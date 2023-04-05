@@ -4,6 +4,9 @@ import numpy as np
 
 from framework import Framework
 
+import random
+import torch
+
 parser = argparse.ArgumentParser(
     description='DPL publication experiments.',
 )
@@ -74,6 +77,11 @@ parser.add_argument(
 args = parser.parse_args()
 seeds = np.arange(10)
 seed = seeds[args.index - 1]
+
+random.seed(seed)
+np.random.seed(seed)
+torch.manual_seed(seed)
+torch.use_deterministic_algorithms(True)
 
 framework = Framework(args, seed)
 framework.run()

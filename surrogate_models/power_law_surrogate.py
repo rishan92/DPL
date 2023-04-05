@@ -5,6 +5,7 @@ import time
 from typing import List, Tuple
 
 import numpy as np
+import random
 
 from scipy.stats import norm
 import torch
@@ -141,6 +142,7 @@ class PowerLawSurrogate:
         # generating the seeds of the ensemble
         torch.manual_seed(seed)
         np.random.seed(seed)
+        random.seed(seed)
 
         self.seeds = np.random.choice(100, ensemble_size, replace=False)
         self.max_benchmark_epochs = max_benchmark_epochs
@@ -250,7 +252,6 @@ class PowerLawSurrogate:
         """Refine the surrogate model.
         """
         for model_index, model_seed in enumerate(self.seeds):
-
             train_dataset = self._prepare_dataset()
             self.logger.info(f'Started refining model with index: {model_index}')
             refined_model = self.train_pipeline(
@@ -351,8 +352,27 @@ class PowerLawSurrogate:
 
         surrogate_config = self.surrogate_configs[model_index]
         seed = self.seeds[model_index]
+
+        def seed_worker(worker_id):
+            worker_seed = torch.initial_seed() % 2 ** 32
+            np.random.seed(worker_seed)
+            random.seed(worker_seed)
+
+        g = torch.Generator()
+        g.manual_seed(int(seed))
+
+        # make the training dataset here
+        train_dataloader = DataLoader(
+            train_dataset,
+            batch_size=batch_size,
+            worker_init_fn=seed_worker,
+            generator=g,
+            shuffle=True,
+        )
+
         torch.manual_seed(seed)
         np.random.seed(seed)
+        random.seed(seed)
 
         if refine:
             model = self.models[model_index]
@@ -368,12 +388,6 @@ class PowerLawSurrogate:
             )
             model.to(self.dev)
 
-        # make the training dataset here
-        train_dataloader = DataLoader(
-            train_dataset,
-            batch_size=batch_size,
-            shuffle=True,
-        )
         train_dataloader = WrappedDataLoader(train_dataloader, self.dev)
         optimizer = torch.optim.Adam(model.parameters(), lr=self.learning_rate)
 
@@ -436,7 +450,7 @@ class PowerLawSurrogate:
                 running_loss += loss.item()
 
             running_loss = running_loss / len(train_dataloader)
-            self.logger.info(f'Epoch {epoch +1}, Loss:{running_loss}')
+            self.logger.info(f'Epoch {epoch + 1}, Loss:{running_loss}')
 
             if activate_early_stopping:
                 if running_loss < best_loss:
@@ -592,7 +606,8 @@ class PowerLawSurrogate:
         initial_empty_value = self.get_mean_initial_value() if self.fill_value == 'last' else 0
         if self.initial_random_index >= len(self.rand_init_conf_indices):
             performance = self.performances[hp_index]
-            self.last_point = (hp_index, b, performance[b-1], performance[0:b-1] if b > 1 else [initial_empty_value])
+            self.last_point = (
+                hp_index, b, performance[b - 1], performance[0:b - 1] if b > 1 else [initial_empty_value])
 
             if self.train:
                 # delete the previously stored models
@@ -657,7 +672,7 @@ class PowerLawSurrogate:
                 real_budgets.append(max_budget)
                 learning_curve = self.performances[hp_index]
 
-                hp_curve = learning_curve[0:max_budget-1] if max_budget > 1 else [initial_empty_value]
+                hp_curve = learning_curve[0:max_budget - 1] if max_budget > 1 else [initial_empty_value]
             else:
                 real_budgets.append(1)
                 hp_curve = [initial_empty_value]
@@ -692,7 +707,7 @@ class PowerLawSurrogate:
             example = self.hp_candidates[hp_index]
 
             for budget in budgets:
-                example_curve = performances[0:budget-1]
+                example_curve = performances[0:budget - 1]
                 train_examples.append(example)
                 train_budgets.append(budget)
                 train_labels.append(performances[budget - 1])
@@ -751,9 +766,9 @@ class PowerLawSurrogate:
         return acq_values
 
     def find_suggested_config(
-            self,
-            mean_predictions: np.ndarray,
-            mean_stds: np.ndarray,
+        self,
+        mean_predictions: np.ndarray,
+        mean_stds: np.ndarray,
     ) -> int:
         """Return the hyperparameter with the highest acq function value.
 
@@ -880,9 +895,9 @@ class PowerLawSurrogate:
         return mean_initial_value
 
     def prepare_training_curves(
-            self,
-            train_budgets: List[int],
-            train_curves: List[float]
+        self,
+        train_budgets: List[int],
+        train_curves: List[float]
     ) -> np.ndarray:
         """Prepare the configuration performance curves for training.
 

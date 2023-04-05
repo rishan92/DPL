@@ -11,11 +11,11 @@ from sklearn.preprocessing import FunctionTransformer, OneHotEncoder
 
 from benchmarks.lcbench import LCBench
 from benchmarks.taskset import TaskSet
-from benchmarks.hyperbo import PD1
+# from benchmarks.hyperbo import PD1
 from surrogate_models.power_law_surrogate import PowerLawSurrogate
 from surrogate_models.asha import AHBOptimizer
 from surrogate_models.dehb.interface import DEHBOptimizer
-from surrogate_models.dragonfly import DragonFlyOptimizer
+# from surrogate_models.dragonfly import DragonFlyOptimizer
 from surrogate_models.random_search import RandomOptimizer
 
 
@@ -39,6 +39,7 @@ class Framework:
             benchmark_extension = os.path.join(
                 'lc_bench',
                 'results',
+                # 'lcbench_credit-g.json',
                 'data_2k.json',
             )
         elif args.benchmark_name == 'taskset':
@@ -59,14 +60,14 @@ class Framework:
         benchmark_types = {
             'lcbench': LCBench,
             'taskset': TaskSet,
-            'pd1': PD1,
+            # 'pd1': PD1,
         }
 
         surrogate_types = {
             'power_law': PowerLawSurrogate,
             'asha': AHBOptimizer,
             'dehb': DEHBOptimizer,
-            'dragonfly': DragonFlyOptimizer,
+            # 'dragonfly': DragonFlyOptimizer,
             'random': RandomOptimizer,
         }
 
@@ -231,7 +232,6 @@ class Framework:
             general_transformers.append(('num', MinMaxScaler(), numerical_columns))
 
         if len(categorical_columns) > 0:
-
             general_transformers.append(
                 (
                     'cat',
@@ -254,12 +254,12 @@ class Framework:
         return preprocessed_candidates
 
     def log_info(
-            self,
-            hp_index: int,
-            performance: float,
-            budget: int,
-            best_value_observed: float,
-            time_duration: float,
+        self,
+        hp_index: int,
+        performance: float,
+        budget: int,
+        best_value_observed: float,
+        time_duration: float,
     ):
         """Log information after every HPO iteration.
 
