@@ -8,7 +8,6 @@ from lc_bench.api import Benchmark
 
 
 class LCBench(BaseBenchmark):
-
     nr_hyperparameters = 2000
     # Declaring the search space for LCBench
     param_space = OrderedDict([
@@ -61,6 +60,7 @@ class LCBench(BaseBenchmark):
 
         bench = Benchmark(
             data_dir=self.path_to_json_file,
+            cache=True
         )
 
         return bench
