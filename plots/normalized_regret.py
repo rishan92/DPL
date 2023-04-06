@@ -14,7 +14,6 @@ from benchmarks.lcbench import LCBench
 from benchmarks.taskset import TaskSet
 from benchmarks.hyperbo import PD1
 
-
 sns.set_style('white')
 
 sns.set(
@@ -29,7 +28,6 @@ sns.set(
     },
     style="white"
 )
-
 
 result_path = os.path.expanduser(
     os.path.join(
@@ -73,11 +71,11 @@ pretty_names = {
 
 
 def get_method_dataset_regret_time_performance(
-        benchmark: BaseBenchmark,
-        dataset_name: str,
-        method_name: str,
-        benchmark_surrogate_results: str,
-        benchmark_name: str = 'lcbench',
+    benchmark: BaseBenchmark,
+    dataset_name: str,
+    method_name: str,
+    benchmark_surrogate_results: str,
+    benchmark_name: str = 'lcbench',
 ) -> Tuple[List, np.ndarray]:
     """Retrieve the time taken and the incumbent curve
     of a method for a particular dataset.
@@ -126,10 +124,10 @@ def get_method_dataset_regret_time_performance(
             continue
 
         baseline_incumbent_curve = result_info['curve']
-        if len(baseline_incumbent_curve) < 1000:
-            continue
-        elif len(baseline_incumbent_curve) > 1000:
-            baseline_incumbent_curve = baseline_incumbent_curve[0:1000]
+        # if len(baseline_incumbent_curve) < 1000:
+        #     continue
+        # elif len(baseline_incumbent_curve) > 1000:
+        #     baseline_incumbent_curve = baseline_incumbent_curve[0:1000]
 
         baseline_incumbent_curves.append(baseline_incumbent_curve)
 
@@ -217,11 +215,11 @@ def get_method_dataset_regret_time_performance(
 
 
 def get_method_dataset_regret_epoch_performance(
-        benchmark: BaseBenchmark,
-        dataset_name: str,
-        method_name: str,
-        benchmark_surrogate_results: str,
-        benchmark_name: str = 'lcbench',
+    benchmark: BaseBenchmark,
+    dataset_name: str,
+    method_name: str,
+    benchmark_surrogate_results: str,
+    benchmark_name: str = 'lcbench',
 ) -> Tuple[List, np.ndarray, np.ndarray]:
     """Retrieve the epochs taken and the incumbent curve
     of a method for a particular dataset.
@@ -267,10 +265,10 @@ def get_method_dataset_regret_epoch_performance(
 
         baseline_incumbent_curve = result_info['curve']
 
-        if len(baseline_incumbent_curve) < 1000:
-            continue
-        elif len(baseline_incumbent_curve) > 1000:
-            baseline_incumbent_curve = baseline_incumbent_curve[0:1000]
+        # if len(baseline_incumbent_curve) < 1000:
+        #     continue
+        # elif len(baseline_incumbent_curve) > 1000:
+        #     baseline_incumbent_curve = baseline_incumbent_curve[0:1000]
         baseline_incumbent_curves.append(baseline_incumbent_curve)
 
         evaluated_hps = result_info['hp']
@@ -290,7 +288,7 @@ def get_method_dataset_regret_epoch_performance(
         baseline_epochs.append(repeat_epochs_cost)
 
     if len(baseline_incumbent_curves) == 0:
-        return [], []
+        return [], [], []
 
     mean_cost_values = []
     try:
@@ -305,7 +303,7 @@ def get_method_dataset_regret_epoch_performance(
             if len(mean_config_point_values) > 0:
                 mean_cost_values.append(np.mean(mean_config_point_values))
     except Exception:
-        return [], []
+        return [], [], []
 
     if len(mean_cost_values) < len(baseline_incumbent_curves[0]):
         mean_cost_values = [1 for _ in range(1, len(baseline_incumbent_curves[0]) + 1)]
@@ -345,11 +343,11 @@ def get_method_dataset_regret_epoch_performance(
 
 
 def get_method_dataset_number_configs(
-        benchmark: BaseBenchmark,
-        dataset_name: str,
-        method_name: str,
-        benchmark_surrogate_results: str,
-        benchmark_name: str = 'lcbench',
+    benchmark: BaseBenchmark,
+    dataset_name: str,
+    method_name: str,
+    benchmark_surrogate_results: str,
+    benchmark_name: str = 'lcbench',
 ) -> float:
     """Calculate the number of unique configurations
     explored.
@@ -402,11 +400,11 @@ def get_method_dataset_number_configs(
 
 
 def get_method_dataset_number_max_configs(
-        benchmark: BaseBenchmark,
-        dataset_name: str,
-        method_name: str,
-        benchmark_surrogate_results: str,
-        benchmark_name: str = 'lcbench',
+    benchmark: BaseBenchmark,
+    dataset_name: str,
+    method_name: str,
+    benchmark_surrogate_results: str,
+    benchmark_name: str = 'lcbench',
 ) -> float:
     """Return the number of unique configurations that
     were explored at the max budget.
@@ -466,9 +464,9 @@ def get_method_dataset_number_max_configs(
 
 
 def generate_walltime_data(
-        benchmark_data_path: str,
-        surrogate_results_path: str,
-        benchmark_name: str,
+    benchmark_data_path: str,
+    surrogate_results_path: str,
+    benchmark_name: str,
 ):
     benchmark_class = {
         'pd1': PD1,
@@ -634,9 +632,9 @@ def generate_walltime_data(
 
 
 def generate_epoch_performance_data(
-        benchmark_data_path: str,
-        surrogate_results_path: str,
-        benchmark_name: str,
+    benchmark_data_path: str,
+    surrogate_results_path: str,
+    benchmark_name: str,
 ):
     benchmark_class = {
         'pd1': PD1,
@@ -675,8 +673,8 @@ def generate_epoch_performance_data(
                 benchmark_name,
             )
 
-            if len(dataset_epochs_taken) < 1000:
-                continue
+            # if len(dataset_epochs_taken) < 1000:
+            #     continue
 
             if benchmark_name == 'pd1':
                 if benchmark.max_budget <= 50:
@@ -735,15 +733,16 @@ def generate_epoch_performance_data(
 
     return method_mean_epochs, method_mean_regret_performance, dataset_normalized_std
 
+
 def plot_rank_performance(
-        benchmark_data_path: str,
-        surrogate_results_path: str,
-        benchmark_name: str,
+    benchmark_data_path: str,
+    surrogate_results_path: str,
+    benchmark_name: str,
 ):
     benchmark_surrogate_results = os.path.join(surrogate_results_path, benchmark_name)
     benchmark_class = {
         'pd1': PD1,
-        'nasbench201': NASBench201,
+        # 'nasbench201': NASBench201,
     }
     # It loads all datasets in one go, so we cannot load it for every dataset like the
     # other ones.
@@ -826,10 +825,10 @@ def plot_rank_performance(
 
 
 def build_cd_diagram(
-        benchmark_data_path: str,
-        surrogate_results_path: str,
-        benchmark_name: str,
-        half: bool,
+    benchmark_data_path: str,
+    surrogate_results_path: str,
+    benchmark_name: str,
+    half: bool,
 ) -> pd.DataFrame:
     table_results = {
         'Method': [],
@@ -839,7 +838,7 @@ def build_cd_diagram(
 
     benchmark_class = {
         'pd1': PD1,
-        'nasbench201': NASBench201,
+        # 'nasbench201': NASBench201,
     }
 
     benchmark_surrogate_results = os.path.join(surrogate_results_path, benchmark_name)
@@ -895,13 +894,13 @@ def build_cd_diagram(
 
 
 def plot_config_distribution(
-        benchmark_data_path: str,
-        surrogate_results_path: str,
-        benchmark_name: str,
+    benchmark_data_path: str,
+    surrogate_results_path: str,
+    benchmark_name: str,
 ):
     benchmark_class = {
         'pd1': PD1,
-        'nasbench201': NASBench201,
+        # 'nasbench201': NASBench201,
     }
 
     config_info_dict = {
@@ -960,13 +959,13 @@ def plot_config_distribution(
 
 
 def plot_dataset_epoch_performance(
-        benchmark_data_path: str,
-        surrogate_results_path: str,
-        benchmark_name: str,
+    benchmark_data_path: str,
+    surrogate_results_path: str,
+    benchmark_name: str,
 ):
     benchmark_class = {
         'pd1': PD1,
-        'nasbench201': NASBench201,
+        # 'nasbench201': NASBench201,
     }
 
     benchmark_surrogate_results = os.path.join(surrogate_results_path, benchmark_name)
@@ -1036,7 +1035,7 @@ def plot_dataset_epoch_performance(
 
 def plot_all_baselines_epoch_performance(project_folder, result_path):
     fig, ax = plt.subplots(3, 3, sharey=True)
-    benchmark_names = ['lcbench', 'taskset', 'pd1']
+    benchmark_names = ['lcbench']
 
     for axes in ax[1]:
         axes.set_visible(False)
@@ -1050,7 +1049,8 @@ def plot_all_baselines_epoch_performance(project_folder, result_path):
             benchmark_extension = os.path.join(
                 'lc_bench',
                 'results',
-                'data_2k.json',
+                'lcbench_APSFailure_mini.json',
+                # 'data_2k.json',
             )
         elif benchmark_name == 'taskset':
             benchmark_extension = os.path.join(
@@ -1060,10 +1060,7 @@ def plot_all_baselines_epoch_performance(project_folder, result_path):
         else:
             benchmark_extension = ''
 
-        benchmark_data_path = os.path.join(
-            project_folder,
-            benchmark_extension,
-        )
+        benchmark_data_path = str(project_folder / benchmark_extension)
 
         methods_mean_epochs, methods_mean_regret, methods_mean_std = \
             generate_epoch_performance_data(
@@ -1078,7 +1075,9 @@ def plot_all_baselines_epoch_performance(project_folder, result_path):
                 label=pretty_names[method_name],
                 linewidth=4,
             )
-            axes.fill_between(methods_mean_regret[method_index], np.add(methods_mean_regret[method_index], methods_mean_std[method_index]), np.subtract(methods_mean_regret[method_index], methods_mean_std[method_index]), alpha=0.1)
+            axes.fill_between(methods_mean_regret[method_index],
+                              np.add(methods_mean_regret[method_index], methods_mean_std[method_index]),
+                              np.subtract(methods_mean_regret[method_index], methods_mean_std[method_index]), alpha=0.1)
 
         if benchmark_name == 'lcbench':
             axes.set_title('LCBench')
@@ -1115,7 +1114,7 @@ def plot_all_baselines_epoch_performance(project_folder, result_path):
 
 def plot_all_baselines_time_performance(project_folder, result_path):
     fig, ax = plt.subplots(2, 2, sharey=True)
-    benchmark_names = ['lcbench', 'pd1']
+    benchmark_names = ['lcbench']
 
     for axes in ax[1]:
         axes.set_visible(False)
@@ -1126,7 +1125,8 @@ def plot_all_baselines_time_performance(project_folder, result_path):
             benchmark_extension = os.path.join(
                 'lc_bench',
                 'results',
-                'data_2k.json',
+                'lcbench_APSFailure_mini.json',
+                # 'data_2k.json',
             )
         elif benchmark_name == 'taskset':
             benchmark_extension = os.path.join(
@@ -1136,10 +1136,7 @@ def plot_all_baselines_time_performance(project_folder, result_path):
         else:
             benchmark_extension = ''
 
-        benchmark_data_path = os.path.join(
-            project_folder,
-            benchmark_extension,
-        )
+        benchmark_data_path = str(project_folder / benchmark_extension)
 
         methods_mean_epochs, methods_mean_regret = \
             generate_walltime_data(

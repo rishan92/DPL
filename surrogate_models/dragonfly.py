@@ -1,3 +1,4 @@
+import time
 from argparse import Namespace
 import threading
 
@@ -121,6 +122,8 @@ class DragonFlyOptimizer:
                     self.fidelity_hp_curves[config_index] = fidelity_value
                 self.fidelity_index = None
                 break
+            else:
+                time.sleep(1)
 
         return fidelity_opt_cost
 
@@ -193,7 +196,7 @@ class DragonFlyOptimizer:
                     # The framework has not yet responded with a value,
                     # keep checking
                     # TODO add a delay
-                    pass
+                    time.sleep(1)
         else:
             score = config_curve[budget - 1]
 
@@ -217,7 +220,7 @@ class DragonFlyOptimizer:
         """
         while self.next_conf is None:
             # DragonFly has not generated the config yet
-            pass
+            time.sleep(1)
         self.conf_info = None
 
         return self.next_conf, self.conf_budget

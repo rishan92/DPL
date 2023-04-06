@@ -1,6 +1,7 @@
 import json
 import os
 from typing import List
+from collections import OrderedDict
 
 import numpy as np
 import pandas as pd
@@ -9,7 +10,6 @@ from benchmarks.benchmark import BaseBenchmark
 
 
 class TaskSet(BaseBenchmark):
-
     nr_hyperparameters = 1000
     max_budget = 51
 
@@ -25,6 +25,20 @@ class TaskSet(BaseBenchmark):
     ]
 
     log_indicator = [True, False, False, True, True, True, True, True]
+
+    min_budget = 1
+    # param_space = None
+    param_space = OrderedDict([
+        ('learning_rate', [1e-8, 1e1, float, True]),
+        ('beta1', [1e-4, 1e0, float, False]),
+        ('beta2', [1e-6, 1e0, float, False]),
+        ('epsilon', [1e-10, 1e3, float, True]),
+        ('l1', [1e-8, 1e1, float, True]),
+        ('l2', [1e-8, 1e1, float, True]),
+        ('linear_decay', [1e-7, 1e-4, float, True]),
+        ('exponential_decay', [1e-3, 1e-6, float, True]),
+    ])
+    minimization_metric = True
 
     def __init__(self, path_to_json_files: str, dataset_name: str):
 
@@ -44,8 +58,12 @@ class TaskSet(BaseBenchmark):
         self.hp_candidates = self.hp_candidates[filtered_indices]
 
         self.categorical_indicator = [False] * self.hp_candidates[1]
-        self.min_value = self.get_worst_performance()
-        self.max_value = self.get_best_performance()
+        self.min_value = self.get_best_performance()
+        self.max_value = self.get_worst_performance()
+
+    def set_dataset_name(self, dataset_name: str):
+        new_taskset_instance = TaskSet(self.path_to_json_file, dataset_name=dataset_name)
+        return new_taskset_instance
 
     def get_worst_performance(self):
         # for taskset we have loss, so the worst value possible value

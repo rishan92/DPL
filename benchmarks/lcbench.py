@@ -1,5 +1,6 @@
 from collections import OrderedDict
 from typing import List
+import functools
 
 import numpy as np
 
@@ -9,6 +10,7 @@ from lc_bench.api import Benchmark
 
 class LCBench(BaseBenchmark):
     nr_hyperparameters = 2000
+
     # Declaring the search space for LCBench
     param_space = OrderedDict([
         ('batch_size', [16, 512, int, True]),
@@ -29,15 +31,21 @@ class LCBench(BaseBenchmark):
     # if the best value corresponds to a lower value
     minimization_metric = False
 
-    def __init__(self, path_to_json_file: str, dataset_name: str):
+    def __init__(self, path_to_json_files: str, dataset_name: str):
 
-        super().__init__(path_to_json_file)
+        super().__init__(path_to_json_files)
         self.benchmark = self._load_benchmark()
         self.dataset_name = dataset_name
         self.dataset_names = self.load_dataset_names()
         self.categorical_indicator = [False] * len(self.param_space)
         self.max_value = 1.0
         self.min_value = 0.0
+
+    def get_best_performance(self):
+        incumbent_curve = self.get_incumbent_curve()
+        best_value = max(incumbent_curve)
+
+        return best_value
 
     def get_worst_performance(self):
 
@@ -56,8 +64,7 @@ class LCBench(BaseBenchmark):
 
         return min_value
 
-    def _load_benchmark(self):
-
+    def _load_benchmark(self) -> Benchmark:
         bench = Benchmark(
             data_dir=self.path_to_json_file,
             cache=True
@@ -172,5 +179,5 @@ class LCBench(BaseBenchmark):
         return step_cost
 
     def set_dataset_name(self, dataset_name: str):
-
         self.dataset_name = dataset_name
+        return self

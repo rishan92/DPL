@@ -122,7 +122,6 @@ nbconvert==6.5.3
 nbformat==5.4.0
 nest-asyncio==1.5.5
 notebook==6.4.12
-numpy==1.21.5
 oauthlib==3.2.0
 olefile==0.46
 onnxruntime==1.12.1

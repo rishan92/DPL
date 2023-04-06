@@ -103,7 +103,7 @@ class ConditionedPowerLaw(nn.Module):
             learning_curves: torch.Tensor
                 The learning curves for the hyperparameter configurations.
         """
-        #x = torch.cat((x, torch.unsqueeze(evaluated_budgets, 1)), dim=1)
+        # x = torch.cat((x, torch.unsqueeze(evaluated_budgets, 1)), dim=1)
         if self.use_learning_curve:
             lc_features = self.cnn(learning_curves)
             # revert the output from the cnn into nr_rows x nr_kernels.

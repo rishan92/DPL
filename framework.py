@@ -2,6 +2,7 @@ import argparse
 import json
 import os
 import time
+import warnings
 
 import numpy as np
 from sklearn.preprocessing import MinMaxScaler
@@ -13,10 +14,17 @@ from benchmarks.lcbench import LCBench
 from benchmarks.taskset import TaskSet
 # from benchmarks.hyperbo import PD1
 from surrogate_models.power_law_surrogate import PowerLawSurrogate
+from surrogate_models.dyhpo import DyHPO
 from surrogate_models.asha import AHBOptimizer
 from surrogate_models.dehb.interface import DEHBOptimizer
-# from surrogate_models.dragonfly import DragonFlyOptimizer
 from surrogate_models.random_search import RandomOptimizer
+
+from hpo_method import DyHPOAlgorithm
+
+
+# if warnings.catch_warnings():
+#     warnings.simplefilter('ignore')
+#     from surrogate_models.dragonfly import DragonFlyOptimizer
 
 
 class Framework:
@@ -36,17 +44,11 @@ class Framework:
         """
 
         if args.benchmark_name == 'lcbench':
-            benchmark_extension = os.path.join(
-                'lc_bench',
-                'results',
-                # 'lcbench_credit-g.json',
-                'data_2k.json',
-            )
+            benchmark_extension = os.path.join('lc_bench', 'results', 'data_2k.json')
+        elif args.benchmark_name == 'lcbench_mini':
+            benchmark_extension = os.path.join('lc_bench', 'results', 'lcbench_credit-g.json')
         elif args.benchmark_name == 'taskset':
-            benchmark_extension = os.path.join(
-                'data',
-                'taskset',
-            )
+            benchmark_extension = os.path.join('data', 'taskset')
         elif args.benchmark_name == 'pd1':
             benchmark_extension = 'pd1'
         else:
@@ -60,11 +62,13 @@ class Framework:
         benchmark_types = {
             'lcbench': LCBench,
             'taskset': TaskSet,
+            'lcbench_mini': LCBench,
             # 'pd1': PD1,
         }
 
         surrogate_types = {
             'power_law': PowerLawSurrogate,
+            'dyhpo': DyHPO,
             'asha': AHBOptimizer,
             'dehb': DEHBOptimizer,
             # 'dragonfly': DragonFlyOptimizer,
@@ -73,6 +77,7 @@ class Framework:
 
         disable_preprocessing = {
             'dehb',
+            # 'asha'
         }
 
         self.benchmark = benchmark_types[args.benchmark_name](benchmark_data_path, args.dataset_name)
@@ -120,6 +125,18 @@ class Framework:
                 output_path=self.result_dir,
                 max_value=self.max_value,
                 min_value=self.min_value,
+            )
+        elif args.surrogate_name == 'dyhpo':
+            self.surrogate = DyHPOAlgorithm(
+                hp_candidates=self.benchmark.get_hyperparameter_candidates(),
+                log_indicator=self.benchmark.log_indicator,
+                seed=seed,
+                max_benchmark_epochs=self.benchmark.max_budget,
+                fantasize_step=self.fantasize_step,
+                minimization=self.minimization_metric,
+                total_budget=args.budget_limit,
+                dataset_name=self.dataset_name,
+                output_path=self.result_dir,
             )
         else:
             self.surrogate = surrogate_types[args.surrogate_name](
