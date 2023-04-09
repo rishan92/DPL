@@ -3,7 +3,7 @@ import json
 import os
 import time
 import warnings
-
+from loguru import logger
 import numpy as np
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.compose import ColumnTransformer
@@ -14,7 +14,7 @@ from benchmarks.lcbench import LCBench
 from benchmarks.taskset import TaskSet
 # from benchmarks.hyperbo import PD1
 from surrogate_models.power_law_surrogate import PowerLawSurrogate
-from surrogate_models.dyhpo import DyHPO
+from models.dyhpo import DyHPO
 from surrogate_models.asha import AHBOptimizer
 from surrogate_models.dehb.interface import DEHBOptimizer
 from surrogate_models.random_search import RandomOptimizer

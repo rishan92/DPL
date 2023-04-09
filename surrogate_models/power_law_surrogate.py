@@ -3,18 +3,18 @@ import logging
 import os
 import time
 from typing import List, Tuple
-
+from loguru import logger
 import numpy as np
 import random
-
+from pathlib import Path
 from scipy.stats import norm
 import torch
 from torch.utils.data import DataLoader
 
 from data_loader.tabular_data_loader import WrappedDataLoader
 from dataset.tabular_dataset import TabularDataset
-
-from models.conditioned_power_law import ConditionedPowerLaw
+from models.ensemble_model import EnsembleModel
+from data_loader.surrogate_data_loader import SurrogateDataLoader
 
 
 class PowerLawSurrogate:
@@ -97,36 +97,23 @@ class PowerLawSurrogate:
             f'checkpoint_{seed}.pth',
         )
 
-        self.model_instances = [
-            ConditionedPowerLaw,
-            ConditionedPowerLaw,
-            ConditionedPowerLaw,
-            ConditionedPowerLaw,
-            ConditionedPowerLaw,
-        ]
+        self.model_class = EnsembleModel
+        self.model = None
 
         if device is None:
-            self.dev = torch.device(
-                'cuda') if torch.cuda.is_available() else torch.device('cpu')
+            self.dev = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
         else:
             self.dev = torch.device(device)
 
-        self.learning_rate = 0.001
         self.batch_size = 64
         self.refine_batch_size = 64
 
-        self.criterion = torch.nn.L1Loss()
         self.hp_candidates = hp_candidates
 
         self.minimization = minimization
         self.seed = seed
 
-        self.logger = logging.getLogger('power_law')
-        logging.basicConfig(
-            filename=f'power_law_surrogate_{dataset_name}_{seed}.log',
-            level=logging.INFO,
-            force=True,
-        )
+        self.logger = logger
 
         # with what percentage configurations will be taken randomly instead of being sampled from the model
         self.fraction_random_configs = 0.1
@@ -138,13 +125,6 @@ class PowerLawSurrogate:
         self.examples = dict()
         self.performances = dict()
 
-        # set a seed already, so that it is deterministic when
-        # generating the seeds of the ensemble
-        torch.manual_seed(seed)
-        np.random.seed(seed)
-        random.seed(seed)
-
-        self.seeds = np.random.choice(100, ensemble_size, replace=False)
         self.max_benchmark_epochs = max_benchmark_epochs
         self.ensemble_size = ensemble_size
         self.nr_epochs = nr_epochs
@@ -170,30 +150,11 @@ class PowerLawSurrogate:
 
         self.initial_random_index = 0
 
-        if surrogate_configs is None:
-
-            self.surrogate_configs = []
-            for i in range(0, self.ensemble_size):
-                self.surrogate_configs.append(
-                    {
-                        'nr_units': 128,
-                        'nr_layers': 2,
-                        'kernel_size': 3,
-                        'nr_filters': 4,
-                        'nr_cnn_layers': 2,
-                        'use_learning_curve': False,
-                    }
-                )
-        else:
-            self.surrogate_configs = surrogate_configs
-
         self.nr_features = self.hp_candidates.shape[1]
         self.best_value_observed = np.inf
 
         self.diverged_configs = set()
 
-        # Where the models of the ensemble will be stored
-        self.models = []
         # A tuple which will have the last evaluated point
         # It will be used in the refining process
         # Tuple(config_index, budget, performance, curve)
@@ -248,24 +209,8 @@ class PowerLawSurrogate:
 
         return train_dataset
 
-    def _refine_surrogate(self):
-        """Refine the surrogate model.
-        """
-        for model_index, model_seed in enumerate(self.seeds):
-            train_dataset = self._prepare_dataset()
-            self.logger.info(f'Started refining model with index: {model_index}')
-            refined_model = self.train_pipeline(
-                model_index,
-                train_dataset,
-                nr_epochs=self.refine_nr_epochs,
-                refine=True,
-                weight_new_example=True,
-                batch_size=self.refine_batch_size,
-            )
-
-            self.models[model_index] = refined_model
-
-    def _train_surrogate(self, pretrain: bool = False):
+    def _train_surrogate(self, pretrain: bool = False, should_refine: bool = False,
+                         should_weight_last_sample: bool = False):
         """Train the surrogate model.
 
         Trains all the models of the ensemble
@@ -277,197 +222,76 @@ class PowerLawSurrogate:
                 If we have pretrained weights and we will just
                 refine the models.
         """
-        for model_index, model_seed in enumerate(self.seeds):
-            train_dataset = self._prepare_dataset()
-            self.logger.info(f'Started training model with index: {model_index}')
+        self.iterations_counter += 1
+        self.logger.info(f'Iteration number: {self.iterations_counter}')
 
-            if pretrain:
-                # refine the models that were already pretrained
-                trained_model = self.train_pipeline(
-                    model_index,
-                    train_dataset,
-                    nr_epochs=self.refine_nr_epochs,
-                    refine=True,
-                    weight_new_example=False,
-                    batch_size=self.batch_size,
-                    early_stopping_it=self.refine_nr_epochs,  # basically no early stopping
-                )
-                self.models[model_index] = trained_model
-            else:
-                # train the models for the first time
-                trained_model = self.train_pipeline(
-                    model_index,
-                    train_dataset,
-                    nr_epochs=self.nr_epochs,
-                    refine=False,
-                    weight_new_example=False,
-                    batch_size=self.batch_size,
-                    early_stopping_it=self.nr_epochs,  # basically no early stopping
-                )
-                self.models.append(trained_model)
+        train_dataset = self._prepare_dataset()
 
-    def train_pipeline(
-        self,
-        model_index: int,
-        train_dataset: TabularDataset,
-        nr_epochs: int,
-        refine: bool = False,
-        weight_new_example: bool = True,
-        batch_size: int = 64,
-        early_stopping_it: int = 10,
-        activate_early_stopping: bool = False,
-    ) -> torch.nn.Module:
-        """Train an algorithm to predict the performance
-        of the hyperparameter configuration based on the budget.
+        if pretrain:
+            should_refine = True,
+            should_weight_last_sample = False
 
-        Args:
-            model_index: int
-                The index of the model.
-            train_dataset: TabularDataset
-                The tabular dataset featuring the examples, labels,
-                budgets and curves.
-            nr_epochs: int
-                The number of epochs to train the model for.
-            refine: bool
-                If an existing model will be refined or if the training
-                will start from scratch.
-            weight_new_example: bool
-                If the last example that was added should be weighted more
-                by being included in every batch. This is only applicable
-                when refine is True.
-            batch_size: int
-                The batch size to be used for training.
-            early_stopping_it: int
-                The early stopping iteration patience.
-            activate_early_stopping: bool
-                Flag controlling the activation.
+        last_sample = None
+        if should_weight_last_sample:
+            newp_index, newp_budget, newp_performance, newp_curve = self.last_point
+            new_example = np.array([self.hp_candidates[newp_index]], dtype=np.single)
+            newp_missing_values = self.prepare_missing_values_channel([newp_budget])
+            newp_budget = np.array([newp_budget], dtype=np.single) / self.max_benchmark_epochs
+            newp_performance = np.array([newp_performance], dtype=np.single)
+            modified_curve = deepcopy(newp_curve)
 
-        Returns:
-            model: torch.nn.Module
-                A trained model.
-        """
-        if model_index == 0:
-            self.iterations_counter += 1
-            self.logger.info(f'Iteration number: {self.iterations_counter}')
+            difference = self.max_benchmark_epochs - len(modified_curve) - 1
+            if difference > 0:
+                modified_curve.extend([modified_curve[-1] if self.fill_value == 'last' else 0] * difference)
 
-        surrogate_config = self.surrogate_configs[model_index]
-        seed = self.seeds[model_index]
+            modified_curve = np.array([modified_curve], dtype=np.single)
+            newp_missing_values = np.array(newp_missing_values, dtype=np.single)
 
-        def seed_worker(worker_id):
-            worker_seed = torch.initial_seed() % 2 ** 32
-            np.random.seed(worker_seed)
-            random.seed(worker_seed)
+            # add depth dimension to the train_curves array and missing_value_matrix
+            modified_curve = np.expand_dims(modified_curve, 1)
+            newp_missing_values = np.expand_dims(newp_missing_values, 1)
+            modified_curve = np.concatenate((modified_curve, newp_missing_values), axis=1)
 
-        g = torch.Generator()
-        g.manual_seed(int(seed))
+            new_example = torch.tensor(new_example, device=self.dev)
+            newp_budget = torch.tensor(newp_budget, device=self.dev)
+            newp_performance = torch.tensor(newp_performance, device=self.dev)
+            modified_curve = torch.tensor(modified_curve, device=self.dev)
 
-        # make the training dataset here
-        train_dataloader = DataLoader(
-            train_dataset,
-            batch_size=batch_size,
-            worker_init_fn=seed_worker,
-            generator=g,
-            shuffle=True,
-        )
+            last_sample = (new_example, newp_performance, newp_budget, modified_curve)
 
-        torch.manual_seed(seed)
-        np.random.seed(seed)
-        random.seed(seed)
+        if should_refine:
+            nr_epochs = self.refine_nr_epochs
+            batch_size = self.refine_batch_size
 
-        if refine:
-            model = self.models[model_index]
-        else:
-            model = self.model_instances[model_index](
-                nr_initial_features=self.nr_features + 1 if self.backbone == 'nn' else self.nr_features,
-                nr_units=surrogate_config['nr_units'],
-                nr_layers=surrogate_config['nr_layers'],
-                use_learning_curve=surrogate_config['use_learning_curve'],
-                kernel_size=surrogate_config['kernel_size'],
-                nr_filters=surrogate_config['nr_filters'],
-                nr_cnn_layers=surrogate_config['nr_cnn_layers'],
+            # make the training dataset here
+            train_dataloader = SurrogateDataLoader(
+                dataset=train_dataset, batch_size=batch_size, shuffle=True, seed=self.seed, dev=self.dev,
+                should_weight_last_sample=should_weight_last_sample, last_sample=last_sample,
+                # drop_last=train_dataset.X.shape[0] > batch_size and train_dataset.X.shape[0] % batch_size < 2
             )
-            model.to(self.dev)
+            self.model.train()
+            self.model.train_loop(nr_epochs=nr_epochs, train_dataloader=train_dataloader, reset_optimizer=True)
+        else:
+            nr_epochs = self.nr_epochs
+            batch_size = self.batch_size
 
-        train_dataloader = WrappedDataLoader(train_dataloader, self.dev)
-        optimizer = torch.optim.Adam(model.parameters(), lr=self.learning_rate)
+            # make the training dataset here
+            train_dataloader = SurrogateDataLoader(
+                dataset=train_dataset, batch_size=batch_size, shuffle=True, seed=self.seed, dev=self.dev
+            )
 
-        patience_rounds = 0
-        best_loss = np.inf
-        best_state = deepcopy(model.state_dict())
+            model_config = {'seed': self.seed}
+            self.model = self.model_class(
+                nr_features=train_dataset.X.shape[1],
+                train_dataloader=train_dataloader,
+                surrogate_configs=model_config
+            )
+            self.model.to(self.dev)
 
-        for epoch in range(0, nr_epochs):
-            running_loss = 0
-            model.train()
+            self.model.train()
+            self.model.train_loop(nr_epochs=nr_epochs)
 
-            for batch_examples, batch_labels, batch_budgets, batch_curves in train_dataloader:
-
-                nr_examples_batch = batch_examples.shape[0]
-                # if only one example in the batch, skip the batch.
-                # Otherwise, the code will fail because of batchnormalization.
-                if nr_examples_batch == 1:
-                    continue
-
-                # zero the parameter gradients
-                optimizer.zero_grad(set_to_none=True)
-
-                # in case we are refining, we add the new example to every
-                # batch to give it more importance.
-                if refine and weight_new_example:
-                    newp_index, newp_budget, newp_performance, newp_curve = self.last_point
-                    new_example = np.array([self.hp_candidates[newp_index]], dtype=np.single)
-                    newp_missing_values = self.prepare_missing_values_channel([newp_budget])
-                    newp_budget = np.array([newp_budget], dtype=np.single) / self.max_benchmark_epochs
-                    newp_performance = np.array([newp_performance], dtype=np.single)
-                    modified_curve = deepcopy(newp_curve)
-
-                    difference = self.max_benchmark_epochs - len(modified_curve) - 1
-                    if difference > 0:
-                        modified_curve.extend([modified_curve[-1] if self.fill_value == 'last' else 0] * difference)
-
-                    modified_curve = np.array([modified_curve], dtype=np.single)
-                    newp_missing_values = np.array(newp_missing_values, dtype=np.single)
-
-                    # add depth dimension to the train_curves array and missing_value_matrix
-                    modified_curve = np.expand_dims(modified_curve, 1)
-                    newp_missing_values = np.expand_dims(newp_missing_values, 1)
-                    modified_curve = np.concatenate((modified_curve, newp_missing_values), axis=1)
-
-                    new_example = torch.tensor(new_example, device=self.dev)
-                    newp_budget = torch.tensor(newp_budget, device=self.dev)
-                    newp_performance = torch.tensor(newp_performance, device=self.dev)
-                    modified_curve = torch.tensor(modified_curve, device=self.dev)
-
-                    batch_examples = torch.cat((batch_examples, new_example))
-                    batch_budgets = torch.cat((batch_budgets, newp_budget))
-                    batch_labels = torch.cat((batch_labels, newp_performance))
-                    batch_curves = torch.cat((batch_curves, modified_curve))
-
-                outputs = model(batch_examples, batch_budgets, batch_budgets, batch_curves)
-                loss = self.criterion(outputs, batch_labels)
-                loss.backward()
-                optimizer.step()
-                # print statistics
-                running_loss += loss.item()
-
-            running_loss = running_loss / len(train_dataloader)
-            self.logger.info(f'Epoch {epoch + 1}, Loss:{running_loss}')
-
-            if activate_early_stopping:
-                if running_loss < best_loss:
-                    best_state = deepcopy(model.state_dict())
-                    best_loss = running_loss
-                    patience_rounds = 0
-                elif running_loss > best_loss:
-                    patience_rounds += 1
-                    if patience_rounds == early_stopping_it:
-                        model.load_state_dict(best_state)
-                        self.logger.info(f'Stopping training since validation loss is not improving')
-                        break
-
-        if activate_early_stopping:
-            model.load_state_dict(best_state)
-
-        return model
+        return self.model
 
     def _predict(self) -> Tuple[np.ndarray, np.ndarray, List, np.ndarray]:
         """
@@ -498,15 +322,12 @@ class PowerLawSurrogate:
         hp_curves = hp_curves.to(device=self.dev)
         network_real_budgets = torch.tensor(real_budgets / self.max_benchmark_epochs)
         network_real_budgets.to(device=self.dev)
-        all_predictions = []
 
-        for model in self.models:
-            model = model.eval()
-            predictions = model(configurations, budgets, network_real_budgets, hp_curves)
-            all_predictions.append(predictions.detach().cpu().numpy())
+        self.model.eval()
+        predictions = self.model((configurations, budgets, network_real_budgets, hp_curves))
 
-        mean_predictions = np.mean(all_predictions, axis=0)
-        std_predictions = np.std(all_predictions, axis=0)
+        mean_predictions = predictions[0]
+        std_predictions = predictions[1]
 
         return mean_predictions, std_predictions, hp_indices, real_budgets
 
@@ -535,8 +356,7 @@ class PowerLawSurrogate:
                 mean_predictions,
                 std_predictions,
             )
-            # actually do the mapping between the configuration indices and the best prediction
-            # index
+            # actually do the mapping between the configuration indices and the best prediction index
             suggested_hp_index = hp_indices[best_prediction_index]
 
             if suggested_hp_index in self.examples:
@@ -624,7 +444,7 @@ class PowerLawSurrogate:
                     self.train = False
             else:
                 self.refine_counter += 1
-                self._refine_surrogate()
+                self._train_surrogate(should_refine=True, should_weight_last_sample=True)
 
     def prepare_examples(self, hp_indices: List) -> List:
         """

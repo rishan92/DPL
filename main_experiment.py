@@ -4,6 +4,8 @@ import sys
 import numpy as np
 import random
 import torch
+from loguru import logger
+from pathlib import Path
 
 from framework import Framework
 
@@ -11,10 +13,8 @@ from framework import Framework
 def main():
     current_seed = os.environ.get("PYTHONHASHSEED")
     if current_seed is None or current_seed != '0':
-        print(f'Environment variable not set PYTHONHASHSEED="0"')
-    random.seed(0)
-    np.random.seed(0)
-    torch.manual_seed(0)
+        logger.warning(
+            f'Environment variable not set PYTHONHASHSEED="0". Results may not be reproducible due to hash randamization.')
 
     parser = argparse.ArgumentParser(
         description='DPL publication experiments.',
@@ -91,6 +91,11 @@ def main():
     np.random.seed(seed)
     torch.manual_seed(seed)
     torch.use_deterministic_algorithms(True)
+
+    logger.remove()
+    # logger.add(sys.stderr, format="{level} | {message}")
+    logger.add(Path(f'./logs/power_law_surrogate_{args.dataset_name}_{seed}.log'), mode='w',
+               format="{level} | {message}")
 
     framework = Framework(args, seed)
     framework.run()
