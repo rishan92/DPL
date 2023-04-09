@@ -2,25 +2,21 @@ import argparse
 import json
 import os
 import time
-import warnings
-from loguru import logger
 import numpy as np
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import FunctionTransformer, OneHotEncoder
 
-from benchmarks.lcbench import LCBench
-from benchmarks.taskset import TaskSet
+from src.benchmarks.lcbench import LCBench
+from src.benchmarks.taskset import TaskSet
 # from benchmarks.hyperbo import PD1
-from surrogate_models.power_law_surrogate import PowerLawSurrogate
-from models.dyhpo import DyHPO
-from surrogate_models.asha import AHBOptimizer
-from surrogate_models.dehb.interface import DEHBOptimizer
-from surrogate_models.random_search import RandomOptimizer
-
-
-# from hpo_method import DyHPOAlgorithm
+from src.surrogate_models.power_law_surrogate import PowerLawSurrogate
+from src.surrogate_models.asha import AHBOptimizer
+from src.surrogate_models.dehb.interface import DEHBOptimizer
+from src.surrogate_models.random_search import RandomOptimizer
+from src.surrogate_models.hpo_method import DyHPOAlgorithm
+import global_variables as gv
 
 
 # if warnings.catch_warnings():
@@ -69,7 +65,7 @@ class Framework:
 
         surrogate_types = {
             'power_law': PowerLawSurrogate,
-            # 'dyhpo': DyHPO,
+            'dyhpo': PowerLawSurrogate,
             'asha': AHBOptimizer,
             'dehb': DEHBOptimizer,
             # 'dragonfly': DragonFlyOptimizer,
@@ -111,6 +107,8 @@ class Framework:
         else:
             self.hp_candidates = self.benchmark.get_hyperparameter_candidates()
 
+        # if args.surrogate_name == 'power_law' or args.surrogate_name == 'dyhpo':
+        # gv.IS_DYHPO = (args.surrogate_name == 'dyhpo')
         if args.surrogate_name == 'power_law':
             self.surrogate = surrogate_types[args.surrogate_name](
                 self.hp_candidates,
@@ -128,9 +126,12 @@ class Framework:
                 min_value=self.min_value,
             )
         elif args.surrogate_name == 'dyhpo':
+            gv.IS_DYHPO = 1
             self.surrogate = DyHPOAlgorithm(
                 hp_candidates=self.benchmark.get_hyperparameter_candidates(),
                 log_indicator=self.benchmark.log_indicator,
+                max_value=self.max_value,
+                min_value=self.min_value,
                 seed=seed,
                 max_benchmark_epochs=self.benchmark.max_budget,
                 fantasize_step=self.fantasize_step,

@@ -9,11 +9,10 @@ import torch.nn as nn
 import torch.optim as optim
 from torchvision import datasets, transforms
 
-from models.preact_resnet import PreActResNet18
+from src.models.preact_resnet import PreActResNet18
 
 
 def main():
-
     # Training settings
     parser = argparse.ArgumentParser(description='CIFAR10 benchmarking')
     parser.add_argument('--train_batch_size', type=int, default=64, metavar='N',
@@ -136,6 +135,7 @@ def main():
             model.state_dict(),
             os.path.join(args.output_path, f'{drop_rate}_cifar10_cnn.pt'),
         )
+
 
 if __name__ == '__main__':
     main()

@@ -1,13 +1,12 @@
 import os
 import unittest
 
-from benchmarks.lcbench import LCBench
+from src.benchmarks.lcbench import LCBench
 
 
 class TestLCBench(unittest.TestCase):
 
     def setUp(self) -> None:
-
         project_folder = os.path.expanduser(
             os.path.join(
                 '~',
@@ -29,7 +28,6 @@ class TestLCBench(unittest.TestCase):
         self.dataset_name = 'credit-g'
 
     def test_load_dataset_names(self):
-
         dataset_names = [
             'APSFailure', 'Amazon_employee_access', 'Australian',
             'Fashion-MNIST', 'KDDCup09_appetency', 'MiniBooNE',
@@ -45,12 +43,10 @@ class TestLCBench(unittest.TestCase):
         self.assertEqual(dataset_names, self.lcbench.dataset_names)
 
     def test_get_hyperparameter_candidates(self):
-
         hp_configs = self.lcbench.get_hyperparameter_candidates(self.dataset_name)
         self.assertEqual(hp_configs.shape, (LCBench.nr_hyperparameters, len(LCBench.param_space)))
 
     def test_get_performance(self):
-
         hp_index = 0
         self.assertGreaterEqual(
             self.lcbench.get_performance(self.dataset_name, hp_index, LCBench.max_budget),

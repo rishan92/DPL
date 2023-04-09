@@ -6,7 +6,7 @@ import pandas as pd
 from syne_tune.blackbox_repository import load_blackbox
 from syne_tune.config_space import is_log_space
 
-from benchmarks.benchmark import BaseBenchmark
+from src.benchmarks.benchmark import BaseBenchmark
 
 
 class PD1(BaseBenchmark):
@@ -46,7 +46,9 @@ class PD1(BaseBenchmark):
 
         self.param_space = OrderedDict(
             [
-                (hp_names[i], [self.blackbox[dataset_name].hyperparameters[hp_names[i]].min(), self.blackbox[dataset_name].hyperparameters[hp_names[i]].max(), float, self.log_indicator[i]]) for i in range(len(hp_names))
+                (hp_names[i], [self.blackbox[dataset_name].hyperparameters[hp_names[i]].min(),
+                               self.blackbox[dataset_name].hyperparameters[hp_names[i]].max(), float,
+                               self.log_indicator[i]]) for i in range(len(hp_names))
             ]
         )
 

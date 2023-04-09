@@ -1,10 +1,9 @@
 from collections import OrderedDict
 from typing import List
-import functools
 
 import numpy as np
 
-from benchmarks.benchmark import BaseBenchmark
+from src.benchmarks.benchmark import BaseBenchmark
 from lc_bench.api import Benchmark
 
 

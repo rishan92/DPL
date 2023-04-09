@@ -1,12 +1,9 @@
 import torch
 import torch.nn as nn
-from typing import List, Tuple, Dict, Any
-from loguru import logger
 from copy import deepcopy
 import numpy as np
-import random
 
-from models.base_pytorch_module import BasePytorchModule
+from src.models.power_law.base_pytorch_module import BasePytorchModule
 
 
 class ConditionedPowerLawModel(BasePytorchModule):

@@ -3,16 +3,16 @@ import os
 from typing import Tuple, List
 
 import matplotlib.pyplot as plt
-from matplotlib.ticker import (MultipleLocator, AutoMinorLocator)
+from matplotlib.ticker import (MultipleLocator)
 import numpy as np
 import pandas as pd
 from scipy.stats import rankdata
 import seaborn as sns
 
-from benchmarks.benchmark import BaseBenchmark
-from benchmarks.lcbench import LCBench
-from benchmarks.taskset import TaskSet
-from benchmarks.hyperbo import PD1
+from src.benchmarks.benchmark import BaseBenchmark
+from src.benchmarks.lcbench import LCBench
+from src.benchmarks.taskset import TaskSet
+from src.benchmarks.hyperbo import PD1
 
 sns.set_style('white')
 
