@@ -14,12 +14,13 @@ from benchmarks.lcbench import LCBench
 from benchmarks.taskset import TaskSet
 # from benchmarks.hyperbo import PD1
 from surrogate_models.power_law_surrogate import PowerLawSurrogate
-from surrogate_models.dyhpo import DyHPO
+# from surrogate_models.dyhpo import DyHPO
 from surrogate_models.asha import AHBOptimizer
 from surrogate_models.dehb.interface import DEHBOptimizer
 from surrogate_models.random_search import RandomOptimizer
 
-from hpo_method import DyHPOAlgorithm
+
+# from hpo_method import DyHPOAlgorithm
 
 
 # if warnings.catch_warnings():
@@ -68,7 +69,7 @@ class Framework:
 
         surrogate_types = {
             'power_law': PowerLawSurrogate,
-            'dyhpo': DyHPO,
+            # 'dyhpo': DyHPO,
             'asha': AHBOptimizer,
             'dehb': DEHBOptimizer,
             # 'dragonfly': DragonFlyOptimizer,

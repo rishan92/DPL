@@ -126,6 +126,7 @@ class PowerLawSurrogate:
             filename=f'power_law_surrogate_{dataset_name}_{seed}.log',
             level=logging.INFO,
             force=True,
+            filemode='w',
         )
 
         # with what percentage configurations will be taken randomly instead of being sampled from the model
@@ -138,13 +139,6 @@ class PowerLawSurrogate:
         self.examples = dict()
         self.performances = dict()
 
-        # set a seed already, so that it is deterministic when
-        # generating the seeds of the ensemble
-        torch.manual_seed(seed)
-        np.random.seed(seed)
-        random.seed(seed)
-
-        self.seeds = np.random.choice(100, ensemble_size, replace=False)
         self.max_benchmark_epochs = max_benchmark_epochs
         self.ensemble_size = ensemble_size
         self.nr_epochs = nr_epochs
@@ -157,6 +151,14 @@ class PowerLawSurrogate:
         conf_individual_budget = 1
         init_conf_indices = np.random.choice(self.hp_candidates.shape[0], initial_configurations_nr, replace=False)
         init_budgets = [i for i in range(1, conf_individual_budget + 1)]
+
+        # set a seed already, so that it is deterministic when
+        # generating the seeds of the ensemble
+        torch.manual_seed(seed)
+        np.random.seed(seed)
+        random.seed(seed)
+
+        self.seeds = np.random.choice(100, ensemble_size, replace=False)
 
         self.rand_init_conf_indices = []
         self.rand_init_budgets = []
@@ -361,7 +363,6 @@ class PowerLawSurrogate:
         g = torch.Generator()
         g.manual_seed(int(seed))
 
-        # make the training dataset here
         train_dataloader = DataLoader(
             train_dataset,
             batch_size=batch_size,
@@ -390,26 +391,19 @@ class PowerLawSurrogate:
 
         train_dataloader = WrappedDataLoader(train_dataloader, self.dev)
         optimizer = torch.optim.Adam(model.parameters(), lr=self.learning_rate)
-
         patience_rounds = 0
         best_loss = np.inf
         best_state = deepcopy(model.state_dict())
+
+        torch.manual_seed(seed)
+        np.random.seed(seed)
+        random.seed(seed)
 
         for epoch in range(0, nr_epochs):
             running_loss = 0
             model.train()
 
             for batch_examples, batch_labels, batch_budgets, batch_curves in train_dataloader:
-
-                nr_examples_batch = batch_examples.shape[0]
-                # if only one example in the batch, skip the batch.
-                # Otherwise, the code will fail because of batchnormalization.
-                if nr_examples_batch == 1:
-                    continue
-
-                # zero the parameter gradients
-                optimizer.zero_grad(set_to_none=True)
-
                 # in case we are refining, we add the new example to every
                 # batch to give it more importance.
                 if refine and weight_new_example:
@@ -442,6 +436,15 @@ class PowerLawSurrogate:
                     batch_labels = torch.cat((batch_labels, newp_performance))
                     batch_curves = torch.cat((batch_curves, modified_curve))
 
+                nr_examples_batch = batch_examples.shape[0]
+                # if only one example in the batch, skip the batch.
+                # Otherwise, the code will fail because of batchnormalization.
+                if nr_examples_batch == 1:
+                    continue
+
+                # zero the parameter gradients
+                optimizer.zero_grad(set_to_none=True)
+
                 outputs = model(batch_examples, batch_budgets, batch_budgets, batch_curves)
                 loss = self.criterion(outputs, batch_labels)
                 loss.backward()
@@ -466,7 +469,8 @@ class PowerLawSurrogate:
 
         if activate_early_stopping:
             model.load_state_dict(best_state)
-
+        check_seed_torch = torch.random.get_rng_state().sum()
+        self.logger.info(f"end rng_state {check_seed_torch}")
         return model
 
     def _predict(self) -> Tuple[np.ndarray, np.ndarray, List, np.ndarray]:
