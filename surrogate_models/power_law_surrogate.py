@@ -138,6 +138,14 @@ class PowerLawSurrogate:
         init_conf_indices = np.random.choice(self.hp_candidates.shape[0], initial_configurations_nr, replace=False)
         init_budgets = [i for i in range(1, conf_individual_budget + 1)]
 
+        # set a seed already, so that it is deterministic when
+        # generating the seeds of the ensemble
+        torch.manual_seed(seed)
+        np.random.seed(seed)
+        random.seed(seed)
+
+        self.seeds = np.random.choice(100, ensemble_size, replace=False)
+
         self.rand_init_conf_indices = []
         self.rand_init_budgets = []
 
