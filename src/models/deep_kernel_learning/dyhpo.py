@@ -12,8 +12,8 @@ from loguru import logger
 
 import gpytorch
 
-from src.models.deep_kernel_learning.feature_extractor import FeatureExtractor
-from src.models.deep_kernel_learning.gp_regression_model import GPRegressionModel
+from .feature_extractor import FeatureExtractor
+from .gp_regression_model import GPRegressionModel
 
 
 class DyHPO:

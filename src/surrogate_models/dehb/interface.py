@@ -5,7 +5,7 @@ from typing import Dict, List, OrderedDict, Tuple, Union
 import ConfigSpace
 import numpy as np
 
-from surrogate_models.dehb.dehb import DEHB
+from src.surrogate_models.dehb.dehb import DEHB
 
 
 class DEHBOptimizer:
@@ -252,10 +252,10 @@ class DEHBOptimizer:
         return self.next_conf, self.conf_budget
 
     def observe(self,
-        hp_index: int,
-        budget: int,
-        learning_curve: List[float],
-    ):
+                hp_index: int,
+                budget: int,
+                learning_curve: List[float],
+                ):
         """
         Respond regarding the performance of a
         hyperparameter configuration. get_next should
@@ -511,7 +511,7 @@ class DEHBOptimizer:
                         log_range = np.log(upper) - np.log(lower)
                         value = (np.log(value) - np.log(lower)) / log_range
                     else:
-                        value = (value - lower) /  (upper - lower)
+                        value = (value - lower) / (upper - lower)
                     new_config.append(value)
             new_configs.append(new_config)
 

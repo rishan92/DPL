@@ -1,7 +1,7 @@
 from copy import deepcopy
 import os
 import time
-from typing import List, Tuple
+from typing import List, Tuple, Dict, Optional, Any
 from loguru import logger
 import numpy as np
 import random
@@ -11,6 +11,8 @@ import torch
 from src.dataset.tabular_dataset import TabularDataset
 from src.models.power_law.ensemble_model import EnsembleModel
 from src.data_loader.surrogate_data_loader import SurrogateDataLoader
+from src.models.deep_kernel_learning.dyhpo_model import DyHPOModel
+import global_variables as gv
 
 
 class PowerLawSurrogate:
@@ -93,7 +95,8 @@ class PowerLawSurrogate:
             f'checkpoint_{seed}.pth',
         )
 
-        self.model_class = EnsembleModel
+        # self.model_class = EnsembleModel
+        self.model_class = DyHPOModel
         self.model = None
 
         if device is None:
@@ -113,7 +116,7 @@ class PowerLawSurrogate:
 
         # with what percentage configurations will be taken randomly instead of being sampled from the model
         self.fraction_random_configs = 0.1
-        self.iteration_probabilities = np.random.rand(self.total_budget)
+        # self.iteration_probabilities = np.random.rand(self.total_budget)
 
         # the keys will be hyperparameter indices while the value
         # will be a list with all the budgets evaluated for examples
@@ -124,7 +127,10 @@ class PowerLawSurrogate:
         self.max_benchmark_epochs = max_benchmark_epochs
         self.ensemble_size = ensemble_size
         self.nr_epochs = nr_epochs
-        self.refine_nr_epochs = 20
+        if gv.IS_DYHPO:
+            self.refine_nr_epochs = 50
+        else:
+            self.refine_nr_epochs = 20
         self.fantasize_step = fantasize_step
 
         self.pretrain = pretrain
@@ -132,15 +138,11 @@ class PowerLawSurrogate:
         initial_configurations_nr = 1
         conf_individual_budget = 1
         init_conf_indices = np.random.choice(self.hp_candidates.shape[0], initial_configurations_nr, replace=False)
-        init_budgets = [i for i in range(1, conf_individual_budget + 1)]
 
-        # set a seed already, so that it is deterministic when
-        # generating the seeds of the ensemble
-        torch.manual_seed(seed)
-        np.random.seed(seed)
-        random.seed(seed)
-
-        self.seeds = np.random.choice(100, ensemble_size, replace=False)
+        if gv.IS_DYHPO:
+            init_budgets = [conf_individual_budget] * initial_configurations_nr
+        else:
+            init_budgets = [i for i in range(1, conf_individual_budget + 1)]
 
         self.rand_init_conf_indices = []
         self.rand_init_budgets = []
@@ -155,7 +157,10 @@ class PowerLawSurrogate:
         self.initial_random_index = 0
 
         self.nr_features = self.hp_candidates.shape[1]
-        self.best_value_observed = np.inf
+        if gv.IS_DYHPO:
+            self.best_value_observed = np.NINF
+        else:
+            self.best_value_observed = np.inf
 
         self.diverged_configs = set()
 
@@ -164,6 +169,8 @@ class PowerLawSurrogate:
         # Tuple(config_index, budget, performance, curve)
         self.last_point = None
 
+        # the number of initial points for which we will retrain fully from scratch
+        # This is basically equal to the dimensionality of the search space + 1.
         self.initial_full_training_trials = 10
 
         # a flag if the surrogate should be trained
@@ -186,7 +193,18 @@ class PowerLawSurrogate:
         self.no_improvement_threshold = int(self.max_benchmark_epochs + 0.2 * self.max_benchmark_epochs)
         self.no_improvement_patience = 0
 
-    def _prepare_dataset(self) -> TabularDataset:
+        self.checkpoint_path = os.path.join(
+            output_path,
+            'checkpoints',
+            f'{dataset_name}',
+            f'{self.seed}',
+        )
+
+        os.makedirs(self.checkpoint_path, exist_ok=True)
+
+        self.cnn_kernel_size = 3  # TODO: get this from dyhpo model hyperparameters
+
+    def _prepare_dataset(self):  # -> TabularDataset:
         """This method is called to prepare the necessary training dataset
         for training a model.
 
@@ -195,8 +213,10 @@ class PowerLawSurrogate:
                 and learning curves.
         """
         train_examples, train_labels, train_budgets, train_curves = self.history_configurations()
-
-        train_curves = self.prepare_training_curves(train_budgets, train_curves)
+        if gv.IS_DYHPO:
+            train_curves = self.patch_curves_to_same_length_dyhpo(train_curves)
+        else:
+            train_curves = self.prepare_training_curves(train_budgets, train_curves)
         train_examples = np.array(train_examples, dtype=np.single)
         train_labels = np.array(train_labels, dtype=np.single)
         train_budgets = np.array(train_budgets, dtype=np.single)
@@ -204,17 +224,56 @@ class PowerLawSurrogate:
         # scale budgets to [0, 1]
         train_budgets = train_budgets / self.max_benchmark_epochs
 
-        train_dataset = TabularDataset(
-            train_examples,
-            train_labels,
-            train_budgets,
-            train_curves,
-        )
+        if gv.IS_DYHPO:
+            train_examples = torch.tensor(train_examples)
+            train_labels = torch.tensor(train_labels)
+            train_budgets = torch.tensor(train_budgets)
+            train_curves = torch.tensor(train_curves)
+            train_dataset = {
+                'X_train': train_examples,
+                'train_budgets': train_budgets,
+                'train_curves': train_curves,
+                'y_train': train_labels,
+            }
+        else:
+            train_dataset = TabularDataset(
+                train_examples,
+                train_labels,
+                train_budgets,
+                train_curves,
+            )
 
         return train_dataset
 
+    @staticmethod
+    def patch_curves_to_same_length_dyhpo(curves):
+        """
+        Patch the given curves to the same length.
+
+        Finds the maximum curve length and patches all
+        other curves that are shorter in length with zeroes.
+
+        Args:
+            curves: The given hyperparameter curves.
+
+        Returns:
+            curves: The updated array where the learning
+                curves are of the same length.
+        """
+        max_curve_length = 0
+        for curve in curves:
+            if len(curve) > max_curve_length:
+                max_curve_length = len(curve)
+
+        for curve in curves:
+            difference = max_curve_length - len(curve)
+            if difference > 0:
+                curve.extend([0.0] * difference)
+
+        return curves
+
     def _train_surrogate(self, pretrain: bool = False, should_refine: bool = False,
-                         should_weight_last_sample: bool = False):
+                         should_weight_last_sample: bool = False, load_checkpoint: bool = False):
         """Train the surrogate model.
 
         Trains all the models of the ensemble
@@ -266,34 +325,48 @@ class PowerLawSurrogate:
         if should_refine:
             nr_epochs = self.refine_nr_epochs
             batch_size = self.refine_batch_size
-
-            # make the training dataset here
-            train_dataloader = SurrogateDataLoader(
-                dataset=train_dataset, batch_size=batch_size, shuffle=True, seed=self.seed, dev=self.dev,
-                should_weight_last_sample=should_weight_last_sample, last_sample=last_sample,
-                # drop_last=train_dataset.X.shape[0] > batch_size and train_dataset.X.shape[0] % batch_size < 2
-            )
-            self.model.train()
-            self.model.train_loop(nr_epochs=nr_epochs, train_dataloader=train_dataloader, reset_optimizer=True)
+            if gv.IS_DYHPO:
+                self.model.train()
+                self.model.train_loop(nr_epochs=nr_epochs, data=train_dataset)
+            else:
+                # make the training dataset here
+                train_dataloader = SurrogateDataLoader(
+                    dataset=train_dataset, batch_size=batch_size, shuffle=True, seed=self.seed, dev=self.dev,
+                    should_weight_last_sample=should_weight_last_sample, last_sample=last_sample,
+                    # drop_last=train_dataset.X.shape[0] > batch_size and train_dataset.X.shape[0] % batch_size < 2
+                )
+                self.model.train()
+                self.model.train_loop(nr_epochs=nr_epochs, train_dataloader=train_dataloader, reset_optimizer=True)
         else:
             nr_epochs = self.nr_epochs
             batch_size = self.batch_size
+            if gv.IS_DYHPO:
+                model_config = {'seed': self.seed}
+                self.model = self.model_class(
+                    nr_features=train_dataset['X_train'].shape[1],
+                    surrogate_configs=model_config,
+                    checkpoint_path=self.checkpoint_path
+                )
+                self.model.to(self.dev)
 
-            # make the training dataset here
-            train_dataloader = SurrogateDataLoader(
-                dataset=train_dataset, batch_size=batch_size, shuffle=True, seed=self.seed, dev=self.dev
-            )
+                self.model.train()
+                self.model.train_loop(nr_epochs=nr_epochs, data=train_dataset)
+            else:
+                # make the training dataset here
+                train_dataloader = SurrogateDataLoader(
+                    dataset=train_dataset, batch_size=batch_size, shuffle=True, seed=self.seed, dev=self.dev
+                )
 
-            model_config = {'seed': self.seed}
-            self.model = self.model_class(
-                nr_features=train_dataset.X.shape[1],
-                train_dataloader=train_dataloader,
-                surrogate_configs=model_config
-            )
-            self.model.to(self.dev)
+                model_config = {'seed': self.seed}
+                self.model = self.model_class(
+                    nr_features=train_dataset.X.shape[1],
+                    train_dataloader=train_dataloader,
+                    surrogate_configs=model_config
+                )
+                self.model.to(self.dev)
 
-            self.model.train()
-            self.model.train_loop(nr_epochs=nr_epochs)
+                self.model.train()
+                self.model.train_loop(nr_epochs=nr_epochs)
 
         return self.model
 
@@ -313,25 +386,34 @@ class PowerLawSurrogate:
         configurations, hp_indices, budgets, real_budgets, hp_curves = self.generate_candidate_configurations()
         # scale budgets to [0, 1]
         budgets = np.array(budgets, dtype=np.single)
-        hp_curves = self.prepare_training_curves(real_budgets, hp_curves)
+        if gv.IS_DYHPO:
+            hp_curves = self.patch_curves_to_same_length_dyhpo(hp_curves)
+        else:
+            hp_curves = self.prepare_training_curves(real_budgets, hp_curves)
         budgets = budgets / self.max_benchmark_epochs
         real_budgets = np.array(real_budgets, dtype=np.single)
         configurations = np.array(configurations, dtype=np.single)
 
-        configurations = torch.tensor(configurations)
-        configurations = configurations.to(device=self.dev)
-        budgets = torch.tensor(budgets)
-        budgets = budgets.to(device=self.dev)
-        hp_curves = torch.tensor(hp_curves)
-        hp_curves = hp_curves.to(device=self.dev)
-        network_real_budgets = torch.tensor(real_budgets / self.max_benchmark_epochs)
-        network_real_budgets.to(device=self.dev)
+        configurations = torch.tensor(configurations, device=self.dev)
+        budgets = torch.tensor(budgets, device=self.dev)
+        hp_curves = torch.tensor(hp_curves, device=self.dev)
+        network_real_budgets = torch.tensor(real_budgets / self.max_benchmark_epochs, device=self.dev)
 
-        self.model.eval()
-        predictions = self.model((configurations, budgets, network_real_budgets, hp_curves))
+        if gv.IS_DYHPO:
+            train_data = self._prepare_dataset()
+            test_data = {
+                'X_test': configurations,
+                'test_budgets': network_real_budgets,
+                'test_curves': hp_curves,
+            }
 
-        mean_predictions = predictions[0]
-        std_predictions = predictions[1]
+            mean_predictions, std_predictions = self.model.predict_pipeline(train_data, test_data)
+        else:
+            self.model.eval()
+            predictions = self.model((configurations, budgets, network_real_budgets, hp_curves))
+
+            mean_predictions = predictions[0]
+            std_predictions = predictions[1]
 
         return mean_predictions, std_predictions, hp_indices, real_budgets
 
@@ -356,17 +438,32 @@ class PowerLawSurrogate:
             self.initial_random_index += 1
         else:
             mean_predictions, std_predictions, hp_indices, real_budgets = self._predict()
-            best_prediction_index = self.find_suggested_config(
-                mean_predictions,
-                std_predictions,
-            )
+            if gv.IS_DYHPO:
+                best_prediction_index = self.find_suggested_config_dyhpo(
+                    mean_predictions,
+                    std_predictions,
+                    real_budgets,
+                )
+            else:
+                best_prediction_index = self.find_suggested_config(
+                    mean_predictions,
+                    std_predictions,
+                )
+            """
+            the best prediction index is not always matching with the actual hp index.
+            Since when evaluating the acq function, we do not consider hyperparameter
+            candidates that diverged or that are evaluated fully.
+            """
             # actually do the mapping between the configuration indices and the best prediction index
             suggested_hp_index = hp_indices[best_prediction_index]
 
+            # decide for what budget we will evaluate the most
+            # promising hyperparameter configuration next.
             if suggested_hp_index in self.examples:
                 evaluated_budgets = self.examples[suggested_hp_index]
                 max_budget = max(evaluated_budgets)
                 budget = max_budget + self.fantasize_step
+                # this would only trigger if fantasize_step is bigger than 1
                 if budget > self.max_benchmark_epochs:
                     budget = self.max_benchmark_epochs
             else:
@@ -394,25 +491,36 @@ class PowerLawSurrogate:
             hp_curve: List
                 The performance of the hyperparameter configuration.
         """
-        for index, curve_element in enumerate(hp_curve):
-            if np.isnan(curve_element):
+        if gv.IS_DYHPO:
+            if np.isnan(hp_curve).any():
                 self.diverged_configs.add(hp_index)
-                # only use the non-nan part of the curve and the corresponding
-                # budget to still have the information in the network
-                hp_curve = hp_curve[0:index + 1]
-                b = index
-                break
-
-        if not self.minimization:
-            hp_curve = np.subtract([self.max_value] * len(hp_curve), hp_curve)
-            hp_curve = hp_curve.tolist()
+                return
+        else:
+            for index, curve_element in enumerate(hp_curve):
+                if np.isnan(curve_element):
+                    self.diverged_configs.add(hp_index)
+                    # only use the non-nan part of the curve and the corresponding
+                    # budget to still have the information in the network
+                    hp_curve = hp_curve[0:index + 1]
+                    b = index
+                    break
+        if gv.IS_DYHPO:
+            if self.minimization:
+                hp_curve = np.subtract([self.max_value] * len(hp_curve), hp_curve) / (
+                    self.max_value - self.min_value)
+                hp_curve = hp_curve.tolist()
+        else:
+            if not self.minimization:
+                hp_curve = np.subtract([self.max_value] * len(hp_curve), hp_curve)
+                hp_curve = hp_curve.tolist()
 
         best_curve_value = min(hp_curve)
-
+        # TODO: check if arange should start with 1 oe zero
         self.examples[hp_index] = np.arange(1, b + 1)
         self.performances[hp_index] = hp_curve
 
-        if self.best_value_observed > best_curve_value:
+        if (self.best_value_observed > best_curve_value and not gv.IS_DYHPO) or \
+            (self.best_value_observed < best_curve_value and gv.IS_DYHPO):
             self.best_value_observed = best_curve_value
             self.no_improvement_patience = 0
             self.logger.info(f'New Incumbent value found '
@@ -441,14 +549,22 @@ class PowerLawSurrogate:
                     pass
 
                 self._train_surrogate(pretrain=self.pretrain)
-
-                if self.iterations_counter <= self.initial_full_training_trials:
-                    self.train = True
+                if gv.IS_DYHPO:
+                    if self.iterations_counter < self.initial_full_training_trials:
+                        self.train = True
+                    else:
+                        self.train = False
                 else:
-                    self.train = False
+                    if self.iterations_counter <= self.initial_full_training_trials:
+                        self.train = True
+                    else:
+                        self.train = False
             else:
                 self.refine_counter += 1
-                self._train_surrogate(should_refine=True, should_weight_last_sample=True)
+                if gv.IS_DYHPO:
+                    self._train_surrogate(should_refine=True, should_weight_last_sample=False)
+                else:
+                    self._train_surrogate(should_refine=True, should_weight_last_sample=True)
 
     def prepare_examples(self, hp_indices: List) -> List:
         """
@@ -493,12 +609,21 @@ class PowerLawSurrogate:
                 max_budget = budgets[-1]
                 if max_budget == self.max_benchmark_epochs:
                     continue
-                real_budgets.append(max_budget)
+                if gv.IS_DYHPO:
+                    real_budgets.append(max_budget + self.fantasize_step)
+                else:
+                    real_budgets.append(max_budget)
                 learning_curve = self.performances[hp_index]
 
-                hp_curve = learning_curve[0:max_budget - 1] if max_budget > 1 else [initial_empty_value]
+                hp_curve = learning_curve[:max_budget - 1] if max_budget > 1 else [initial_empty_value]
+                if gv.IS_DYHPO:
+                    # if the curve is shorter than the length of the kernel size,
+                    # pad it with zeros
+                    difference_curve_length = self.cnn_kernel_size - len(hp_curve)
+                    if difference_curve_length > 0:
+                        hp_curve.extend([0.0] * difference_curve_length)
             else:
-                real_budgets.append(1)
+                real_budgets.append(self.fantasize_step)
                 hp_curve = [initial_empty_value]
 
             hp_indices.append(hp_index)
@@ -531,11 +656,15 @@ class PowerLawSurrogate:
             example = self.hp_candidates[hp_index]
 
             for budget in budgets:
-                example_curve = performances[0:budget - 1]
                 train_examples.append(example)
                 train_budgets.append(budget)
                 train_labels.append(performances[budget - 1])
-                train_curves.append(example_curve if len(example_curve) > 0 else [initial_empty_value])
+                train_curve = performances[:budget - 1] if budget > 1 else [initial_empty_value]
+                if gv.IS_DYHPO:
+                    difference_curve_length = self.cnn_kernel_size - len(train_curve)
+                    if difference_curve_length > 0:
+                        train_curve.extend([0.0] * difference_curve_length)
+                train_curves.append(train_curve)
 
         return train_examples, train_labels, train_budgets, train_curves
 
@@ -589,6 +718,58 @@ class PowerLawSurrogate:
 
         return acq_values
 
+    def acq_dyhpo(
+        self,
+        best_value: float,
+        mean: float,
+        std: float,
+        explore_factor: Optional[float] = 0.25,
+        acq_fc: str = 'ei',
+    ) -> float:
+        """
+        The acquisition function that will be called
+        to evaluate the score of a hyperparameter configuration.
+
+        Parameters
+        ----------
+        best_value: float
+            Best observed function evaluation. Individual per fidelity.
+        mean: float
+            Point mean of the posterior process.
+        std: float
+            Point std of the posterior process.
+        explore_factor: float
+            The exploration factor for when ucb is used as the
+            acquisition function.
+        ei_calibration_factor: float
+            The factor used to calibrate expected improvement.
+        acq_fc: str
+            The type of acquisition function to use.
+
+        Returns
+        -------
+        acq_value: float
+            The value of the acquisition function.
+        """
+        if acq_fc == 'ei':
+            if std == 0:
+                return 0
+            z = (mean - best_value) / std
+            acq_value = (mean - best_value) * norm.cdf(z) + std * norm.pdf(z)
+        elif acq_fc == 'ucb':
+            acq_value = mean + explore_factor * std
+        elif acq_fc == 'thompson':
+            acq_value = np.random.normal(mean, std)
+        elif acq_fc == 'exploit':
+            acq_value = mean
+        else:
+            raise NotImplementedError(
+                f'Acquisition function {acq_fc} has not been'
+                f'implemented',
+            )
+
+        return acq_value
+
     def find_suggested_config(
         self,
         mean_predictions: np.ndarray,
@@ -625,6 +806,42 @@ class PowerLawSurrogate:
 
         return max_value_index
 
+    def find_suggested_config_dyhpo(
+        self,
+        mean_predictions: np.ndarray,
+        mean_stds: np.ndarray,
+        budgets: List,
+    ) -> int:
+        """
+        Find the hyperparameter configuration that has the highest score
+        with the acquisition function.
+
+        Args:
+            mean_predictions: The mean predictions of the posterior.
+            mean_stds: The mean standard deviations of the posterior.
+            budgets: The next budgets that the hyperparameter configurations
+                will be evaluated for.
+
+        Returns:
+            best_index: The index of the hyperparameter configuration with the
+                highest score.
+        """
+        highest_acq_value = np.NINF
+        best_index = -1
+
+        index = 0
+        for mean_value, std in zip(mean_predictions, mean_stds):
+            budget = int(budgets[index])
+            best_value = self.calculate_fidelity_ymax_dyhpo(budget)
+            acq_value = self.acq_dyhpo(best_value, mean_value, std, acq_fc='ei')
+            if acq_value > highest_acq_value:
+                highest_acq_value = acq_value
+                best_index = index
+
+            index += 1
+
+        return best_index
+
     def calculate_fidelity_ymax(self, fidelity: int) -> float:
         """Calculate the incumbent for a certain fidelity level.
 
@@ -646,6 +863,44 @@ class PowerLawSurrogate:
 
         # lowest error corresponds to best value
         best_value = min(config_values)
+
+        return best_value
+
+    def calculate_fidelity_ymax_dyhpo(self, fidelity: int):
+        """
+        Find ymax for a given fidelity level.
+
+        If there are hyperparameters evaluated for that fidelity
+        take the maximum from their values. Otherwise, take
+        the maximum from all previous fidelity levels for the
+        hyperparameters that we have evaluated.
+
+        Args:
+            fidelity: The fidelity of the hyperparameter
+                configuration.
+
+        Returns:
+            best_value: The best value seen so far for the
+                given fidelity.
+        """
+        exact_fidelity_config_values = []
+        lower_fidelity_config_values = []
+
+        for example_index in self.examples.keys():
+            try:
+                performance = self.performances[example_index][fidelity - 1]
+                exact_fidelity_config_values.append(performance)
+            except IndexError:
+                learning_curve = self.performances[example_index]
+                # The hyperparameter was not evaluated until fidelity, or more.
+                # Take the maximum value from the curve.
+                lower_fidelity_config_values.append(max(learning_curve))
+
+        if len(exact_fidelity_config_values) > 0:
+            # lowest error corresponds to best value
+            best_value = max(exact_fidelity_config_values)
+        else:
+            best_value = max(lower_fidelity_config_values)
 
         return best_value
 

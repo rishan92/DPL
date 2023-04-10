@@ -45,30 +45,3 @@ class BasePytorchModule(nn.Module):
         assert train_dataloader is not None
         self.train_dataloader = train_dataloader
         self.train_dataloader_it = iter(self.train_dataloader)
-
-    def get_dataloader(self, dataset, batch_size, seed=None):
-        # make the training dataset here
-        if seed is None:
-            dataloader = DataLoader(
-                dataset,
-                batch_size=batch_size,
-                shuffle=True,
-            )
-        else:
-            def seed_worker(worker_id):
-                worker_seed = torch.initial_seed() % 2 ** 32
-                np.random.seed(worker_seed)
-                random.seed(worker_seed)
-
-            g = torch.Generator()
-            g.manual_seed(int(seed))
-
-            dataloader = DataLoader(
-                dataset,
-                batch_size=batch_size,
-                worker_init_fn=seed_worker,
-                generator=g,
-                shuffle=True,
-            )
-        dataloader = WrappedDataLoader(dataloader, dev=self.device)
-        return dataloader

@@ -21,38 +21,38 @@ class FeatureExtractor(nn.Module):
     def __init__(self, configuration):
         super(FeatureExtractor, self).__init__()
 
-        self.configuration = configuration
+        self.hp = configuration
 
-        self.nr_layers = configuration['nr_layers']
+        self.nr_layers = self.hp.nr_layers
         self.act_func = nn.LeakyReLU()
         # adding one to the dimensionality of the initial input features
         # for the concatenation with the budget.
-        initial_features = configuration['nr_initial_features'] + 1
-        self.fc1 = nn.Linear(initial_features, configuration['layer1_units'])
-        self.bn1 = nn.BatchNorm1d(configuration['layer1_units'])
+        initial_features = self.hp.nr_initial_features + 1
+        self.fc1 = nn.Linear(initial_features, self.hp.layer1_units)
+        self.bn1 = nn.BatchNorm1d(self.hp.layer1_units)
         for i in range(2, self.nr_layers):
             setattr(
                 self,
                 f'fc{i + 1}',
-                nn.Linear(configuration[f'layer{i - 1}_units'], configuration[f'layer{i}_units']),
+                nn.Linear(getattr(self.hp, f'layer{i - 1}_units'), getattr(self.hp, f'layer{i}_units')),
             )
             setattr(
                 self,
                 f'bn{i + 1}',
-                nn.BatchNorm1d(configuration[f'layer{i}_units']),
+                nn.BatchNorm1d(getattr(self.hp, f'layer{i}_units')),
             )
 
         setattr(
             self,
             f'fc{self.nr_layers}',
             nn.Linear(
-                configuration[f'layer{self.nr_layers - 1}_units'] +
-                configuration['cnn_nr_channels'],  # accounting for the learning curve features
-                configuration[f'layer{self.nr_layers}_units']
+                getattr(self.hp, f'layer{self.nr_layers - 1}_units') +
+                self.hp.cnn_nr_channels,  # accounting for the learning curve features
+                getattr(self.hp, f'layer{self.nr_layers}_units')
             ),
         )
         self.cnn = nn.Sequential(
-            nn.Conv1d(in_channels=1, kernel_size=(configuration['cnn_kernel_size'],), out_channels=4),
+            nn.Conv1d(in_channels=1, kernel_size=(self.hp.cnn_kernel_size,), out_channels=4),
             nn.AdaptiveMaxPool1d(1),
         )
 

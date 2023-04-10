@@ -3,6 +3,7 @@ import json
 import os
 import time
 import numpy as np
+import pandas as pd
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
@@ -17,6 +18,8 @@ from src.surrogate_models.dehb.interface import DEHBOptimizer
 from src.surrogate_models.random_search import RandomOptimizer
 from src.surrogate_models.hpo_method import DyHPOAlgorithm
 import global_variables as gv
+
+import sklearn
 
 
 # if warnings.catch_warnings():
@@ -107,9 +110,8 @@ class Framework:
         else:
             self.hp_candidates = self.benchmark.get_hyperparameter_candidates()
 
-        # if args.surrogate_name == 'power_law' or args.surrogate_name == 'dyhpo':
-        # gv.IS_DYHPO = (args.surrogate_name == 'dyhpo')
-        if args.surrogate_name == 'power_law':
+        if args.surrogate_name == 'power_law' or args.surrogate_name == 'dyhpo':
+            gv.IS_DYHPO = (args.surrogate_name == 'dyhpo')
             self.surrogate = surrogate_types[args.surrogate_name](
                 self.hp_candidates,
                 seed=seed,
@@ -124,21 +126,6 @@ class Framework:
                 output_path=self.result_dir,
                 max_value=self.max_value,
                 min_value=self.min_value,
-            )
-        elif args.surrogate_name == 'dyhpo':
-            gv.IS_DYHPO = 1
-            self.surrogate = DyHPOAlgorithm(
-                hp_candidates=self.benchmark.get_hyperparameter_candidates(),
-                log_indicator=self.benchmark.log_indicator,
-                max_value=self.max_value,
-                min_value=self.min_value,
-                seed=seed,
-                max_benchmark_epochs=self.benchmark.max_budget,
-                fantasize_step=self.fantasize_step,
-                minimization=self.minimization_metric,
-                total_budget=args.budget_limit,
-                dataset_name=self.dataset_name,
-                output_path=self.result_dir,
             )
         else:
             self.surrogate = surrogate_types[args.surrogate_name](
@@ -167,7 +154,6 @@ class Framework:
             start_time = time.time()
             hp_index, budget = self.surrogate.suggest()
             hp_curve = self.benchmark.get_curve(hp_index, budget)
-
             self.surrogate.observe(hp_index, budget, hp_curve)
             time_duration = time.time() - start_time
 
@@ -261,14 +247,28 @@ class Framework:
                     categorical_columns,
                 )
             )
-        column_transformers.append(('feature_types_pre', ColumnTransformer(general_transformers)))
+        column_transformers.append(
+            ('feature_types_pre', ColumnTransformer(general_transformers, remainder='passthrough')))
 
         preprocessor = Pipeline(
             column_transformers
         )
-        # TODO log preprocessing will push numerical columns to the right
+
+        sklearn.set_config(transform_output="pandas")
+        hp_candidates_pd = pd.DataFrame(hp_candidates, columns=self.hp_names)
+
+        preprocessed_candidates = preprocessor.fit_transform(hp_candidates_pd)
+
+        # log preprocessing will push numerical columns to the right
         # so a mapping has to happen for the feature_types_pre
-        preprocessed_candidates = preprocessor.fit_transform(hp_candidates)
+        new_column_map = []
+        for name in hp_candidates_pd.columns:
+            for new_name in preprocessed_candidates.columns:
+                if name in new_name:
+                    new_column_map.append(new_name)
+
+        preprocessed_candidates = preprocessed_candidates[new_column_map]
+        preprocessed_candidates = preprocessed_candidates.to_numpy()
 
         return preprocessed_candidates
 

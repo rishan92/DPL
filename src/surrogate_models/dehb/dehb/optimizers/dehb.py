@@ -10,9 +10,8 @@ from copy import deepcopy
 from loguru import logger
 from distributed import Client
 
-from surrogate_models.dehb.dehb.optimizers import DE, AsyncDE
-from surrogate_models.dehb.dehb.utils import SHBracketManager
-
+from src.surrogate_models.dehb.dehb.optimizers import DE, AsyncDE
+from src.surrogate_models.dehb.dehb.utils import SHBracketManager
 
 logger.configure(handlers=[{"sink": sys.stdout, "level": "INFO"}])
 _logger_props = {
@@ -68,12 +67,12 @@ class DEHBBase:
         self.max_SH_iter = None
         self.budgets = None
         if self.min_budget is not None and \
-           self.max_budget is not None and \
-           self.eta is not None:
+            self.max_budget is not None and \
+            self.eta is not None:
             self.max_SH_iter = -int(np.log(self.min_budget / self.max_budget) / np.log(self.eta)) + 1
             self.budgets = self.max_budget * np.power(self.eta,
-                                                     -np.linspace(start=self.max_SH_iter - 1,
-                                                                  stop=0, num=self.max_SH_iter))
+                                                      -np.linspace(start=self.max_SH_iter - 1,
+                                                                   stop=0, num=self.max_SH_iter))
 
         # Miscellaneous
         self.output_path = kwargs['output_path'] if 'output_path' in kwargs else './'
@@ -136,10 +135,10 @@ class DEHBBase:
         # number of 'SH runs'
         s = self.max_SH_iter - 1 - (iteration % self.max_SH_iter)
         # budget spacing for this iteration
-        budgets = self.budgets[(-s-1):]
+        budgets = self.budgets[(-s - 1):]
         # number of configurations in that bracket
-        n0 = int(np.floor((self.max_SH_iter)/(s+1)) * self.eta**s)
-        ns = [max(int(n0*(self.eta**(-i))), 1) for i in range(s+1)]
+        n0 = int(np.floor((self.max_SH_iter) / (s + 1)) * self.eta ** s)
+        ns = [max(int(n0 * (self.eta ** (-i))), 1) for i in range(s + 1)]
         if self.min_clip is not None and self.max_clip is not None:
             ns = np.clip(ns, a_min=self.min_clip, a_max=self.max_clip)
         elif self.min_clip is not None:
@@ -433,7 +432,7 @@ class DEHB(DEHBBase):
 
         # creating population for promotion if none promoted yet or nothing to promote
         if self.de[high_budget].promotion_pop is None or \
-                len(self.de[high_budget].promotion_pop) == 0:
+            len(self.de[high_budget].promotion_pop) == 0:
             self.de[high_budget].promotion_pop = np.empty((0, self.dimensions))
             self.de[high_budget].promotion_fitness = np.array([])
 
@@ -524,7 +523,7 @@ class DEHB(DEHBBase):
         """
         bracket = None
         if len(self.active_brackets) == 0 or \
-                np.all([bracket.is_bracket_done() for bracket in self.active_brackets]):
+            np.all([bracket.is_bracket_done() for bracket in self.active_brackets]):
             # start new bracket when no pending jobs from existing brackets or empty bracket list
             bracket = self._start_new_bracket()
         else:
@@ -661,7 +660,7 @@ class DEHB(DEHBBase):
                 for bracket in self.active_brackets:
                     # waits for all brackets < iteration_counter to finish by collecting results
                     if bracket.bracket_id < self.iteration_counter and \
-                            not bracket.is_bracket_done():
+                        not bracket.is_bracket_done():
                         return False
                 return True
         else:
@@ -925,4 +924,3 @@ class DEHB(DEHBBase):
             new_configs.append(new_config)
 
         return np.array(new_configs)
-

@@ -13,9 +13,4 @@ class TabularDataset(Dataset):
         return self.y.size
 
     def __getitem__(self, idx):
-
         return self.X[idx], self.y[idx], self.budgets[idx], self.curves[idx]
-
-
-
-
