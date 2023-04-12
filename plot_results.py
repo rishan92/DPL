@@ -16,15 +16,18 @@ import matplotlib as mpl
 from src.plot.framework_metric_generator import FrameworkMetricsGenerator
 from src.plot.utils import plot_line
 
+
 # from plots.normalized_regret import plot_all_baselines_epoch_performance, plot_all_baselines_time_performance
 
-IS_DEV = 0
 
-mpl.rc_file_defaults()
-sns.reset_orig()
+# mpl.rc_file_defaults()
+# sns.reset_orig()
+# #
+# sns.set_palette(sns.color_palette('deep'))
+# sns.set_style("white")
 
-sns.set_palette(sns.color_palette('deep'))
-sns.set_style("white")
+
+# sns.set()
 
 
 def plot_results(result_path: Path, x_metric: str = None, y_metric: str = None, aggregate_level: str = None,
@@ -75,19 +78,15 @@ def plot_results(result_path: Path, x_metric: str = None, y_metric: str = None, 
 
 
 def main():
-    if not IS_DEV:
-        result_path = Path("./Golden_Results")
-        plot_path = Path("./result_plots")
-    else:
-        result_path = Path("./Golden_Test_Results")
-        plot_path = Path("./result_test_plots")
+    result_path = Path("./Results_PL")
+    plot_path = Path("./Results_PL")
 
     project_folder = Path(".")
     dataset_files_path = Path("./bash_scripts")
 
-    method_names = ['power_law', 'dyhpo', 'asha', 'dehb', 'random']  # , 'dragonfly'
+    method_names = ['power_law', 'dyhpo', 'dyhpo_pl', 'dyhpo_pl_arch', 'dehb', 'random']
     benchmark_names = ['taskset', 'lcbench']
-    benchmark_names = ['taskset']
+    benchmark_names = ['lcbench']
     dataset_names = None
     # dataset_names = ['FixedTextRNNClassification_imdb_patch32_GRU64_avg_bs128',
     #                  'FixedTextRNNClassification_imdb_patch32_GRU128_bs128']
@@ -104,8 +103,8 @@ def main():
     # plot_results_f(y_metric='curve', x_metric='epochs', aggregate_level='dataset')
     # plot_results_f(y_metric='curve', x_metric='epochs', aggregate_level='benchmark')
     # plot_results_f(y_metric='regret', x_metric='epochs', aggregate_level=None)
-    plot_results_f(y_metric='regret', x_metric='epochs', aggregate_level='dataset')
-    plot_results_f(y_metric='regret', x_metric='epochs', aggregate_level='benchmark')
+    plot_results_f(y_metric='regret', x_metric='epochs', aggregate_level='dataset', y_log=True, plot_std=False)
+    plot_results_f(y_metric='regret', x_metric='epochs', aggregate_level='benchmark', y_log=True, plot_std=False)
 
 
 if __name__ == "__main__":

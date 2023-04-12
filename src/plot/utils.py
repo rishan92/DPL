@@ -20,7 +20,7 @@ def add_plot_legend(ax: matplotlib.axes.Axes, n: int):
 
     # Put a legend below current axis
     handles, legends = ax.get_legend_handles_labels()
-    ax.legend(handles, legends, loc='upper center', bbox_to_anchor=(0.5, -0.2), fontsize="10",
+    ax.legend(handles, legends, loc='upper center', bbox_to_anchor=(0.5, -0.15), fontsize="7",
               fancybox=True, shadow=True, ncol=n)
 
 
@@ -29,7 +29,8 @@ def plot_line(data: pd.DataFrame, x_label: str, y_label: str, title: str, path: 
     plt.clf()
     p = sns.lineplot(data=data)
 
-    if std_data is not None:
+    plot_std = kwargs['plot_std'] if 'plot_std' in kwargs else True
+    if std_data is not None and plot_std:
         for col in data.columns:
             p.axes.fill_between(data.index, data[col] + std_data[col], data[col] - std_data[col], alpha=0.3)
 

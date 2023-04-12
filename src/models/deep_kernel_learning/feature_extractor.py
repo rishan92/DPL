@@ -52,7 +52,7 @@ class FeatureExtractor(nn.Module):
             ),
         )
         self.cnn = nn.Sequential(
-            nn.Conv1d(in_channels=1, kernel_size=(self.hp.cnn_kernel_size,), out_channels=4),
+            nn.Conv1d(in_channels=1, kernel_size=(self.hp.cnn_kernel_size,), out_channels=self.hp.cnn_nr_channels),
             nn.AdaptiveMaxPool1d(1),
         )
 
@@ -77,10 +77,10 @@ class FeatureExtractor(nn.Module):
 
         # add an extra dimensionality for the learning curve
         # making it nr_rows x 1 x lc_values.
-        learning_curves = torch.unsqueeze(learning_curves, 1)
+        learning_curves = torch.unsqueeze(learning_curves, dim=1)
         lc_features = self.cnn(learning_curves)
         # revert the output from the cnn into nr_rows x nr_kernels.
-        lc_features = torch.squeeze(lc_features, 2)
+        lc_features = torch.squeeze(lc_features, dim=2)
 
         # put learning curve features into the last layer along with the higher level features.
         x = cat((x, lc_features), dim=1)

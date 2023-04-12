@@ -7,12 +7,14 @@ import numpy as np
 import random
 from scipy.stats import norm
 import torch
+from types import SimpleNamespace
 
 from src.dataset.tabular_dataset import TabularDataset
 from src.models.power_law.ensemble_model import EnsembleModel
 from src.data_loader.surrogate_data_loader import SurrogateDataLoader
 from src.models.deep_kernel_learning.dyhpo_model import DyHPOModel
 import global_variables as gv
+from src.history.history_manager import HistoryManager
 
 
 class PowerLawSurrogate:
@@ -20,6 +22,7 @@ class PowerLawSurrogate:
     def __init__(
         self,
         hp_candidates: np.ndarray,
+        surrogate_name: str = 'power_law',
         surrogate_configs: dict = None,
         seed: int = 11,
         max_benchmark_epochs: int = 52,
@@ -83,6 +86,20 @@ class PowerLawSurrogate:
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False
 
+        self.model_type = surrogate_name
+        if self.model_type == 'power_law':
+            self.model_class = EnsembleModel
+        elif self.model_type == 'dyhpo':
+            self.model_class = DyHPOModel
+        self.model = None
+
+        self.hp = self.get_default_hp(self.model_type)
+        if surrogate_configs is not None:
+            # fill hyperparameters not given in surrogate_configs with default hyperparameter values.
+            self.hp = {**self.hp, **surrogate_configs}
+        # make hyperparameters callable by dot notation
+        self.hp = SimpleNamespace(**self.hp)
+
         self.total_budget = total_budget
         self.fill_value = fill_value
         self.max_value = max_value
@@ -95,17 +112,13 @@ class PowerLawSurrogate:
             f'checkpoint_{seed}.pth',
         )
 
-        # self.model_class = EnsembleModel
-        self.model_class = DyHPOModel
-        self.model = None
-
         if device is None:
             self.dev = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
         else:
             self.dev = torch.device(device)
 
-        self.batch_size = 64
-        self.refine_batch_size = 64
+        self.batch_size = self.hp.batch_size
+        self.refine_batch_size = self.hp.refine_batch_size
 
         self.hp_candidates = hp_candidates
 
@@ -115,22 +128,13 @@ class PowerLawSurrogate:
         self.logger = logger
 
         # with what percentage configurations will be taken randomly instead of being sampled from the model
-        self.fraction_random_configs = 0.1
+        self.fraction_random_configs = self.hp.fraction_random_configs
         # self.iteration_probabilities = np.random.rand(self.total_budget)
-
-        # the keys will be hyperparameter indices while the value
-        # will be a list with all the budgets evaluated for examples
-        # and with all performances for the performances
-        self.examples = dict()
-        self.performances = dict()
 
         self.max_benchmark_epochs = max_benchmark_epochs
         self.ensemble_size = ensemble_size
-        self.nr_epochs = nr_epochs
-        if gv.IS_DYHPO:
-            self.refine_nr_epochs = 50
-        else:
-            self.refine_nr_epochs = 20
+        self.nr_epochs = self.hp.nr_epochs
+        self.refine_nr_epochs = self.hp.refine_nr_epochs
         self.fantasize_step = fantasize_step
 
         self.pretrain = pretrain
@@ -171,7 +175,7 @@ class PowerLawSurrogate:
 
         # the number of initial points for which we will retrain fully from scratch
         # This is basically equal to the dimensionality of the search space + 1.
-        self.initial_full_training_trials = 10
+        self.initial_full_training_trials = self.hp.initial_full_training_trials
 
         # a flag if the surrogate should be trained
         self.train = True
@@ -202,75 +206,36 @@ class PowerLawSurrogate:
 
         os.makedirs(self.checkpoint_path, exist_ok=True)
 
-        self.cnn_kernel_size = 3  # TODO: get this from dyhpo model hyperparameters
+        self.history_manager = HistoryManager(
+            hp_candidates=self.hp_candidates,
+            max_benchmark_epochs=max_benchmark_epochs,
+            fill_value=self.fill_value,
+            fantasize_step=self.fantasize_step,  # TODO: remove this dependency
+        )
 
-    def _prepare_dataset(self):  # -> TabularDataset:
-        """This method is called to prepare the necessary training dataset
-        for training a model.
-
-        Returns:
-            train_dataset: A dataset consisting of examples, labels, budgets
-                and learning curves.
-        """
-        train_examples, train_labels, train_budgets, train_curves = self.history_configurations()
-        if gv.IS_DYHPO:
-            train_curves = self.patch_curves_to_same_length_dyhpo(train_curves)
-        else:
-            train_curves = self.prepare_training_curves(train_budgets, train_curves)
-        train_examples = np.array(train_examples, dtype=np.single)
-        train_labels = np.array(train_labels, dtype=np.single)
-        train_budgets = np.array(train_budgets, dtype=np.single)
-
-        # scale budgets to [0, 1]
-        train_budgets = train_budgets / self.max_benchmark_epochs
-
-        if gv.IS_DYHPO:
-            train_examples = torch.tensor(train_examples)
-            train_labels = torch.tensor(train_labels)
-            train_budgets = torch.tensor(train_budgets)
-            train_curves = torch.tensor(train_curves)
-            train_dataset = {
-                'X_train': train_examples,
-                'train_budgets': train_budgets,
-                'train_curves': train_curves,
-                'y_train': train_labels,
+    def get_default_hp(self, model_type):
+        if model_type == 'power_law':
+            hp = {
+                'nr_epochs': 250,
+                'refine_nr_epochs': 20,
+                'batch_size': 64,
+                'refine_batch_size': 64,
+                'fraction_random_configs': 0.1,
+                'initial_full_training_trials': 10,
+            }
+        elif model_type == 'dyhpo':
+            hp = {
+                'nr_epochs': 1000,
+                'refine_nr_epochs': 50,
+                'fraction_random_configs': 0.1,
+                'initial_full_training_trials': 10,
+                # TODO: remove not required hp
+                'batch_size': 64,
+                'refine_batch_size': 64,
             }
         else:
-            train_dataset = TabularDataset(
-                train_examples,
-                train_labels,
-                train_budgets,
-                train_curves,
-            )
-
-        return train_dataset
-
-    @staticmethod
-    def patch_curves_to_same_length_dyhpo(curves):
-        """
-        Patch the given curves to the same length.
-
-        Finds the maximum curve length and patches all
-        other curves that are shorter in length with zeroes.
-
-        Args:
-            curves: The given hyperparameter curves.
-
-        Returns:
-            curves: The updated array where the learning
-                curves are of the same length.
-        """
-        max_curve_length = 0
-        for curve in curves:
-            if len(curve) > max_curve_length:
-                max_curve_length = len(curve)
-
-        for curve in curves:
-            difference = max_curve_length - len(curve)
-            if difference > 0:
-                curve.extend([0.0] * difference)
-
-        return curves
+            raise NotImplementedError
+        return hp
 
     def _train_surrogate(self, pretrain: bool = False, should_refine: bool = False,
                          should_weight_last_sample: bool = False, load_checkpoint: bool = False):
@@ -288,39 +253,13 @@ class PowerLawSurrogate:
         self.iterations_counter += 1
         self.logger.info(f'Iteration number: {self.iterations_counter}')
 
-        train_dataset = self._prepare_dataset()
+        train_dataset = self.history_manager.prepare_dataset()
 
         if pretrain:
             should_refine = True,
             should_weight_last_sample = False
 
-        last_sample = None
-        if should_weight_last_sample:
-            newp_index, newp_budget, newp_performance, newp_curve = self.last_point
-            new_example = np.array([self.hp_candidates[newp_index]], dtype=np.single)
-            newp_missing_values = self.prepare_missing_values_channel([newp_budget])
-            newp_budget = np.array([newp_budget], dtype=np.single) / self.max_benchmark_epochs
-            newp_performance = np.array([newp_performance], dtype=np.single)
-            modified_curve = deepcopy(newp_curve)
-
-            difference = self.max_benchmark_epochs - len(modified_curve) - 1
-            if difference > 0:
-                modified_curve.extend([modified_curve[-1] if self.fill_value == 'last' else 0] * difference)
-
-            modified_curve = np.array([modified_curve], dtype=np.single)
-            newp_missing_values = np.array(newp_missing_values, dtype=np.single)
-
-            # add depth dimension to the train_curves array and missing_value_matrix
-            modified_curve = np.expand_dims(modified_curve, 1)
-            newp_missing_values = np.expand_dims(newp_missing_values, 1)
-            modified_curve = np.concatenate((modified_curve, newp_missing_values), axis=1)
-
-            new_example = torch.tensor(new_example, device=self.dev)
-            newp_budget = torch.tensor(newp_budget, device=self.dev)
-            newp_performance = torch.tensor(newp_performance, device=self.dev)
-            modified_curve = torch.tensor(modified_curve, device=self.dev)
-
-            last_sample = (new_example, newp_performance, newp_budget, modified_curve)
+        last_sample = self.history_manager.get_last_sample() if should_weight_last_sample else None
 
         if should_refine:
             nr_epochs = self.refine_nr_epochs
@@ -387,9 +326,9 @@ class PowerLawSurrogate:
         # scale budgets to [0, 1]
         budgets = np.array(budgets, dtype=np.single)
         if gv.IS_DYHPO:
-            hp_curves = self.patch_curves_to_same_length_dyhpo(hp_curves)
+            hp_curves = self.history_manager.patch_curves_to_same_length_dyhpo(hp_curves)
         else:
-            hp_curves = self.prepare_training_curves(real_budgets, hp_curves)
+            hp_curves = self.history_manager.prepare_training_curves(real_budgets, hp_curves)
         budgets = budgets / self.max_benchmark_epochs
         real_budgets = np.array(real_budgets, dtype=np.single)
         configurations = np.array(configurations, dtype=np.single)
@@ -400,7 +339,7 @@ class PowerLawSurrogate:
         network_real_budgets = torch.tensor(real_budgets / self.max_benchmark_epochs, device=self.dev)
 
         if gv.IS_DYHPO:
-            train_data = self._prepare_dataset()
+            train_data = self.history_manager.prepare_dataset()
             test_data = {
                 'X_test': configurations,
                 'test_budgets': network_real_budgets,
@@ -459,8 +398,8 @@ class PowerLawSurrogate:
 
             # decide for what budget we will evaluate the most
             # promising hyperparameter configuration next.
-            if suggested_hp_index in self.examples:
-                evaluated_budgets = self.examples[suggested_hp_index]
+            evaluated_budgets = self.history_manager.get_evaluated_budgets(suggested_hp_index)
+            if len(evaluated_budgets) != 0:
                 max_budget = max(evaluated_budgets)
                 budget = max_budget + self.fantasize_step
                 # this would only trigger if fantasize_step is bigger than 1
@@ -514,10 +453,12 @@ class PowerLawSurrogate:
                 hp_curve = np.subtract([self.max_value] * len(hp_curve), hp_curve)
                 hp_curve = hp_curve.tolist()
 
-        best_curve_value = min(hp_curve)
-        # TODO: check if arange should start with 1 oe zero
-        self.examples[hp_index] = np.arange(1, b + 1)
-        self.performances[hp_index] = hp_curve
+        if gv.IS_DYHPO:
+            best_curve_value = max(hp_curve)
+        else:
+            best_curve_value = min(hp_curve)
+
+        self.history_manager.add(hp_index, b, hp_curve)
 
         if (self.best_value_observed > best_curve_value and not gv.IS_DYHPO) or \
             (self.best_value_observed < best_curve_value and gv.IS_DYHPO):
@@ -527,23 +468,17 @@ class PowerLawSurrogate:
                              f'{1 - best_curve_value if not self.minimization else best_curve_value}')
         else:
             self.no_improvement_patience += 1
-            if self.no_improvement_patience == self.no_improvement_threshold:
+            if self.no_improvement_patience >= self.no_improvement_threshold:
                 self.train = True
                 self.no_improvement_patience = 0
                 self.logger.info(
                     'No improvement in the incumbent value threshold reached, '
                     'restarting training from scratch'
                 )
-
-        initial_empty_value = self.get_mean_initial_value() if self.fill_value == 'last' else 0
+        self.logger.debug(f"no_improvement_patience {self.no_improvement_patience}")
         if self.initial_random_index >= len(self.rand_init_conf_indices):
-            performance = self.performances[hp_index]
-            self.last_point = (
-                hp_index, b, performance[b - 1], performance[0:b - 1] if b > 1 else [initial_empty_value])
 
             if self.train:
-                # delete the previously stored models
-                self.models = []
                 if self.pretrain:
                     # TODO Load the pregiven weights.
                     pass
@@ -595,78 +530,11 @@ class PowerLawSurrogate:
                 budgets they have been evaluated and their corresponding performance
                 curves.
         """
-        hp_indices = []
-        hp_budgets = []
-        hp_curves = []
-        real_budgets = []
-        initial_empty_value = self.get_mean_initial_value() if self.fill_value == 'last' else 0
 
-        for hp_index in range(0, self.hp_candidates.shape[0]):
-
-            if hp_index in self.examples:
-                budgets = self.examples[hp_index]
-                # Take the max budget evaluated for a certain hpc
-                max_budget = budgets[-1]
-                if max_budget == self.max_benchmark_epochs:
-                    continue
-                if gv.IS_DYHPO:
-                    real_budgets.append(max_budget + self.fantasize_step)
-                else:
-                    real_budgets.append(max_budget)
-                learning_curve = self.performances[hp_index]
-
-                hp_curve = learning_curve[:max_budget - 1] if max_budget > 1 else [initial_empty_value]
-                if gv.IS_DYHPO:
-                    # if the curve is shorter than the length of the kernel size,
-                    # pad it with zeros
-                    difference_curve_length = self.cnn_kernel_size - len(hp_curve)
-                    if difference_curve_length > 0:
-                        hp_curve.extend([0.0] * difference_curve_length)
-            else:
-                real_budgets.append(self.fantasize_step)
-                hp_curve = [initial_empty_value]
-
-            hp_indices.append(hp_index)
-            hp_budgets.append(self.max_benchmark_epochs)
-            hp_curves.append(hp_curve)
-
+        hp_indices, hp_budgets, real_budgets, hp_curves = self.history_manager.generate_candidate_configurations()
         configurations = self.prepare_examples(hp_indices)
 
         return configurations, hp_indices, hp_budgets, real_budgets, hp_curves
-
-    def history_configurations(self) -> Tuple[List, List, List, List]:
-        """
-        Generate the configurations, labels, budgets and curves
-        based on the history of evaluated configurations.
-
-        Returns:
-            (train_examples, train_labels, train_budgets, train_curves): Tuple
-                A tuple of examples, labels and budgets for the
-                configurations evaluated so far.
-        """
-        train_examples = []
-        train_labels = []
-        train_budgets = []
-        train_curves = []
-        initial_empty_value = self.get_mean_initial_value() if self.fill_value == 'last' else 0
-
-        for hp_index in self.examples:
-            budgets = self.examples[hp_index]
-            performances = self.performances[hp_index]
-            example = self.hp_candidates[hp_index]
-
-            for budget in budgets:
-                train_examples.append(example)
-                train_budgets.append(budget)
-                train_labels.append(performances[budget - 1])
-                train_curve = performances[:budget - 1] if budget > 1 else [initial_empty_value]
-                if gv.IS_DYHPO:
-                    difference_curve_length = self.cnn_kernel_size - len(train_curve)
-                    if difference_curve_length > 0:
-                        train_curve.extend([0.0] * difference_curve_length)
-                train_curves.append(train_curve)
-
-        return train_examples, train_labels, train_budgets, train_curves
 
     @staticmethod
     def acq(
@@ -832,7 +700,7 @@ class PowerLawSurrogate:
         index = 0
         for mean_value, std in zip(mean_predictions, mean_stds):
             budget = int(budgets[index])
-            best_value = self.calculate_fidelity_ymax_dyhpo(budget)
+            best_value = self.history_manager.calculate_fidelity_ymax_dyhpo(budget)
             acq_value = self.acq_dyhpo(best_value, mean_value, std, acq_fc='ei')
             if acq_value > highest_acq_value:
                 highest_acq_value = acq_value
@@ -841,167 +709,3 @@ class PowerLawSurrogate:
             index += 1
 
         return best_index
-
-    def calculate_fidelity_ymax(self, fidelity: int) -> float:
-        """Calculate the incumbent for a certain fidelity level.
-
-        Args:
-            fidelity: int
-                The given budget fidelity.
-
-        Returns:
-            best_value: float
-                The incumbent value for a certain fidelity level.
-        """
-        config_values = []
-        for example_index in self.examples.keys():
-            try:
-                performance = self.performances[example_index][fidelity - 1]
-            except IndexError:
-                performance = self.performances[example_index][-1]
-            config_values.append(performance)
-
-        # lowest error corresponds to best value
-        best_value = min(config_values)
-
-        return best_value
-
-    def calculate_fidelity_ymax_dyhpo(self, fidelity: int):
-        """
-        Find ymax for a given fidelity level.
-
-        If there are hyperparameters evaluated for that fidelity
-        take the maximum from their values. Otherwise, take
-        the maximum from all previous fidelity levels for the
-        hyperparameters that we have evaluated.
-
-        Args:
-            fidelity: The fidelity of the hyperparameter
-                configuration.
-
-        Returns:
-            best_value: The best value seen so far for the
-                given fidelity.
-        """
-        exact_fidelity_config_values = []
-        lower_fidelity_config_values = []
-
-        for example_index in self.examples.keys():
-            try:
-                performance = self.performances[example_index][fidelity - 1]
-                exact_fidelity_config_values.append(performance)
-            except IndexError:
-                learning_curve = self.performances[example_index]
-                # The hyperparameter was not evaluated until fidelity, or more.
-                # Take the maximum value from the curve.
-                lower_fidelity_config_values.append(max(learning_curve))
-
-        if len(exact_fidelity_config_values) > 0:
-            # lowest error corresponds to best value
-            best_value = max(exact_fidelity_config_values)
-        else:
-            best_value = max(lower_fidelity_config_values)
-
-        return best_value
-
-    def patch_curves_to_same_length(self, curves: List):
-        """
-        Patch the given curves to the same length.
-
-        Finds the maximum curve length and patches all
-        other curves that are shorter with zeroes.
-
-        Args:
-            curves: List
-                The hyperparameter curves.
-        """
-        for curve in curves:
-            difference = self.max_benchmark_epochs - len(curve) - 1
-            if difference > 0:
-                fill_value = [curve[-1]] if self.fill_value == 'last' else [0]
-                curve.extend(fill_value * difference)
-
-    def prepare_missing_values_channel(self, budgets: List) -> List:
-        """Prepare an additional channel for learning curves.
-
-        The additional channel will represent an existing learning
-        curve value with a 1 and a missing learning curve value with
-        a 0.
-
-        Args:
-            budgets: List
-                A list of budgets for every training point.
-
-        Returns:
-            missing_value_curves: List
-                A list of curves representing existing or missing
-                values for the training curves of the training points.
-        """
-        missing_value_curves = []
-
-        for i in range(len(budgets)):
-            budget = budgets[i]
-            budget = budget - 1
-            budget = int(budget)
-
-            if budget > 0:
-                example_curve = [1] * budget
-            else:
-                example_curve = []
-
-            difference_in_curve = self.max_benchmark_epochs - len(example_curve) - 1
-            if difference_in_curve > 0:
-                example_curve.extend([0] * difference_in_curve)
-            missing_value_curves.append(example_curve)
-
-        return missing_value_curves
-
-    def get_mean_initial_value(self):
-        """Returns the mean initial value
-        for all hyperparameter configurations in the history so far.
-
-        Returns:
-            mean_initial_value: float
-                Mean initial value for all hyperparameter configurations
-                observed.
-        """
-        first_values = []
-        for performance_curve in self.performances.values():
-            first_values.append(performance_curve[0])
-
-        mean_initial_value = np.mean(first_values)
-
-        return mean_initial_value
-
-    def prepare_training_curves(
-        self,
-        train_budgets: List[int],
-        train_curves: List[float]
-    ) -> np.ndarray:
-        """Prepare the configuration performance curves for training.
-
-        For every configuration training curve, add an extra dimension
-        regarding the missing values, as well as extend the curve to have
-        a fixed uniform length for all.
-
-        Args:
-            train_budgets: List
-                A list of the budgets for all training points.
-            train_curves: List
-                A list of curves that pertain to every training point.
-
-        Returns:
-            train_curves: np.ndarray
-                The transformed training curves.
-        """
-        missing_value_matrix = self.prepare_missing_values_channel(train_budgets)
-        self.patch_curves_to_same_length(train_curves)
-        train_curves = np.array(train_curves, dtype=np.single)
-        missing_value_matrix = np.array(missing_value_matrix, dtype=np.single)
-
-        # add depth dimension to the train_curves array and missing_value_matrix
-        train_curves = np.expand_dims(train_curves, 1)
-        missing_value_matrix = np.expand_dims(missing_value_matrix, 1)
-        train_curves = np.concatenate((train_curves, missing_value_matrix), axis=1)
-
-        return train_curves

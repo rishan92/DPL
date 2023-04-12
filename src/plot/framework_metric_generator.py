@@ -232,6 +232,8 @@ class FrameworkMetricsGenerator:
                 tag = tag.strip()
                 if tag not in self.tag_names:
                     self.tag_names.add(tag)
+                if tag == "epochs":
+                    assert y[0] == 1, "Regret calculation not implemented for epochs not equal to one."
                 column = pd.Series(y, name=(tag, benchmark_name, dataset_name, method_name, repeat_nr))
                 column_list.append(column)
 

@@ -4,6 +4,7 @@ import os
 import time
 import numpy as np
 import pandas as pd
+import sklearn
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
@@ -18,8 +19,6 @@ from src.surrogate_models.dehb.interface import DEHBOptimizer
 from src.surrogate_models.random_search import RandomOptimizer
 from src.surrogate_models.hpo_method import DyHPOAlgorithm
 import global_variables as gv
-
-import sklearn
 
 
 # if warnings.catch_warnings():
@@ -114,6 +113,7 @@ class Framework:
             gv.IS_DYHPO = (args.surrogate_name == 'dyhpo')
             self.surrogate = surrogate_types[args.surrogate_name](
                 self.hp_candidates,
+                surrogate_name=args.surrogate_name,
                 seed=seed,
                 max_benchmark_epochs=self.benchmark.max_budget,
                 ensemble_size=args.ensemble_size,
