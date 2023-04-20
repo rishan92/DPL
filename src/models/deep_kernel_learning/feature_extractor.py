@@ -27,7 +27,7 @@ class FeatureExtractor(nn.Module):
         self.act_func = nn.LeakyReLU()
         # adding one to the dimensionality of the initial input features
         # for the concatenation with the budget.
-        initial_features = self.hp.nr_initial_features + 1
+        initial_features = self.hp.nr_features + 1
         self.fc1 = nn.Linear(initial_features, self.hp.layer1_units)
         self.bn1 = nn.BatchNorm1d(self.hp.layer1_units)
         for i in range(2, self.nr_layers):

@@ -1,4 +1,5 @@
 import argparse
+import json
 import os
 import sys
 import numpy as np
@@ -82,6 +83,18 @@ def main():
         default='./output',
         help='The directory where the project output files will be stored.',
     )
+    parser.add_argument(
+        '--config_file',
+        type=str,
+        default=None,
+        help='The file where the project configuration is stored.',
+    )
+    parser.add_argument(
+        '--config',
+        type=str,
+        default=None,
+        help='configuration in json syntax',
+    )
 
     args = parser.parse_args()
     seeds = np.arange(10)
@@ -97,7 +110,14 @@ def main():
     logger.add(Path(f'./logs/power_law_surrogate_{args.dataset_name}_{seed}.log'), mode='w',
                format="{level} | {message}")
 
-    framework = Framework(args, seed)
+    configs = {}
+    if args.config_file:
+        configs = json.loads(args.config_file)
+    if args.config:
+        arg_configs = json.loads(args.config)
+        configs = {**configs, **arg_configs}
+
+    framework = Framework(args=args, seed=seed, configs=configs)
     framework.run()
 
 

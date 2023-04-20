@@ -8,6 +8,7 @@ import random
 from scipy.stats import norm
 import torch
 from types import SimpleNamespace
+import wandb
 
 from src.dataset.tabular_dataset import TabularDataset
 from src.models.power_law.ensemble_model import EnsembleModel
@@ -15,19 +16,23 @@ from src.data_loader.surrogate_data_loader import SurrogateDataLoader
 from src.models.deep_kernel_learning.dyhpo_model import DyHPOModel
 import global_variables as gv
 from src.history.history_manager import HistoryManager
+from src.plot.wandb_logger import WANDBLogger
 
 
 class PowerLawSurrogate:
+    model_types = {
+        'power_law': EnsembleModel,
+        'dyhpo': DyHPOModel,
+    }
+    meta = None
 
     def __init__(
         self,
         hp_candidates: np.ndarray,
         surrogate_name: str = 'power_law',
-        surrogate_configs: dict = None,
         seed: int = 11,
         max_benchmark_epochs: int = 52,
         ensemble_size: int = 5,
-        nr_epochs: int = 250,
         fantasize_step: int = 1,
         minimization: bool = True,
         total_budget: int = 1000,
@@ -87,18 +92,11 @@ class PowerLawSurrogate:
         torch.backends.cudnn.benchmark = False
 
         self.model_type = surrogate_name
-        if self.model_type == 'power_law':
-            self.model_class = EnsembleModel
-        elif self.model_type == 'dyhpo':
-            self.model_class = DyHPOModel
+        self.model_class = PowerLawSurrogate.model_types[surrogate_name]
         self.model = None
 
-        self.hp = self.get_default_hp(self.model_type)
-        if surrogate_configs is not None:
-            # fill hyperparameters not given in surrogate_configs with default hyperparameter values.
-            self.hp = {**self.hp, **surrogate_configs}
-        # make hyperparameters callable by dot notation
-        self.hp = SimpleNamespace(**self.hp)
+        assert PowerLawSurrogate.meta is not None, "Meta parameters are not set"
+        self.hp = PowerLawSurrogate.meta
 
         self.total_budget = total_budget
         self.fill_value = fill_value
@@ -117,9 +115,6 @@ class PowerLawSurrogate:
         else:
             self.dev = torch.device(device)
 
-        self.batch_size = self.hp.batch_size
-        self.refine_batch_size = self.hp.refine_batch_size
-
         self.hp_candidates = hp_candidates
 
         self.minimization = minimization
@@ -132,9 +127,6 @@ class PowerLawSurrogate:
         # self.iteration_probabilities = np.random.rand(self.total_budget)
 
         self.max_benchmark_epochs = max_benchmark_epochs
-        self.ensemble_size = ensemble_size
-        self.nr_epochs = self.hp.nr_epochs
-        self.refine_nr_epochs = self.hp.refine_nr_epochs
         self.fantasize_step = fantasize_step
 
         self.pretrain = pretrain
@@ -143,10 +135,7 @@ class PowerLawSurrogate:
         conf_individual_budget = 1
         init_conf_indices = np.random.choice(self.hp_candidates.shape[0], initial_configurations_nr, replace=False)
 
-        if gv.IS_DYHPO:
-            init_budgets = [conf_individual_budget] * initial_configurations_nr
-        else:
-            init_budgets = [i for i in range(1, conf_individual_budget + 1)]
+        init_budgets = [i for i in range(1, conf_individual_budget + 1)]
 
         self.rand_init_conf_indices = []
         self.rand_init_budgets = []
@@ -213,32 +202,29 @@ class PowerLawSurrogate:
             fantasize_step=self.fantasize_step,  # TODO: remove this dependency
         )
 
-    def get_default_hp(self, model_type):
-        if model_type == 'power_law':
-            hp = {
-                'nr_epochs': 250,
-                'refine_nr_epochs': 20,
-                'batch_size': 64,
-                'refine_batch_size': 64,
-                'fraction_random_configs': 0.1,
-                'initial_full_training_trials': 10,
-            }
-        elif model_type == 'dyhpo':
-            hp = {
-                'nr_epochs': 1000,
-                'refine_nr_epochs': 50,
-                'fraction_random_configs': 0.1,
-                'initial_full_training_trials': 10,
-                # TODO: remove not required hp
-                'batch_size': 64,
-                'refine_batch_size': 64,
-            }
-        else:
-            raise NotImplementedError
+    def get_meta(self):
+        return vars(self.hp)
+
+    @staticmethod
+    def get_default_meta():
+        hp = {
+            'fraction_random_configs': 0.1,
+            'initial_full_training_trials': 10,
+        }
         return hp
 
-    def _train_surrogate(self, pretrain: bool = False, should_refine: bool = False,
-                         should_weight_last_sample: bool = False, load_checkpoint: bool = False):
+    @classmethod
+    def set_meta(cls, surrogate_name, config=None):
+        config = {} if config is None else config
+        default_meta = cls.get_default_meta()
+        meta = {**default_meta, **config}
+        model_class = cls.model_types[surrogate_name]
+        model_config = model_class.set_meta(config.get("model", None))
+        meta['model'] = model_config
+        cls.meta = SimpleNamespace(**meta)
+        return meta
+
+    def _train_surrogate(self, pretrain: bool = False, should_refine: bool = False, load_checkpoint: bool = False):
         """Train the surrogate model.
 
         Trains all the models of the ensemble
@@ -253,61 +239,25 @@ class PowerLawSurrogate:
         self.iterations_counter += 1
         self.logger.info(f'Iteration number: {self.iterations_counter}')
 
-        train_dataset = self.history_manager.prepare_dataset()
+        train_dataset = self.history_manager.prepare_dataset(curve_size_mode=self.model_class.curve_size_mode)
 
         if pretrain:
             should_refine = True,
             should_weight_last_sample = False
 
-        last_sample = self.history_manager.get_last_sample() if should_weight_last_sample else None
+        last_sample = self.history_manager.get_last_sample()
 
         if should_refine:
-            nr_epochs = self.refine_nr_epochs
-            batch_size = self.refine_batch_size
-            if gv.IS_DYHPO:
-                self.model.train()
-                self.model.train_loop(nr_epochs=nr_epochs, data=train_dataset)
-            else:
-                # make the training dataset here
-                train_dataloader = SurrogateDataLoader(
-                    dataset=train_dataset, batch_size=batch_size, shuffle=True, seed=self.seed, dev=self.dev,
-                    should_weight_last_sample=should_weight_last_sample, last_sample=last_sample,
-                    # drop_last=train_dataset.X.shape[0] > batch_size and train_dataset.X.shape[0] % batch_size < 2
-                )
-                self.model.train()
-                self.model.train_loop(nr_epochs=nr_epochs, train_dataloader=train_dataloader, reset_optimizer=True)
+            self.model.train_loop(train_dataset=train_dataset, should_refine=should_refine, reset_optimizer=True,
+                                  last_sample=last_sample)
         else:
-            nr_epochs = self.nr_epochs
-            batch_size = self.batch_size
-            if gv.IS_DYHPO:
-                model_config = {'seed': self.seed}
-                self.model = self.model_class(
-                    nr_features=train_dataset['X_train'].shape[1],
-                    surrogate_configs=model_config,
-                    checkpoint_path=self.checkpoint_path
-                )
-                self.model.to(self.dev)
-
-                self.model.train()
-                self.model.train_loop(nr_epochs=nr_epochs, data=train_dataset)
-            else:
-                # make the training dataset here
-                train_dataloader = SurrogateDataLoader(
-                    dataset=train_dataset, batch_size=batch_size, shuffle=True, seed=self.seed, dev=self.dev
-                )
-
-                model_config = {'seed': self.seed}
-                self.model = self.model_class(
-                    nr_features=train_dataset.X.shape[1],
-                    train_dataloader=train_dataloader,
-                    surrogate_configs=model_config
-                )
-                self.model.to(self.dev)
-
-                self.model.train()
-                self.model.train_loop(nr_epochs=nr_epochs)
-
-        return self.model
+            self.model = self.model_class(
+                nr_features=train_dataset.X.shape[1],
+                checkpoint_path=self.checkpoint_path,
+                seed=self.seed
+            )
+            self.model.to(self.dev)
+            self.model.train_loop(train_dataset=train_dataset)
 
     def _predict(self) -> Tuple[np.ndarray, np.ndarray, List, np.ndarray]:
         """
@@ -325,10 +275,6 @@ class PowerLawSurrogate:
         configurations, hp_indices, budgets, real_budgets, hp_curves = self.generate_candidate_configurations()
         # scale budgets to [0, 1]
         budgets = np.array(budgets, dtype=np.single)
-        if gv.IS_DYHPO:
-            hp_curves = self.history_manager.patch_curves_to_same_length_dyhpo(hp_curves)
-        else:
-            hp_curves = self.history_manager.prepare_training_curves(real_budgets, hp_curves)
         budgets = budgets / self.max_benchmark_epochs
         real_budgets = np.array(real_budgets, dtype=np.single)
         configurations = np.array(configurations, dtype=np.single)
@@ -336,23 +282,19 @@ class PowerLawSurrogate:
         configurations = torch.tensor(configurations, device=self.dev)
         budgets = torch.tensor(budgets, device=self.dev)
         hp_curves = torch.tensor(hp_curves, device=self.dev)
-        network_real_budgets = torch.tensor(real_budgets / self.max_benchmark_epochs, device=self.dev)
 
         if gv.IS_DYHPO:
-            train_data = self.history_manager.prepare_dataset()
-            test_data = {
-                'X_test': configurations,
-                'test_budgets': network_real_budgets,
-                'test_curves': hp_curves,
-            }
-
-            mean_predictions, std_predictions = self.model.predict_pipeline(train_data, test_data)
+            train_data = self.history_manager.prepare_dataset(curve_size_mode=self.model_class.curve_size_mode)
         else:
-            self.model.eval()
-            predictions = self.model((configurations, budgets, network_real_budgets, hp_curves))
+            train_data = None
 
-            mean_predictions = predictions[0]
-            std_predictions = predictions[1]
+        test_data = TabularDataset(
+            X=configurations,
+            budgets=budgets,
+            curves=hp_curves,
+        )
+
+        mean_predictions, std_predictions = self.model.predict(test_data=test_data, train_data=train_data)
 
         return mean_predictions, std_predictions, hp_indices, real_budgets
 
@@ -430,23 +372,18 @@ class PowerLawSurrogate:
             hp_curve: List
                 The performance of the hyperparameter configuration.
         """
-        if gv.IS_DYHPO:
-            if np.isnan(hp_curve).any():
+        for index, curve_element in enumerate(hp_curve):
+            if np.isnan(curve_element):
                 self.diverged_configs.add(hp_index)
-                return
-        else:
-            for index, curve_element in enumerate(hp_curve):
-                if np.isnan(curve_element):
-                    self.diverged_configs.add(hp_index)
-                    # only use the non-nan part of the curve and the corresponding
-                    # budget to still have the information in the network
-                    hp_curve = hp_curve[0:index + 1]
-                    b = index
-                    break
+                # only use the non-nan part of the curve and the corresponding
+                # budget to still have the information in the network
+                hp_curve = hp_curve[0:index + 1]
+                b = index
+                break
+
         if gv.IS_DYHPO:
             if self.minimization:
-                hp_curve = np.subtract([self.max_value] * len(hp_curve), hp_curve) / (
-                    self.max_value - self.min_value)
+                hp_curve = np.subtract([self.max_value] * len(hp_curve), hp_curve)
                 hp_curve = hp_curve.tolist()
         else:
             if not self.minimization:
@@ -496,10 +433,7 @@ class PowerLawSurrogate:
                         self.train = False
             else:
                 self.refine_counter += 1
-                if gv.IS_DYHPO:
-                    self._train_surrogate(should_refine=True, should_weight_last_sample=False)
-                else:
-                    self._train_surrogate(should_refine=True, should_weight_last_sample=True)
+                self._train_surrogate(should_refine=True)
 
     def prepare_examples(self, hp_indices: List) -> List:
         """
@@ -531,7 +465,10 @@ class PowerLawSurrogate:
                 curves.
         """
 
-        hp_indices, hp_budgets, real_budgets, hp_curves = self.history_manager.generate_candidate_configurations()
+        hp_indices, hp_budgets, real_budgets, hp_curves = self.history_manager.generate_candidate_configurations(
+            predict_mode=self.model_class.predict_mode,
+            curve_size_mode=self.model_class.curve_size_mode
+        )
         configurations = self.prepare_examples(hp_indices)
 
         return configurations, hp_indices, hp_budgets, real_budgets, hp_curves

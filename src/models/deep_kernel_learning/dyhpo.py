@@ -243,10 +243,10 @@ class DyHPO:
             self.save_checkpoint(initial_state)
             self.load_checkpoint()
 
-    def predict_pipeline(
+    def predict(
         self,
-        train_data: Dict[str, torch.Tensor],
         test_data: Dict[str, torch.Tensor],
+        train_data: Dict[str, torch.Tensor] = None,
     ) -> Tuple[np.ndarray, np.ndarray]:
         """
 
@@ -267,12 +267,13 @@ class DyHPO:
         check_seed_np = np.sum(np.random.get_state()[1])
         check_seed_random = np.sum(random.getstate()[1])
         with torch.no_grad():  # gpytorch.settings.fast_pred_var():
-            projected_train_x = self.feature_extractor(
-                train_data['X_train'],
-                train_data['train_budgets'],
-                train_data['train_curves'],
-            )
-            self.model.set_train_data(inputs=projected_train_x, targets=train_data['y_train'], strict=False)
+            if train_data is not None:
+                projected_train_x = self.feature_extractor(
+                    train_data['X_train'],
+                    train_data['train_budgets'],
+                    train_data['train_curves'],
+                )
+                self.model.set_train_data(inputs=projected_train_x, targets=train_data['y_train'], strict=False)
             projected_test_x = self.feature_extractor(
                 test_data['X_test'],
                 test_data['test_budgets'],

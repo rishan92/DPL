@@ -9,6 +9,9 @@ from sklearn.preprocessing import MinMaxScaler
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import FunctionTransformer, OneHotEncoder
+import wandb
+import hashlib
+from typing import List, Tuple, Dict, Optional, Any, Type
 
 from src.benchmarks.lcbench import LCBench
 from src.benchmarks.taskset import TaskSet
@@ -19,6 +22,7 @@ from src.surrogate_models.dehb.interface import DEHBOptimizer
 from src.surrogate_models.random_search import RandomOptimizer
 from src.surrogate_models.hpo_method import DyHPOAlgorithm
 import global_variables as gv
+import subprocess
 
 
 # if warnings.catch_warnings():
@@ -27,11 +31,27 @@ import global_variables as gv
 
 
 class Framework:
+    surrogate_types = {
+        'power_law': PowerLawSurrogate,
+        'dyhpo': PowerLawSurrogate,
+        'asha': AHBOptimizer,
+        'dehb': DEHBOptimizer,
+        # 'dragonfly': DragonFlyOptimizer,
+        'random': RandomOptimizer,
+    }
+
+    benchmark_types = {
+        'lcbench': LCBench,
+        'taskset': TaskSet,
+        'lcbench_mini': LCBench,
+        # 'pd1': PD1,
+    }
 
     def __init__(
         self,
         args: argparse.Namespace,
         seed: int,
+        configs: Dict[str, Any] = None
     ):
         """
         Args:
@@ -45,7 +65,7 @@ class Framework:
         if args.benchmark_name == 'lcbench':
             benchmark_extension = os.path.join('lc_bench', 'results', 'data_2k.json')
         elif args.benchmark_name == 'lcbench_mini':
-            benchmark_extension = os.path.join('lc_bench', 'results', 'lcbench_credit-g.json')
+            benchmark_extension = os.path.join('lc_bench', 'results', 'lcbench_airlines.json')
         elif args.benchmark_name == 'taskset':
             benchmark_extension = os.path.join('data', 'taskset')
         elif args.benchmark_name == 'pd1':
@@ -58,21 +78,8 @@ class Framework:
             benchmark_extension,
         )
 
-        benchmark_types = {
-            'lcbench': LCBench,
-            'taskset': TaskSet,
-            'lcbench_mini': LCBench,
-            # 'pd1': PD1,
-        }
-
-        surrogate_types = {
-            'power_law': PowerLawSurrogate,
-            'dyhpo': PowerLawSurrogate,
-            'asha': AHBOptimizer,
-            'dehb': DEHBOptimizer,
-            # 'dragonfly': DragonFlyOptimizer,
-            'random': RandomOptimizer,
-        }
+        benchmark_types = Framework.benchmark_types
+        surrogate_types = Framework.surrogate_types
 
         disable_preprocessing = {
             'dehb',
@@ -92,10 +99,28 @@ class Framework:
         self.hp_names = self.benchmark.hp_names
         self.minimization_metric = self.benchmark.minimization_metric
         self.info_dict = dict()
+
+        # set up wandb
+        commit_hash = subprocess.check_output(["git", "rev-parse", "HEAD"]).decode("ascii").strip()
+        framework_meta = Framework.set_meta(args.surrogate_name, configs)
+        serialized_dict = json.dumps(framework_meta, sort_keys=True, ensure_ascii=True).encode('utf-8')
+        config_hash = hashlib.md5(serialized_dict).hexdigest()
+        local_name = "local" if gv.IS_DEBUG else "nemo"
+        group_name = f"{args.benchmark_name}_{args.surrogate_name}_{commit_hash}_{config_hash}_{local_name}"
+        wandb.init(
+            project="power_law_hpo",
+            config=framework_meta,
+            group=group_name,
+            tags=[args.benchmark_name, args.dataset_name, args.surrogate_name, config_hash, commit_hash,
+                  str(args.index), local_name],
+            job_type=args.dataset_name,
+            name=f"{args.dataset_name}_{args.index}",
+        )
+
         self.result_dir = os.path.join(
             args.output_dir,
             args.benchmark_name,
-            args.surrogate_name,
+            f"{args.surrogate_name}_{commit_hash}_{config_hash}_{local_name}",
         )
         os.makedirs(self.result_dir, exist_ok=True)
 
@@ -116,8 +141,6 @@ class Framework:
                 surrogate_name=args.surrogate_name,
                 seed=seed,
                 max_benchmark_epochs=self.benchmark.max_budget,
-                ensemble_size=args.ensemble_size,
-                nr_epochs=args.nr_epochs,
                 fantasize_step=self.fantasize_step,
                 minimization=self.minimization_metric,
                 total_budget=args.budget_limit,
@@ -138,6 +161,12 @@ class Framework:
                 max_nr_trials=args.budget_limit,
                 maximization=not self.benchmark.minimization_metric,
             )
+
+    @classmethod
+    def set_meta(cls, surrogate_name, configs):
+        model_class = cls.surrogate_types[surrogate_name]
+        meta = model_class.set_meta(surrogate_name, configs)
+        return meta
 
     def run(self):
 
@@ -179,7 +208,13 @@ class Framework:
                 surrogate_budget += 1
 
                 if surrogate_budget > self.total_budget:
+                    wandb.finish()
                     exit(0)
+
+                if self.minimization_metric:
+                    regret = best_value - self.min_value
+                else:
+                    regret = self.max_value - best_value
 
                 self.log_info(
                     int(hp_index),
@@ -188,7 +223,18 @@ class Framework:
                     best_value,
                     step_time_duration,
                 )
+                metrics = {
+                    'hpo/hp': int(hp_index),
+                    'hpo/scores': epoch_performance,
+                    'hpo/epochs': epoch,
+                    'hpo/curve': best_value,
+                    'hpo/overhead': step_time_duration,
+                    'hpo/surrogate_budget': surrogate_budget,
+                    'hpo/regret': regret,
+                }
+                wandb.log(metrics)
 
+        wandb.finish()
         exit(0)
 
     def preprocess(self, hp_candidates: np.ndarray) -> np.ndarray:

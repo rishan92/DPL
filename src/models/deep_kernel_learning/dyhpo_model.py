@@ -25,10 +25,9 @@ class DyHPOModel(BasePytorchModule):
     def __init__(
         self,
         nr_features,
-        train_dataloader=None,
-        surrogate_configs=None,
         dataset_name: str = 'unknown',
         checkpoint_path: str = '.',
+        seed=None
     ):
         """
         The constructor for the DyHPO model.
@@ -43,17 +42,15 @@ class DyHPOModel(BasePytorchModule):
             seed: The seed that will be used to store the checkpoint
                 properly.
         """
-        surrogate_configs['nr_initial_features'] = nr_features
-        super().__init__(nr_features=nr_features, surrogate_configs=surrogate_configs)
+        super().__init__(nr_features=nr_features, seed=seed)
         check_seed_torch = torch.random.get_rng_state().sum()
         check_seed_np = np.sum(np.random.get_state()[1])
         check_seed_random = np.sum(random.getstate()[1])
+        self.hp.nr_features = nr_features
         self.feature_extractor = FeatureExtractor(self.hp)
-        self.batch_size = self.hp.batch_size
-        self.nr_epochs = self.hp.nr_epochs
+
         self.early_stopping_patience = self.hp.nr_patience_epochs
-        self.refine_epochs = 50
-        self.seed = self.hp.seed
+        self.seed = seed
         self.model, self.likelihood, self.mll = \
             self.get_model_likelihood_mll(
                 getattr(self.hp, f'layer{self.feature_extractor.nr_layers}_units')
@@ -84,13 +81,8 @@ class DyHPOModel(BasePytorchModule):
             'checkpoint.pth'
         )
 
-    def to(self, dev):
-        self.feature_extractor.to(dev)
-        self.model.to(dev)
-        self.likelihood.to(dev)
-        self.feature_extractor.to(dev)
-
-    def get_default_hp(self) -> Dict[str, Any]:
+    @staticmethod
+    def get_default_meta(**kwargs) -> Dict[str, Any]:
         hp = {
             'nr_layers': 2,
             'layer1_units': 64,
@@ -98,13 +90,29 @@ class DyHPOModel(BasePytorchModule):
             'cnn_nr_channels': 4,
             'cnn_kernel_size': 3,
             'batch_size': 64,
-            'nr_epochs': 1000,
             'nr_patience_epochs': 10,
             'learning_rate': 0.001,
-            'refine_epochs': 50,
-            'seed': 0,
+            'nr_epochs': 1000,
+            'refine_nr_epochs': 50,
+            'predict_mode': 'next_budget',  # 'end_budget'
+            'curve_size_mode': 'variable',  # 'fixed'
         }
         return hp
+
+    def to(self, dev):
+        self.feature_extractor.to(dev)
+        self.model.to(dev)
+        self.likelihood.to(dev)
+
+    def train(self, **kwargs):
+        self.feature_extractor.train(**kwargs)
+        self.model.train(**kwargs)
+        self.likelihood.train(**kwargs)
+
+    def eval(self):
+        self.feature_extractor.eval()
+        self.model.eval()
+        self.likelihood.eval()
 
     def restart_optimization(self):
         """
@@ -147,7 +155,8 @@ class DyHPOModel(BasePytorchModule):
 
         return model, likelihood, mll
 
-    def train_loop(self, nr_epochs: int, data: Dict[str, torch.Tensor], load_checkpoint: bool = False, **kwargs):
+    def train_loop(self, train_dataset, should_refine=False, load_checkpoint: bool = False,
+                   **kwargs):
         """
         Train the surrogate model.
 
@@ -157,7 +166,13 @@ class DyHPOModel(BasePytorchModule):
             load_checkpoint: A flag whether to load the state from a previous checkpoint,
                 or whether to start from scratch.
         """
-        self.set_seed(self.hp.seed)
+        if should_refine:
+            nr_epochs = self.hp.refine_nr_epochs
+        else:
+            nr_epochs = self.hp.nr_epochs
+
+        self.set_seed(self.seed)
+        self.train()
         if load_checkpoint:
             try:
                 self.load_checkpoint()
@@ -165,19 +180,17 @@ class DyHPOModel(BasePytorchModule):
                 self.logger.error(f'No checkpoint file found at: {self.checkpoint_file}'
                                   f'Training the GP from the beginning')
 
-        self.model.train()
-        self.likelihood.train()
-        self.feature_extractor.train()
-
         self.optimizer = torch.optim.Adam([
             {'params': self.model.parameters(), 'lr': self.hp.learning_rate},
             {'params': self.feature_extractor.parameters(), 'lr': self.hp.learning_rate}],
         )
+        model_device = next(self.parameters()).device
+        train_dataset.to(model_device)
 
-        X_train = data['X_train']
-        train_budgets = data['train_budgets']
-        train_curves = data['train_curves']
-        y_train = data['y_train']
+        X_train = train_dataset.X
+        train_budgets = train_dataset.budgets
+        train_curves = train_dataset.curves
+        y_train = train_dataset.Y
 
         initial_state = self.get_state()
         training_errored = False
@@ -240,10 +253,10 @@ class DyHPOModel(BasePytorchModule):
             self.save_checkpoint(initial_state)
             self.load_checkpoint()
 
-    def predict_pipeline(
+    def predict(
         self,
-        train_data: Dict[str, torch.Tensor],
-        test_data: Dict[str, torch.Tensor],
+        test_data,
+        train_data
     ) -> Tuple[np.ndarray, np.ndarray]:
         """
 
@@ -257,23 +270,25 @@ class DyHPOModel(BasePytorchModule):
             means, stds: The means of the predictions for the
                 testing points and the standard deviations.
         """
-        self.model.eval()
-        self.feature_extractor.eval()
-        self.likelihood.eval()
+        model_device = next(self.parameters()).device
+        train_data.to(model_device)
+        test_data.to(model_device)
+
+        self.eval()
         check_seed_torch = torch.random.get_rng_state().sum()
         check_seed_np = np.sum(np.random.get_state()[1])
         check_seed_random = np.sum(random.getstate()[1])
         with torch.no_grad():  # gpytorch.settings.fast_pred_var():
             projected_train_x = self.feature_extractor(
-                train_data['X_train'],
-                train_data['train_budgets'],
-                train_data['train_curves'],
+                train_data.X,
+                train_data.budgets,
+                train_data.curves,
             )
-            self.model.set_train_data(inputs=projected_train_x, targets=train_data['y_train'], strict=False)
+            self.model.set_train_data(inputs=projected_train_x, targets=train_data.Y, strict=False)
             projected_test_x = self.feature_extractor(
-                test_data['X_test'],
-                test_data['test_budgets'],
-                test_data['test_curves'],
+                test_data.X,
+                test_data.budgets,
+                test_data.curves,
             )
             preds = self.likelihood(self.model(projected_test_x))
 

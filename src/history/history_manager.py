@@ -14,6 +14,9 @@ from src.dataset.tabular_dataset import TabularDataset
 
 class HistoryManager:
     def __init__(self, hp_candidates, max_benchmark_epochs, fantasize_step, fill_value='zero'):
+        assert fill_value in ["zero", "last"], "Invalid fill value mode"
+        # assert predict_mode in ["end_budget", "next_budget"], "Invalid predict mode"
+        # assert curve_size_mode in ["fixed", "variable"], "Invalid curve size mode"
         self.hp_candidates = hp_candidates
         self.max_benchmark_epochs = max_benchmark_epochs
         self.fill_value = fill_value
@@ -30,6 +33,9 @@ class HistoryManager:
 
         self.cnn_kernel_size = 3  # TODO: get this from dyhpo model hyperparameters
 
+        self.is_history_modified = True
+        self.cached_train_dataset = None
+
     def get_initial_empty_value(self):
         initial_empty_value = self.get_mean_initial_value() if self.fill_value == 'last' else 0
         return initial_empty_value
@@ -41,6 +47,8 @@ class HistoryManager:
 
         initial_empty_value = self.get_initial_empty_value()
         self.last_point = (hp_index, b, hp_curve[b - 1], hp_curve[0:b - 1] if b > 1 else [initial_empty_value])
+
+        self.is_history_modified = True
 
     def get_evaluated_budgets(self, suggested_hp_index):
         if suggested_hp_index in self.examples:
@@ -76,7 +84,7 @@ class HistoryManager:
         last_sample = (new_example, newp_performance, newp_budget, modified_curve)
         return last_sample
 
-    def history_configurations(self) -> Tuple[List, List, List, List]:
+    def history_configurations(self, curve_size_mode) -> Tuple[List, List, List, List]:
         """
         Generate the configurations, labels, budgets and curves
         based on the history of evaluated configurations.
@@ -90,7 +98,7 @@ class HistoryManager:
         train_labels = []
         train_budgets = []
         train_curves = []
-        initial_empty_value = self.get_mean_initial_value() if self.fill_value == 'last' else 0
+        initial_empty_value = self.get_initial_empty_value()
 
         for hp_index in self.examples:
             budgets = self.examples[hp_index]
@@ -102,15 +110,22 @@ class HistoryManager:
                 train_budgets.append(budget)
                 train_labels.append(performances[budget - 1])
                 train_curve = performances[:budget - 1] if budget > 1 else [initial_empty_value]
-                if gv.IS_DYHPO:
+                if curve_size_mode == "variable":
                     difference_curve_length = self.cnn_kernel_size - len(train_curve)
                     if difference_curve_length > 0:
                         train_curve.extend([0.0] * difference_curve_length)
                 train_curves.append(train_curve)
 
+        if curve_size_mode == "variable":
+            train_curves = self.patch_curves_to_same_variable_length(train_curves)
+        elif curve_size_mode == "fixed":
+            train_curves = self.prepare_training_curves(train_budgets, train_curves)
+        else:
+            raise NotImplementedError
+
         return train_examples, train_labels, train_budgets, train_curves
 
-    def prepare_dataset(self):  # -> TabularDataset:
+    def prepare_dataset(self, curve_size_mode):  # -> TabularDataset:
         """This method is called to prepare the necessary training dataset
         for training a model.
 
@@ -118,11 +133,11 @@ class HistoryManager:
             train_dataset: A dataset consisting of examples, labels, budgets
                 and learning curves.
         """
-        train_examples, train_labels, train_budgets, train_curves = self.history_configurations()
-        if gv.IS_DYHPO:
-            train_curves = self.patch_curves_to_same_length_dyhpo(train_curves)
-        else:
-            train_curves = self.prepare_training_curves(train_budgets, train_curves)
+        if not self.is_history_modified:
+            return self.cached_train_dataset
+
+        train_examples, train_labels, train_budgets, train_curves = self.history_configurations(curve_size_mode)
+
         train_examples = np.array(train_examples, dtype=np.single)
         train_labels = np.array(train_labels, dtype=np.single)
         train_budgets = np.array(train_budgets, dtype=np.single)
@@ -130,29 +145,25 @@ class HistoryManager:
         # scale budgets to [0, 1]
         train_budgets = train_budgets / self.max_benchmark_epochs
 
-        if gv.IS_DYHPO:
-            train_examples = torch.tensor(train_examples)
-            train_labels = torch.tensor(train_labels)
-            train_budgets = torch.tensor(train_budgets)
-            train_curves = torch.tensor(train_curves)
-            train_dataset = {
-                'X_train': train_examples,
-                'train_budgets': train_budgets,
-                'train_curves': train_curves,
-                'y_train': train_labels,
-            }
-        else:
-            train_dataset = TabularDataset(
-                train_examples,
-                train_labels,
-                train_budgets,
-                train_curves,
-            )
+        train_examples = torch.tensor(train_examples)
+        train_labels = torch.tensor(train_labels)
+        train_budgets = torch.tensor(train_budgets)
+        train_curves = torch.tensor(train_curves)
+
+        train_dataset = TabularDataset(
+            X=train_examples,
+            Y=train_labels,
+            budgets=train_budgets,
+            curves=train_curves,
+        )
+
+        self.cached_train_dataset = train_dataset
+        self.is_history_modified = False
 
         return train_dataset
 
     @staticmethod
-    def patch_curves_to_same_length_dyhpo(curves):
+    def patch_curves_to_same_variable_length(curves):
         """
         Patch the given curves to the same length.
 
@@ -240,7 +251,7 @@ class HistoryManager:
 
         return best_value
 
-    def patch_curves_to_same_length(self, curves: List):
+    def patch_curves_to_same_fixed_length(self, curves: List):
         """
         Patch the given curves to the same length.
 
@@ -331,7 +342,7 @@ class HistoryManager:
                 The transformed training curves.
         """
         missing_value_matrix = self.prepare_missing_values_channel(train_budgets)
-        self.patch_curves_to_same_length(train_curves)
+        self.patch_curves_to_same_fixed_length(train_curves)
         train_curves = np.array(train_curves, dtype=np.single)
         missing_value_matrix = np.array(missing_value_matrix, dtype=np.single)
 
@@ -344,7 +355,7 @@ class HistoryManager:
 
     # TODO: break this function to only handle candidates in history and make config manager handle configs
     #  not in history
-    def generate_candidate_configurations(self) -> Tuple[List, List, List, List]:
+    def generate_candidate_configurations(self, predict_mode, curve_size_mode) -> Tuple[List, List, List, List]:
         """Generate candidate configurations that will be
         fantasized upon.
 
@@ -369,14 +380,11 @@ class HistoryManager:
                 max_budget = budgets[-1]
                 if max_budget == self.max_benchmark_epochs:
                     continue
-                if gv.IS_DYHPO:
-                    real_budgets.append(max_budget + self.fantasize_step)
-                else:
-                    real_budgets.append(max_budget)
+                real_budgets.append(max_budget + self.fantasize_step)
                 learning_curve = self.performances[hp_index]
 
                 hp_curve = learning_curve[:max_budget - 1] if max_budget > 1 else [initial_empty_value]
-                if gv.IS_DYHPO:
+                if curve_size_mode == "variable":
                     # if the curve is shorter than the length of the kernel size,
                     # pad it with zeros
                     difference_curve_length = self.cnn_kernel_size - len(hp_curve)
@@ -389,5 +397,15 @@ class HistoryManager:
             hp_indices.append(hp_index)
             hp_budgets.append(self.max_benchmark_epochs)
             hp_curves.append(hp_curve)
+
+        if curve_size_mode == "variable":
+            hp_curves = self.patch_curves_to_same_variable_length(hp_curves)
+        elif curve_size_mode == "fixed":
+            hp_curves = self.prepare_training_curves(real_budgets, hp_curves)
+        else:
+            raise NotImplementedError(f"curve_size_mode {curve_size_mode}")
+
+        if predict_mode == "next_budget":
+            hp_budgets = real_budgets
 
         return hp_indices, hp_budgets, real_budgets, hp_curves

@@ -2,18 +2,22 @@ import torch
 import torch.nn as nn
 from copy import deepcopy
 import numpy as np
+import wandb
+from typing import List, Tuple, Dict, Optional, Any
 
 from src.models.power_law.base_pytorch_module import BasePytorchModule
 
 
 class ConditionedPowerLawModel(BasePytorchModule):
     _instance_counter = 0
+    _global_epoch = {}
 
     def __init__(
         self,
         nr_features,
-        train_dataloader=None,
-        surrogate_configs=None,
+        max_instances,
+        seed=None,
+        checkpoint_path='.'
     ):
         """
         Args:
@@ -32,11 +36,13 @@ class ConditionedPowerLawModel(BasePytorchModule):
             nr_cnn_layers: int
                 The number of cnn layers to be used.
         """
-        super().__init__(nr_features=nr_features, train_dataloader=train_dataloader,
-                         surrogate_configs=surrogate_configs)
-
+        super().__init__(nr_features=nr_features, seed=seed, checkpoint_path=checkpoint_path)
+        self.max_instances = max_instances
         self.instance_id = ConditionedPowerLawModel._instance_counter
         ConditionedPowerLawModel._instance_counter += 1
+        ConditionedPowerLawModel._instance_counter %= self.max_instances
+        if self.instance_id not in ConditionedPowerLawModel._global_epoch:
+            ConditionedPowerLawModel._global_epoch[self.instance_id] = 0
 
         self.act_func = self.get_class(torch.nn, self.hp.act_func)()
         self.last_act_func = self.get_class(torch.nn, self.hp.last_act_func)()
@@ -54,7 +60,8 @@ class ConditionedPowerLawModel(BasePytorchModule):
 
         self.logger.info(f"Surrogate initialized")
 
-    def get_default_hp(self):
+    @staticmethod
+    def get_default_meta():
         hp = {
             'nr_units': 128,
             'nr_layers': 2,
@@ -69,8 +76,7 @@ class ConditionedPowerLawModel(BasePytorchModule):
             'optimizer': 'Adam',
             'batch_size': 64,
             'activate_early_stopping': False,
-            'early_stopping_it': None,
-            'seed': 0,
+            'early_stopping_it': 0,
         }
         return hp
 
@@ -140,7 +146,7 @@ class ConditionedPowerLawModel(BasePytorchModule):
             learning_curves: torch.Tensor
                 The learning curves for the hyperparameter configurations.
         """
-        x, predict_budgets, evaluated_budgets, learning_curves = batch
+        x, predict_budgets, learning_curves = batch
 
         # x = torch.cat((x, torch.unsqueeze(evaluated_budgets, 1)), dim=1)
         if self.hp.use_learning_curve:
@@ -185,7 +191,7 @@ class ConditionedPowerLawModel(BasePytorchModule):
 
         # zero the parameter gradients
         self.optimizer.zero_grad(set_to_none=True)
-        outputs = self((batch_examples, batch_budgets, batch_budgets, batch_curves))
+        outputs = self((batch_examples, batch_budgets, batch_curves))
         loss = self.criterion(outputs, batch_labels)
         loss.backward()
         self.optimizer.step()
@@ -210,6 +216,8 @@ class ConditionedPowerLawModel(BasePytorchModule):
             self.set_optimizer(self.hp)
 
         self.set_seed(self.seed)
+        self.train()
+
         patience_rounds = 0
         best_loss = np.inf
         best_state = deepcopy(self.state_dict())
@@ -217,7 +225,10 @@ class ConditionedPowerLawModel(BasePytorchModule):
         for epoch in range(0, nr_epochs):
             normalized_loss = self.train_epoch()
             self.logger.info(f'Epoch {epoch + 1}, Loss:{normalized_loss}')
-
+            ConditionedPowerLawModel._global_epoch[self.instance_id] += 1
+            wandb.log({f"surrogate/model_{self.instance_id}/training_loss": normalized_loss,
+                       f"surrogate/model_{self.instance_id}/epoch": ConditionedPowerLawModel._global_epoch[
+                           self.instance_id]})
             if self.hp.activate_early_stopping:
                 if normalized_loss < best_loss:
                     best_state = deepcopy(self.state_dict())
@@ -233,6 +244,11 @@ class ConditionedPowerLawModel(BasePytorchModule):
         self.logger.info(f"end rng_state {check_seed_torch}")
         if self.hp.activate_early_stopping:
             self.load_state_dict(best_state)
+
+    def predict(self, test_data):
+        self.eval()
+        predictions = self((test_data.X, test_data.budgets, test_data.curves))
+        return predictions
 
     def __del__(self):
         ConditionedPowerLawModel._instance_counter = 0
