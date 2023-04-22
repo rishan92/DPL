@@ -198,12 +198,6 @@ class DyHPOModel(BasePytorchModule):
         mse = 0.0
 
         for epoch_nr in range(0, nr_epochs):
-            torch.manual_seed(self.seed)
-            np.random.seed(self.seed)
-            random.seed(self.seed)
-            check_seed_torch = torch.random.get_rng_state().sum()
-            check_seed_np = np.sum(np.random.get_state()[1])
-            check_seed_random = np.sum(random.getstate()[1])
             nr_examples_batch = X_train.size(dim=0)
             # if only one example in the batch, skip the batch.
             # Otherwise, the code will fail because of batchnorm
@@ -238,8 +232,6 @@ class DyHPOModel(BasePytorchModule):
                 training_errored = True
                 break
         check_seed_torch = torch.random.get_rng_state().sum()
-        check_seed_np = np.sum(np.random.get_state()[1])
-        check_seed_random = np.sum(random.getstate()[1])
         self.logger.info(f"end rng_state {check_seed_torch}")
         """
         # metric too high, time to restart, or we risk divergence
