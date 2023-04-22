@@ -94,8 +94,6 @@ class DyHPOModel(BasePytorchModule):
             'learning_rate': 0.001,
             'nr_epochs': 1000,
             'refine_nr_epochs': 50,
-            'predict_mode': 'next_budget',  # 'end_budget'
-            'curve_size_mode': 'variable',  # 'fixed'
         }
         return hp
 
@@ -256,7 +254,7 @@ class DyHPOModel(BasePytorchModule):
     def predict(
         self,
         test_data,
-        train_data
+        train_data_fn
     ) -> Tuple[np.ndarray, np.ndarray]:
         """
 
@@ -271,6 +269,7 @@ class DyHPOModel(BasePytorchModule):
                 testing points and the standard deviations.
         """
         model_device = next(self.parameters()).device
+        train_data = train_data_fn()
         train_data.to(model_device)
         test_data.to(model_device)
 

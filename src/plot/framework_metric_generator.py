@@ -37,6 +37,13 @@ class FrameworkMetricsGenerator:
                     'dataset_name': 'credit_g'
                 }
             },
+            'lcbench_mini': {
+                'class': LCBench,
+                'kwargs': {
+                    'path_to_json_files': str(Path('./lc_bench/results/lcbench_airlines.json')),
+                    'dataset_name': 'airlines'
+                }
+            },
             'taskset': {
                 'class': TaskSet,
                 'kwargs': {

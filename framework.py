@@ -129,6 +129,10 @@ class Framework:
             f'{self.dataset_name}_{self.seed}.json',
         )
 
+        self.incumbent_hp_index = self.benchmark.get_incumbent_config_id()
+        self.pred_curves_path = os.path.join(self.result_dir, "pred_curves", self.dataset_name, str(self.seed))
+        os.makedirs(self.pred_curves_path, exist_ok=True)
+
         if args.surrogate_name not in disable_preprocessing:
             self.hp_candidates = self.preprocess(self.benchmark.get_hyperparameter_candidates())
         else:
@@ -178,10 +182,18 @@ class Framework:
         else:
             best_value = 0
 
+        incumbent_value = self.benchmark.get_best_performance()
+
         while surrogate_budget < self.total_budget:
 
             start_time = time.time()
             hp_index, budget = self.surrogate.suggest()
+
+            if budget == 10 or budget == 20 or budget == 40:
+                self.surrogate.plot_pred_curve(hp_index, self.benchmark, surrogate_budget, self.pred_curves_path)
+                self.surrogate.plot_pred_curve(self.incumbent_hp_index, self.benchmark, surrogate_budget,
+                                               self.pred_curves_path, prefix="incumbent_")
+
             hp_curve = self.benchmark.get_curve(hp_index, budget)
             self.surrogate.observe(hp_index, budget, hp_curve)
             time_duration = time.time() - start_time
@@ -212,9 +224,9 @@ class Framework:
                     exit(0)
 
                 if self.minimization_metric:
-                    regret = best_value - self.min_value
+                    regret = best_value - incumbent_value
                 else:
-                    regret = self.max_value - best_value
+                    regret = incumbent_value - best_value
 
                 self.log_info(
                     int(hp_index),

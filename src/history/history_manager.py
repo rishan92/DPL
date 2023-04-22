@@ -110,14 +110,10 @@ class HistoryManager:
                 train_budgets.append(budget)
                 train_labels.append(performances[budget - 1])
                 train_curve = performances[:budget - 1] if budget > 1 else [initial_empty_value]
-                if curve_size_mode == "variable":
-                    difference_curve_length = self.cnn_kernel_size - len(train_curve)
-                    if difference_curve_length > 0:
-                        train_curve.extend([0.0] * difference_curve_length)
                 train_curves.append(train_curve)
 
         if curve_size_mode == "variable":
-            train_curves = self.patch_curves_to_same_variable_length(train_curves)
+            train_curves = self.patch_curves_to_same_variable_length(curves=train_curves, min_size=self.cnn_kernel_size)
         elif curve_size_mode == "fixed":
             train_curves = self.prepare_training_curves(train_budgets, train_curves)
         else:
@@ -162,8 +158,33 @@ class HistoryManager:
 
         return train_dataset
 
+    def get_curves(self, hp_index, curve_size_mode):
+        curves = []
+        real_budgets = []
+        if hp_index in self.examples:
+            budgets = self.examples[hp_index]
+            max_budget = max(budgets)
+            performances = self.performances[hp_index]
+            for budget, performance in zip(budgets, performances):
+                real_budgets.append(budget)
+                train_curve = performances[:budget - 1] if budget > 1 else [0.0]
+                curves.append(train_curve)
+        else:
+            max_budget = 0
+            real_budgets.append(0)
+            curves.append([0])
+
+        if curve_size_mode == "variable":
+            curves = self.patch_curves_to_same_variable_length(curves=curves, min_size=self.cnn_kernel_size)
+        elif curve_size_mode == "fixed":
+            curves = self.prepare_training_curves(real_budgets, curves)
+        else:
+            raise NotImplementedError
+
+        return curves, max_budget
+
     @staticmethod
-    def patch_curves_to_same_variable_length(curves):
+    def patch_curves_to_same_variable_length(curves, min_size):
         """
         Patch the given curves to the same length.
 
@@ -181,6 +202,8 @@ class HistoryManager:
         for curve in curves:
             if len(curve) > max_curve_length:
                 max_curve_length = len(curve)
+
+        max_curve_length = max(max_curve_length, min_size)
 
         for curve in curves:
             difference = max_curve_length - len(curve)
@@ -384,12 +407,6 @@ class HistoryManager:
                 learning_curve = self.performances[hp_index]
 
                 hp_curve = learning_curve[:max_budget - 1] if max_budget > 1 else [initial_empty_value]
-                if curve_size_mode == "variable":
-                    # if the curve is shorter than the length of the kernel size,
-                    # pad it with zeros
-                    difference_curve_length = self.cnn_kernel_size - len(hp_curve)
-                    if difference_curve_length > 0:
-                        hp_curve.extend([0.0] * difference_curve_length)
             else:
                 real_budgets.append(self.fantasize_step)
                 hp_curve = [initial_empty_value]
@@ -399,7 +416,7 @@ class HistoryManager:
             hp_curves.append(hp_curve)
 
         if curve_size_mode == "variable":
-            hp_curves = self.patch_curves_to_same_variable_length(hp_curves)
+            hp_curves = self.patch_curves_to_same_variable_length(curves=hp_curves, min_size=self.cnn_kernel_size)
         elif curve_size_mode == "fixed":
             hp_curves = self.prepare_training_curves(real_budgets, hp_curves)
         else:

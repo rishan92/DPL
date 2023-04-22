@@ -31,7 +31,6 @@ class EnsembleModel(BasePytorchModule):
                 self.model_instances[i](
                     nr_features=self.nr_features,
                     max_instances=self.hp.ensemble_size,
-                    train_dataloader=self.model_train_dataloaders[i],
                     checkpoint_path=self.checkpoint_path,
                     seed=self.model_seeds[i]
                 )
@@ -53,8 +52,6 @@ class EnsembleModel(BasePytorchModule):
             'refine_nr_epochs': 20,
             'batch_size': 64,
             'refine_batch_size': 64,
-            'predict_mode': 'end_budget',  # 'next_budget'
-            'curve_size_mode': 'fixed',  # 'variable'
         }
         return hp
 

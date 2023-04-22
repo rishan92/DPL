@@ -9,6 +9,9 @@ from scipy.stats import norm
 import torch
 from types import SimpleNamespace
 import wandb
+import functools
+import matplotlib.pyplot as plt
+import seaborn as sns
 
 from src.dataset.tabular_dataset import TabularDataset
 from src.models.power_law.ensemble_model import EnsembleModel
@@ -206,19 +209,31 @@ class PowerLawSurrogate:
         return vars(self.hp)
 
     @staticmethod
-    def get_default_meta():
-        hp = {
-            'fraction_random_configs': 0.1,
-            'initial_full_training_trials': 10,
-        }
+    def get_default_meta(model_class):
+        if model_class == EnsembleModel:
+            hp = {
+                'fraction_random_configs': 0.1,
+                'initial_full_training_trials': 10,
+                'predict_mode': 'end_budget',
+                'curve_size_mode': 'fixed',
+            }
+        elif model_class == DyHPOModel:
+            hp = {
+                'fraction_random_configs': 0.1,
+                'initial_full_training_trials': 10,
+                'predict_mode': 'next_budget',
+                'curve_size_mode': 'variable',
+            }
+        else:
+            raise NotImplementedError(f"{model_class=}")
         return hp
 
     @classmethod
     def set_meta(cls, surrogate_name, config=None):
         config = {} if config is None else config
-        default_meta = cls.get_default_meta()
-        meta = {**default_meta, **config}
         model_class = cls.model_types[surrogate_name]
+        default_meta = cls.get_default_meta(model_class)
+        meta = {**default_meta, **config}
         model_config = model_class.set_meta(config.get("model", None))
         meta['model'] = model_config
         cls.meta = SimpleNamespace(**meta)
@@ -239,7 +254,7 @@ class PowerLawSurrogate:
         self.iterations_counter += 1
         self.logger.info(f'Iteration number: {self.iterations_counter}')
 
-        train_dataset = self.history_manager.prepare_dataset(curve_size_mode=self.model_class.curve_size_mode)
+        train_dataset = self.history_manager.prepare_dataset(curve_size_mode=self.meta.curve_size_mode)
 
         if pretrain:
             should_refine = True,
@@ -283,10 +298,8 @@ class PowerLawSurrogate:
         budgets = torch.tensor(budgets, device=self.dev)
         hp_curves = torch.tensor(hp_curves, device=self.dev)
 
-        if gv.IS_DYHPO:
-            train_data = self.history_manager.prepare_dataset(curve_size_mode=self.model_class.curve_size_mode)
-        else:
-            train_data = None
+        train_data_fn = functools.partial(self.history_manager.prepare_dataset,
+                                          curve_size_mode=self.meta.curve_size_mode)
 
         test_data = TabularDataset(
             X=configurations,
@@ -294,7 +307,7 @@ class PowerLawSurrogate:
             curves=hp_curves,
         )
 
-        mean_predictions, std_predictions = self.model.predict(test_data=test_data, train_data=train_data)
+        mean_predictions, std_predictions = self.model.predict(test_data=test_data, train_data_fn=train_data_fn)
 
         return mean_predictions, std_predictions, hp_indices, real_budgets
 
@@ -435,6 +448,59 @@ class PowerLawSurrogate:
                 self.refine_counter += 1
                 self._train_surrogate(should_refine=True)
 
+    def plot_pred_curve(self, hp_index, benchmark, method_budget, output_dir, prefix=""):
+        if self.model is None:
+            return
+
+        real_curve = benchmark.get_curve(hp_index, self.max_benchmark_epochs)
+        if gv.IS_DYHPO:
+            if self.minimization:
+                real_curve = np.subtract([self.max_value] * len(real_curve), real_curve)
+                real_curve = real_curve.tolist()
+        else:
+            if not self.minimization:
+                real_curve = np.subtract([self.max_value] * len(real_curve), real_curve)
+                real_curve = real_curve.tolist()
+
+        curves, max_budget = self.history_manager.get_curves(hp_index=hp_index,
+                                                             curve_size_mode=self.meta.curve_size_mode)
+
+        p_config = self.prepare_examples([hp_index])[0]
+        p_config = torch.Tensor(p_config)
+        p_config = p_config.expand(self.max_benchmark_epochs, -1)
+
+        x_data = np.arange(1, self.max_benchmark_epochs + 1)
+        p_budgets = torch.Tensor(x_data / self.max_benchmark_epochs)
+
+        p_curve = torch.Tensor(curves)
+        p_curve_last_row = p_curve[-1].unsqueeze(0)
+        p_curve_num_repeats = self.max_benchmark_epochs - p_curve.size(0)
+        repeated_last_row = p_curve_last_row.repeat_interleave(p_curve_num_repeats, dim=0)
+        p_curve = torch.cat((p_curve, repeated_last_row), dim=0)
+
+        plot_test_data = TabularDataset(
+            X=p_config,
+            budgets=p_budgets,
+            curves=p_curve
+        )
+
+        train_data_fn = functools.partial(self.history_manager.prepare_dataset,
+                                          curve_size_mode=self.meta.curve_size_mode)
+
+        mean_data, std_data = self.model.predict(test_data=plot_test_data, train_data_fn=train_data_fn)
+
+        plt.clf()
+        p = sns.lineplot(x=x_data, y=mean_data)
+
+        p.axes.fill_between(x_data, mean_data + std_data, mean_data - std_data, alpha=0.3)
+
+        p.plot(x_data[:max_budget], real_curve[:max_budget], 'k-')
+        p.plot(x_data[max_budget:], real_curve[max_budget:], 'k--')
+
+        file_path = os.path.join(output_dir,
+                                 f"{prefix}surrogatebudget_{method_budget}_budget_{max_budget}_hpindex_{hp_index}")
+        plt.savefig(file_path, dpi=100)
+
     def prepare_examples(self, hp_indices: List) -> List:
         """
         Prepare the examples to be given to the surrogate model.
@@ -466,8 +532,8 @@ class PowerLawSurrogate:
         """
 
         hp_indices, hp_budgets, real_budgets, hp_curves = self.history_manager.generate_candidate_configurations(
-            predict_mode=self.model_class.predict_mode,
-            curve_size_mode=self.model_class.curve_size_mode
+            predict_mode=self.meta.predict_mode,
+            curve_size_mode=self.meta.curve_size_mode
         )
         configurations = self.prepare_examples(hp_indices)
 
