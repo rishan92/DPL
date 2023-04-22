@@ -69,12 +69,12 @@ class ConditionedPowerLawModel(BasePytorchModule):
             'nr_filters': 4,
             'nr_cnn_layers': 2,
             'use_learning_curve': False,
+            'use_learning_curve_mask': False,
             'learning_rate': 0.001,
             'act_func': 'LeakyReLU',
             'last_act_func': 'GLU',
             'loss_function': 'L1Loss',
             'optimizer': 'Adam',
-            'batch_size': 64,
             'activate_early_stopping': False,
             'early_stopping_it': 0,
         }

@@ -12,6 +12,8 @@ from sklearn.preprocessing import FunctionTransformer, OneHotEncoder
 import wandb
 import hashlib
 from typing import List, Tuple, Dict, Optional, Any, Type
+from loguru import logger
+from pathlib import Path
 
 from src.benchmarks.lcbench import LCBench
 from src.benchmarks.taskset import TaskSet
@@ -61,6 +63,11 @@ class Framework:
             seed: int
                 The seed for the experiment.
         """
+
+        logger.remove()
+        # logger.add(sys.stderr, format="{level} | {message}")
+        self.log_path = Path(f'./logs/power_law_surrogate_{args.dataset_name}_{seed}.log')
+        logger.add(self.log_path, mode='w', format="{level} | {message}")
 
         if args.benchmark_name == 'lcbench':
             benchmark_extension = os.path.join('lc_bench', 'results', 'data_2k.json')
@@ -166,6 +173,11 @@ class Framework:
                 maximization=not self.benchmark.minimization_metric,
             )
 
+    def finish(self):
+        wandb.log_artifact(str(self.log_path), name='debug_log', type='log')
+        wandb.log_artifact(str(self.result_file), name='result_json', type='result')
+        wandb.finish()
+
     @classmethod
     def set_meta(cls, surrogate_name, configs):
         model_class = cls.surrogate_types[surrogate_name]
@@ -220,8 +232,8 @@ class Framework:
                 surrogate_budget += 1
 
                 if surrogate_budget > self.total_budget:
-                    wandb.finish()
-                    exit(0)
+                    self.finish()
+                    return
 
                 if self.minimization_metric:
                     regret = best_value - incumbent_value
@@ -246,8 +258,7 @@ class Framework:
                 }
                 wandb.log(metrics)
 
-        wandb.finish()
-        exit(0)
+        self.finish()
 
     def preprocess(self, hp_candidates: np.ndarray) -> np.ndarray:
         """Preprocess the hyperparameter candidates.

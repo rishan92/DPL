@@ -59,6 +59,14 @@ class BasePytorchModule(nn.Module):
         self.train_dataloader_it = iter(self.train_dataloader)
 
     @classproperty
+    def use_learning_curve(cls):
+        return cls.meta.use_learning_curve
+
+    @classproperty
+    def use_learning_curve_mask(cls):
+        return cls.meta.use_learning_curve_mask
+
+    @classproperty
     def predict_mode(cls):
         return cls.meta.predict_mode
 

@@ -1,3 +1,4 @@
+import torch
 from torch.utils.data import Dataset
 
 
@@ -7,7 +8,11 @@ class TabularDataset(Dataset):
         self.X = X
         self.Y = Y
         self.budgets = budgets
-        self.curves = curves
+        if curves:
+            self.curves = curves
+        else:
+            self.curves = torch.tensor([0])
+            self.curves = self.curves.expand(self.X.size(0), -1)
 
     def __len__(self):
         return self.Y.size(0)

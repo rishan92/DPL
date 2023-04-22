@@ -94,6 +94,8 @@ class DyHPOModel(BasePytorchModule):
             'learning_rate': 0.001,
             'nr_epochs': 1000,
             'refine_nr_epochs': 50,
+            'use_learning_curve': True,
+            'use_learning_curve_mask': False,
         }
         return hp
 

@@ -7,6 +7,8 @@ import random
 import torch
 from loguru import logger
 from pathlib import Path
+import wandb
+import signal
 
 from framework import Framework
 
@@ -105,11 +107,6 @@ def main():
     torch.manual_seed(seed)
     torch.use_deterministic_algorithms(True)
 
-    logger.remove()
-    # logger.add(sys.stderr, format="{level} | {message}")
-    logger.add(Path(f'./logs/power_law_surrogate_{args.dataset_name}_{seed}.log'), mode='w',
-               format="{level} | {message}")
-
     configs = {}
     if args.config_file:
         configs = json.loads(args.config_file)
@@ -118,7 +115,20 @@ def main():
         configs = {**configs, **arg_configs}
 
     framework = Framework(args=args, seed=seed, configs=configs)
-    framework.run()
+
+    def signal_handler(sig, frame):
+        framework.finish()
+        sys.exit(0)
+
+    # Register the signal handler for SIGINT (Ctrl+C) and SIGTERM
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+
+    try:
+        framework.run()
+    except Exception as ex:
+        framework.finish()
+        raise ex
 
 
 if __name__ == "__main__":

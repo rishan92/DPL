@@ -8,13 +8,14 @@ from src.data_loader.surrogate_data_loader import SurrogateDataLoader
 from src.utils.utils import merge_dicts, get_class
 from types import SimpleNamespace
 import torch.nn as nn
+from src.utils.utils import classproperty
 
 
 class EnsembleModel(BasePytorchModule):
     def __init__(self, nr_features, seed=None, checkpoint_path: str = '.'):
         super().__init__(nr_features=nr_features, seed=seed, checkpoint_path=checkpoint_path)
 
-        model_class = get_class("src/models/power_law", self.hp.model_class)
+        model_class = get_class("src/models/power_law", self.hp.model_class_name)
         self.model_instances: List[Type[model_class]] = [model_class] * self.hp.ensemble_size
 
         # set a seed already, so that it is deterministic when
@@ -46,7 +47,7 @@ class EnsembleModel(BasePytorchModule):
     @staticmethod
     def get_default_meta():
         hp = {
-            'model_class': 'ConditionedPowerLawModel',
+            'model_class_name': 'ConditionedPowerLawModel',
             'ensemble_size': 5,
             'nr_epochs': 250,
             'refine_nr_epochs': 20,
@@ -60,7 +61,7 @@ class EnsembleModel(BasePytorchModule):
         config = {} if config is None else config
         default_meta = cls.get_default_meta()
         meta = {**default_meta, **config}
-        model_class = get_class("src/models/power_law", meta['model_class'])
+        model_class = get_class("src/models/power_law", meta['model_class_name'])
         model_config = model_class.set_meta(config.get("model", None))
         meta['model'] = model_config
         cls.meta = SimpleNamespace(**meta)
@@ -113,3 +114,13 @@ class EnsembleModel(BasePytorchModule):
             model_loss.append(loss)
 
         return model_loss[0]
+
+    @classproperty
+    def use_learning_curve(cls):
+        model_class = get_class("src/models/power_law", cls.meta.model_class_name)
+        return model_class.use_learning_curve
+
+    @classproperty
+    def use_learning_curve_mask(cls):
+        model_class = get_class("src/models/power_law", cls.meta.model_class_name)
+        return model_class.use_learning_curve_mask

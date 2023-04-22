@@ -1,7 +1,7 @@
 from copy import deepcopy
 import os
 import time
-from typing import List, Tuple, Dict, Optional, Any
+from typing import List, Tuple, Dict, Optional, Any, Union, Type
 from loguru import logger
 import numpy as np
 import random
@@ -35,7 +35,6 @@ class PowerLawSurrogate:
         surrogate_name: str = 'power_law',
         seed: int = 11,
         max_benchmark_epochs: int = 52,
-        ensemble_size: int = 5,
         fantasize_step: int = 1,
         minimization: bool = True,
         total_budget: int = 1000,
@@ -95,7 +94,7 @@ class PowerLawSurrogate:
         torch.backends.cudnn.benchmark = False
 
         self.model_type = surrogate_name
-        self.model_class = PowerLawSurrogate.model_types[surrogate_name]
+        self.model_class: Union[Type[EnsembleModel], Type[DyHPOModel]] = PowerLawSurrogate.model_types[surrogate_name]
         self.model = None
 
         assert PowerLawSurrogate.meta is not None, "Meta parameters are not set"
@@ -202,6 +201,8 @@ class PowerLawSurrogate:
             hp_candidates=self.hp_candidates,
             max_benchmark_epochs=max_benchmark_epochs,
             fill_value=self.fill_value,
+            use_learning_curve=self.model_class.use_learning_curve,
+            use_learning_curve_mask=self.model_class.use_learning_curve_mask,
             fantasize_step=self.fantasize_step,  # TODO: remove this dependency
         )
 
@@ -296,7 +297,7 @@ class PowerLawSurrogate:
 
         configurations = torch.tensor(configurations, device=self.dev)
         budgets = torch.tensor(budgets, device=self.dev)
-        hp_curves = torch.tensor(hp_curves, device=self.dev)
+        hp_curves = torch.tensor(hp_curves, device=self.dev) if hp_curves else None
 
         train_data_fn = functools.partial(self.history_manager.prepare_dataset,
                                           curve_size_mode=self.meta.curve_size_mode)
@@ -472,11 +473,13 @@ class PowerLawSurrogate:
         x_data = np.arange(1, self.max_benchmark_epochs + 1)
         p_budgets = torch.Tensor(x_data / self.max_benchmark_epochs)
 
-        p_curve = torch.Tensor(curves)
-        p_curve_last_row = p_curve[-1].unsqueeze(0)
-        p_curve_num_repeats = self.max_benchmark_epochs - p_curve.size(0)
-        repeated_last_row = p_curve_last_row.repeat_interleave(p_curve_num_repeats, dim=0)
-        p_curve = torch.cat((p_curve, repeated_last_row), dim=0)
+        p_curve = None
+        if curves:
+            p_curve = torch.Tensor(curves)
+            p_curve_last_row = p_curve[-1].unsqueeze(0)
+            p_curve_num_repeats = self.max_benchmark_epochs - p_curve.size(0)
+            repeated_last_row = p_curve_last_row.repeat_interleave(p_curve_num_repeats, dim=0)
+            p_curve = torch.cat((p_curve, repeated_last_row), dim=0)
 
         plot_test_data = TabularDataset(
             X=p_config,

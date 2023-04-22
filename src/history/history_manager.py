@@ -13,13 +13,16 @@ from src.dataset.tabular_dataset import TabularDataset
 
 
 class HistoryManager:
-    def __init__(self, hp_candidates, max_benchmark_epochs, fantasize_step, fill_value='zero'):
+    def __init__(self, hp_candidates, max_benchmark_epochs, fantasize_step, use_learning_curve, use_learning_curve_mask,
+                 fill_value='zero'):
         assert fill_value in ["zero", "last"], "Invalid fill value mode"
         # assert predict_mode in ["end_budget", "next_budget"], "Invalid predict mode"
         # assert curve_size_mode in ["fixed", "variable"], "Invalid curve size mode"
         self.hp_candidates = hp_candidates
         self.max_benchmark_epochs = max_benchmark_epochs
         self.fill_value = fill_value
+        self.use_learning_curve = use_learning_curve
+        self.use_learning_curve_mask = use_learning_curve_mask
 
         # the keys will be hyperparameter indices while the value
         # will be a list with all the budgets evaluated for examples
@@ -58,28 +61,32 @@ class HistoryManager:
 
     def get_last_sample(self):
         newp_index, newp_budget, newp_performance, newp_curve = self.last_point
-        new_example = np.array([self.hp_candidates[newp_index]], dtype=np.single)
-        newp_missing_values = self.prepare_missing_values_channel([newp_budget])
-        newp_budget = np.array([newp_budget], dtype=np.single) / self.max_benchmark_epochs
-        newp_performance = np.array([newp_performance], dtype=np.single)
-        modified_curve = deepcopy(newp_curve)
 
-        difference = self.max_benchmark_epochs - len(modified_curve) - 1
-        if difference > 0:
-            modified_curve.extend([modified_curve[-1] if self.fill_value == 'last' else 0] * difference)
+        new_example = torch.tensor(self.hp_candidates[newp_index])
+        new_example = torch.unsqueeze(new_example, dim=0)
+        newp_budget = torch.tensor([newp_budget]) / self.max_benchmark_epochs
+        newp_performance = torch.tensor([newp_performance])
 
-        modified_curve = np.array([modified_curve], dtype=np.single)
-        newp_missing_values = np.array(newp_missing_values, dtype=np.single)
+        if self.use_learning_curve:
+            modified_curve = deepcopy(newp_curve)
 
-        # add depth dimension to the train_curves array and missing_value_matrix
-        modified_curve = np.expand_dims(modified_curve, 1)
-        newp_missing_values = np.expand_dims(newp_missing_values, 1)
-        modified_curve = np.concatenate((modified_curve, newp_missing_values), axis=1)
+            difference = self.max_benchmark_epochs - len(modified_curve) - 1
+            if difference > 0:
+                modified_curve.extend([modified_curve[-1] if self.fill_value == 'last' else 0] * difference)
 
-        new_example = torch.tensor(new_example)
-        newp_budget = torch.tensor(newp_budget)
-        newp_performance = torch.tensor(newp_performance)
-        modified_curve = torch.tensor(modified_curve)
+            modified_curve = np.array([modified_curve], dtype=np.single)
+
+            newp_missing_values = self.prepare_missing_values_channel([newp_budget])
+            newp_missing_values = np.array(newp_missing_values, dtype=np.single)
+
+            # add depth dimension to the train_curves array and missing_value_matrix
+            modified_curve = np.expand_dims(modified_curve, 1)
+            newp_missing_values = np.expand_dims(newp_missing_values, 1)
+            modified_curve = np.concatenate((modified_curve, newp_missing_values), axis=1)
+            modified_curve = torch.tensor(modified_curve)
+        else:
+            modified_curve = torch.tensor([0])
+            modified_curve = torch.unsqueeze(modified_curve, dim=1)
 
         last_sample = (new_example, newp_performance, newp_budget, modified_curve)
         return last_sample
@@ -112,12 +119,16 @@ class HistoryManager:
                 train_curve = performances[:budget - 1] if budget > 1 else [initial_empty_value]
                 train_curves.append(train_curve)
 
-        if curve_size_mode == "variable":
-            train_curves = self.patch_curves_to_same_variable_length(curves=train_curves, min_size=self.cnn_kernel_size)
-        elif curve_size_mode == "fixed":
-            train_curves = self.prepare_training_curves(train_budgets, train_curves)
+        if self.use_learning_curve:
+            if curve_size_mode == "variable":
+                train_curves = self.patch_curves_to_same_variable_length(curves=train_curves,
+                                                                         min_size=self.cnn_kernel_size)
+            elif curve_size_mode == "fixed":
+                train_curves = self.prepare_training_curves(train_budgets, train_curves)
+            else:
+                raise NotImplementedError
         else:
-            raise NotImplementedError
+            train_curves = None
 
         return train_examples, train_labels, train_budgets, train_curves
 
@@ -144,7 +155,7 @@ class HistoryManager:
         train_examples = torch.tensor(train_examples)
         train_labels = torch.tensor(train_labels)
         train_budgets = torch.tensor(train_budgets)
-        train_curves = torch.tensor(train_curves)
+        train_curves = torch.tensor(train_curves) if train_curves else None
 
         train_dataset = TabularDataset(
             X=train_examples,
@@ -174,12 +185,15 @@ class HistoryManager:
             real_budgets.append(0)
             curves.append([0])
 
-        if curve_size_mode == "variable":
-            curves = self.patch_curves_to_same_variable_length(curves=curves, min_size=self.cnn_kernel_size)
-        elif curve_size_mode == "fixed":
-            curves = self.prepare_training_curves(real_budgets, curves)
+        if self.use_learning_curve:
+            if curve_size_mode == "variable":
+                curves = self.patch_curves_to_same_variable_length(curves=curves, min_size=self.cnn_kernel_size)
+            elif curve_size_mode == "fixed":
+                curves = self.prepare_training_curves(real_budgets, curves)
+            else:
+                raise NotImplementedError
         else:
-            raise NotImplementedError
+            curves = None
 
         return curves, max_budget
 
@@ -415,12 +429,15 @@ class HistoryManager:
             hp_budgets.append(self.max_benchmark_epochs)
             hp_curves.append(hp_curve)
 
-        if curve_size_mode == "variable":
-            hp_curves = self.patch_curves_to_same_variable_length(curves=hp_curves, min_size=self.cnn_kernel_size)
-        elif curve_size_mode == "fixed":
-            hp_curves = self.prepare_training_curves(real_budgets, hp_curves)
+        if self.use_learning_curve:
+            if curve_size_mode == "variable":
+                hp_curves = self.patch_curves_to_same_variable_length(curves=hp_curves, min_size=self.cnn_kernel_size)
+            elif curve_size_mode == "fixed":
+                hp_curves = self.prepare_training_curves(real_budgets, hp_curves)
+            else:
+                raise NotImplementedError(f"curve_size_mode {curve_size_mode}")
         else:
-            raise NotImplementedError(f"curve_size_mode {curve_size_mode}")
+            hp_curves = None
 
         if predict_mode == "next_budget":
             hp_budgets = real_budgets
