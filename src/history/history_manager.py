@@ -1,7 +1,7 @@
 from copy import deepcopy
 import os
 import time
-from typing import List, Tuple, Dict, Optional, Any
+from typing import List, Tuple, Dict, Optional, Any, Union
 from loguru import logger
 import numpy as np
 import random
@@ -10,6 +10,8 @@ import torch
 from types import SimpleNamespace
 import global_variables as gv
 from src.dataset.tabular_dataset import TabularDataset
+import functools
+from numpy.typing import NDArray
 
 
 class HistoryManager:
@@ -59,39 +61,28 @@ class HistoryManager:
         else:
             return []
 
-    def get_last_sample(self):
+    def get_last_sample(self, curve_size_mode):
         newp_index, newp_budget, newp_performance, newp_curve = self.last_point
+
+        modified_curve = self.get_processed_curves(curves=[newp_curve], curve_size_mode=curve_size_mode,
+                                                   real_budgets=newp_budget)
 
         new_example = torch.tensor(self.hp_candidates[newp_index], dtype=torch.float32)
         new_example = torch.unsqueeze(new_example, dim=0)
         newp_budget = torch.tensor([newp_budget], dtype=torch.float32) / self.max_benchmark_epochs
         newp_performance = torch.tensor([newp_performance], dtype=torch.float32)
 
-        if self.use_learning_curve:
-            modified_curve = deepcopy(newp_curve)
-
-            difference = self.max_benchmark_epochs - len(modified_curve) - 1
-            if difference > 0:
-                modified_curve.extend([modified_curve[-1] if self.fill_value == 'last' else 0] * difference)
-
-            modified_curve = np.array([modified_curve], dtype=np.single)
-
-            newp_missing_values = self.prepare_missing_values_channel([newp_budget])
-            newp_missing_values = np.array(newp_missing_values, dtype=np.single)
-
-            # add depth dimension to the train_curves array and missing_value_matrix
-            modified_curve = np.expand_dims(modified_curve, 1)
-            newp_missing_values = np.expand_dims(newp_missing_values, 1)
-            modified_curve = np.concatenate((modified_curve, newp_missing_values), axis=1)
-            modified_curve = torch.tensor(modified_curve, dtype=torch.float32)
+        if modified_curve is not None:
+            modified_curve = torch.from_numpy(modified_curve)
         else:
             modified_curve = torch.tensor([0], dtype=torch.float32)
-            modified_curve = torch.unsqueeze(modified_curve, dim=1)
+            modified_curve = torch.unsqueeze(modified_curve, dim=0)
 
         last_sample = (new_example, newp_performance, newp_budget, modified_curve)
         return last_sample
 
-    def history_configurations(self, curve_size_mode) -> Tuple[List, List, List, List]:
+    def history_configurations(self, curve_size_mode) -> \
+        Tuple[NDArray[int], NDArray[np.float32], NDArray[np.float32], Optional[NDArray[np.float32]]]:
         """
         Generate the configurations, labels, budgets and curves
         based on the history of evaluated configurations.
@@ -101,7 +92,7 @@ class HistoryManager:
                 A tuple of examples, labels and budgets for the
                 configurations evaluated so far.
         """
-        train_examples = []
+        train_indices = []
         train_labels = []
         train_budgets = []
         train_curves = []
@@ -110,29 +101,24 @@ class HistoryManager:
         for hp_index in self.examples:
             budgets = self.examples[hp_index]
             performances = self.performances[hp_index]
-            example = self.hp_candidates[hp_index]
 
             for budget in budgets:
-                train_examples.append(example)
+                train_indices.append(hp_index)
                 train_budgets.append(budget)
                 train_labels.append(performances[budget - 1])
                 train_curve = performances[:budget - 1] if budget > 1 else [initial_empty_value]
                 train_curves.append(train_curve)
 
-        if self.use_learning_curve:
-            if curve_size_mode == "variable":
-                train_curves = self.patch_curves_to_same_variable_length(curves=train_curves,
-                                                                         min_size=self.cnn_kernel_size)
-            elif curve_size_mode == "fixed":
-                train_curves = self.prepare_training_curves(train_budgets, train_curves)
-            else:
-                raise NotImplementedError
-        else:
-            train_curves = None
+        train_curves = self.get_processed_curves(curves=train_curves, curve_size_mode=curve_size_mode,
+                                                 real_budgets=train_budgets)
 
-        return train_examples, train_labels, train_budgets, train_curves
+        train_indices = np.array(train_indices, dtype=int)
+        train_budgets = np.array(train_budgets, dtype=np.float32)
+        train_labels = np.array(train_labels, dtype=np.float32)
 
-    def prepare_dataset(self, curve_size_mode):  # -> TabularDataset:
+        return train_indices, train_labels, train_budgets, train_curves
+
+    def get_train_dataset(self, curve_size_mode) -> TabularDataset:
         """This method is called to prepare the necessary training dataset
         for training a model.
 
@@ -143,19 +129,18 @@ class HistoryManager:
         if not self.is_history_modified:
             return self.cached_train_dataset
 
-        train_examples, train_labels, train_budgets, train_curves = self.history_configurations(curve_size_mode)
-
-        train_examples = np.array(train_examples, dtype=np.single)
-        train_labels = np.array(train_labels, dtype=np.single)
-        train_budgets = np.array(train_budgets, dtype=np.single)
+        hp_indices, train_labels, train_budgets, train_curves = self.history_configurations(curve_size_mode)
 
         # scale budgets to [0, 1]
         train_budgets = train_budgets / self.max_benchmark_epochs
 
-        train_examples = torch.tensor(train_examples, dtype=torch.float32)
-        train_labels = torch.tensor(train_labels, dtype=torch.float32)
-        train_budgets = torch.tensor(train_budgets, dtype=torch.float32)
-        train_curves = torch.tensor(train_curves, dtype=torch.float32) if train_curves else None
+        # This creates a copy
+        train_examples = self.hp_candidates[hp_indices]
+
+        train_examples = torch.from_numpy(train_examples)
+        train_labels = torch.from_numpy(train_labels)
+        train_budgets = torch.from_numpy(train_budgets)
+        train_curves = torch.from_numpy(train_curves) if train_curves is not None else None
 
         train_dataset = TabularDataset(
             X=train_examples,
@@ -169,7 +154,7 @@ class HistoryManager:
 
         return train_dataset
 
-    def get_curves(self, hp_index, curve_size_mode):
+    def get_predict_curves_dataset(self, hp_index, curve_size_mode):
         curves = []
         real_budgets = []
         if hp_index in self.examples:
@@ -185,20 +170,49 @@ class HistoryManager:
             real_budgets.append(0)
             curves.append([0])
 
+        curves = self.get_processed_curves(curves=curves, curve_size_mode=curve_size_mode, real_budgets=real_budgets)
+
+        p_config = self.hp_candidates[hp_index]
+        p_config = torch.tensor(p_config, dtype=torch.float32)
+        p_config = p_config.expand(self.max_benchmark_epochs, -1)
+
+        real_budgets = np.arange(1, self.max_benchmark_epochs + 1)
+        p_budgets = torch.tensor(real_budgets / self.max_benchmark_epochs, dtype=torch.float32)
+
+        p_curve = None
+        if curves is not None:
+            p_curve = torch.tensor(curves, dtype=torch.float32)
+            p_curve_last_row = p_curve[-1].unsqueeze(0)
+            p_curve_num_repeats = self.max_benchmark_epochs - p_curve.size(0)
+            repeated_last_row = p_curve_last_row.repeat_interleave(p_curve_num_repeats, dim=0)
+            p_curve = torch.cat((p_curve, repeated_last_row), dim=0)
+
+        pred_test_data = TabularDataset(
+            X=p_config,
+            budgets=p_budgets,
+            curves=p_curve
+        )
+
+        return pred_test_data, real_budgets, max_budget
+
+    def get_processed_curves(self, curves, curve_size_mode, real_budgets) -> Optional[NDArray[np.float32]]:
         if self.use_learning_curve:
             if curve_size_mode == "variable":
-                curves = self.patch_curves_to_same_variable_length(curves=curves, min_size=self.cnn_kernel_size)
+                min_size = self.cnn_kernel_size
             elif curve_size_mode == "fixed":
-                curves = self.prepare_training_curves(real_budgets, curves)
+                min_size = self.max_benchmark_epochs - 1
             else:
                 raise NotImplementedError
+
+            curves = self.patch_curves_to_same_length(curves=curves, min_size=min_size)
+
+            if self.use_learning_curve_mask:
+                curves = self.add_curve_missing_value_mask(curves, real_budgets)
         else:
             curves = None
+        return curves
 
-        return curves, max_budget
-
-    @staticmethod
-    def patch_curves_to_same_variable_length(curves, min_size):
+    def patch_curves_to_same_length(self, curves: List[List[float]], min_size: int) -> NDArray[np.float32]:
         """
         Patch the given curves to the same length.
 
@@ -212,19 +226,18 @@ class HistoryManager:
             curves: The updated array where the learning
                 curves are of the same length.
         """
-        max_curve_length = 0
+        max_curve_length = min_size
         for curve in curves:
             if len(curve) > max_curve_length:
                 max_curve_length = len(curve)
 
-        max_curve_length = max(max_curve_length, min_size)
+        extended_curves = np.empty(shape=(len(curves), max_curve_length), dtype=np.float32)
+        for i, curve in enumerate(curves):
+            extended_curves[i, :len(curve)] = curve
+            fill_value = curve[-1] if self.fill_value == 'last' else 0
+            extended_curves[i, len(curve):] = fill_value
 
-        for curve in curves:
-            difference = max_curve_length - len(curve)
-            if difference > 0:
-                curve.extend([0.0] * difference)
-
-        return curves
+        return extended_curves
 
     def calculate_fidelity_ymax(self, fidelity: int) -> float:
         """Calculate the incumbent for a certain fidelity level.
@@ -288,57 +301,36 @@ class HistoryManager:
 
         return best_value
 
-    def patch_curves_to_same_fixed_length(self, curves: List):
-        """
-        Patch the given curves to the same length.
+    def add_curve_missing_value_mask(self, curves: NDArray[np.float32], budgets: List[int]) -> NDArray[np.float32]:
+        missing_value_mask = self.prepare_missing_values_masks(budgets, curves.size(1))
 
-        Finds the maximum curve length and patches all
-        other curves that are shorter with zeroes.
+        # add depth dimension to the train_curves array and missing_value_matrix
+        curves = np.expand_dims(curves, 1)
+        missing_value_mask = np.expand_dims(missing_value_mask, 1)
+        curves = np.concatenate((curves, missing_value_mask), axis=1)
 
-        Args:
-            curves: List
-                The hyperparameter curves.
-        """
-        for curve in curves:
-            difference = self.max_benchmark_epochs - len(curve) - 1
-            if difference > 0:
-                fill_value = [curve[-1]] if self.fill_value == 'last' else [0]
-                curve.extend(fill_value * difference)
+        return curves
 
-    def prepare_missing_values_channel(self, budgets: List) -> List:
-        """Prepare an additional channel for learning curves.
+    @staticmethod
+    @functools.lru_cache(maxsize=None)
+    def get_curve_mask(budget: int, size: int):
+        mask = np.zeros(shape=(size,), dtype=bool)
+        mask[:budget] = True
+        return mask
 
-        The additional channel will represent an existing learning
-        curve value with a 1 and a missing learning curve value with
-        a 0.
-
-        Args:
-            budgets: List
-                A list of budgets for every training point.
-
-        Returns:
-            missing_value_curves: List
-                A list of curves representing existing or missing
-                values for the training curves of the training points.
-        """
-        missing_value_curves = []
+    def prepare_missing_values_masks(self, budgets: List[int], size: int) -> NDArray[bool]:
+        missing_value_masks = []
 
         for i in range(len(budgets)):
             budget = budgets[i]
             budget = budget - 1
             budget = int(budget)
 
-            if budget > 0:
-                example_curve = [1] * budget
-            else:
-                example_curve = []
+            mask = self.get_curve_mask(budget, size)
+            missing_value_masks.append(mask)
 
-            difference_in_curve = self.max_benchmark_epochs - len(example_curve) - 1
-            if difference_in_curve > 0:
-                example_curve.extend([0] * difference_in_curve)
-            missing_value_curves.append(example_curve)
-
-        return missing_value_curves
+        missing_value_masks = np.array(missing_value_masks, dtype=bool)
+        return missing_value_masks
 
     def get_mean_initial_value(self):
         """Returns the mean initial value
@@ -357,42 +349,31 @@ class HistoryManager:
 
         return mean_initial_value
 
-    def prepare_training_curves(
-        self,
-        train_budgets: List[int],
-        train_curves: List[float]
-    ) -> np.ndarray:
-        """Prepare the configuration performance curves for training.
+    def get_candidate_configurations_dataset(self, predict_mode, curve_size_mode) -> \
+        Tuple[TabularDataset, NDArray[int], NDArray[int]]:
+        hp_indices, budgets, real_budgets, hp_curves = self.generate_candidate_configurations(predict_mode,
+                                                                                              curve_size_mode)
+        # scale budgets to [0, 1]
+        budgets = budgets / self.max_benchmark_epochs
 
-        For every configuration training curve, add an extra dimension
-        regarding the missing values, as well as extend the curve to have
-        a fixed uniform length for all.
+        # This creates a copy
+        configurations = self.hp_candidates[hp_indices]
 
-        Args:
-            train_budgets: List
-                A list of the budgets for all training points.
-            train_curves: List
-                A list of curves that pertain to every training point.
+        configurations = torch.from_numpy(configurations)
+        budgets = torch.from_numpy(budgets)
+        hp_curves = torch.from_numpy(hp_curves) if hp_curves is not None else None
 
-        Returns:
-            train_curves: np.ndarray
-                The transformed training curves.
-        """
-        missing_value_matrix = self.prepare_missing_values_channel(train_budgets)
-        self.patch_curves_to_same_fixed_length(train_curves)
-        train_curves = np.array(train_curves, dtype=np.single)
-        missing_value_matrix = np.array(missing_value_matrix, dtype=np.single)
-
-        # add depth dimension to the train_curves array and missing_value_matrix
-        train_curves = np.expand_dims(train_curves, 1)
-        missing_value_matrix = np.expand_dims(missing_value_matrix, 1)
-        train_curves = np.concatenate((train_curves, missing_value_matrix), axis=1)
-
-        return train_curves
+        test_data = TabularDataset(
+            X=configurations,
+            budgets=budgets,
+            curves=hp_curves,
+        )
+        return test_data, hp_indices, real_budgets
 
     # TODO: break this function to only handle candidates in history and make config manager handle configs
     #  not in history
-    def generate_candidate_configurations(self, predict_mode, curve_size_mode) -> Tuple[List, List, List, List]:
+    def generate_candidate_configurations(self, predict_mode, curve_size_mode) -> \
+        Tuple[NDArray[int], NDArray[np.float32], NDArray[int], Optional[NDArray[np.float32]]]:
         """Generate candidate configurations that will be
         fantasized upon.
 
@@ -429,17 +410,14 @@ class HistoryManager:
             hp_budgets.append(self.max_benchmark_epochs)
             hp_curves.append(hp_curve)
 
-        if self.use_learning_curve:
-            if curve_size_mode == "variable":
-                hp_curves = self.patch_curves_to_same_variable_length(curves=hp_curves, min_size=self.cnn_kernel_size)
-            elif curve_size_mode == "fixed":
-                hp_curves = self.prepare_training_curves(real_budgets, hp_curves)
-            else:
-                raise NotImplementedError(f"curve_size_mode {curve_size_mode}")
-        else:
-            hp_curves = None
+        hp_curves = self.get_processed_curves(curves=hp_curves, curve_size_mode=curve_size_mode,
+                                              real_budgets=hp_budgets)
 
         if predict_mode == "next_budget":
             hp_budgets = real_budgets
+
+        hp_indices = np.array(hp_indices, dtype=int)
+        hp_budgets = np.array(hp_budgets, dtype=np.float32)
+        real_budgets = np.array(real_budgets, dtype=int)
 
         return hp_indices, hp_budgets, real_budgets, hp_curves

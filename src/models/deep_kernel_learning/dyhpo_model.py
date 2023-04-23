@@ -196,7 +196,7 @@ class DyHPOModel(BasePytorchModule):
 
         initial_state = self.get_state()
         training_errored = False
-
+        check_seed_torch = torch.random.get_rng_state().sum()
         # where the mean squared error will be stored
         # when predicting on the train set
         mse = 0.0
@@ -250,7 +250,7 @@ class DyHPOModel(BasePytorchModule):
     def predict(
         self,
         test_data,
-        train_data_fn
+        train_data
     ) -> Tuple[np.ndarray, np.ndarray]:
         """
 
@@ -265,7 +265,6 @@ class DyHPOModel(BasePytorchModule):
                 testing points and the standard deviations.
         """
         model_device = next(self.parameters()).device
-        train_data = train_data_fn()
         train_data.to(model_device)
         test_data.to(model_device)
 

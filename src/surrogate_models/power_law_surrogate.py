@@ -2,6 +2,7 @@ from copy import deepcopy
 import os
 import time
 from typing import List, Tuple, Dict, Optional, Any, Union, Type
+from numpy.typing import NDArray
 from loguru import logger
 import numpy as np
 import random
@@ -117,7 +118,7 @@ class PowerLawSurrogate:
         else:
             self.dev = torch.device(device)
 
-        self.hp_candidates = hp_candidates
+        self.hp_candidates: NDArray[np.float32] = hp_candidates.astype(dtype=np.float32)
 
         self.minimization = minimization
         self.seed = seed
@@ -257,13 +258,13 @@ class PowerLawSurrogate:
         self.iterations_counter += 1
         self.logger.info(f'Iteration number: {self.iterations_counter}')
 
-        train_dataset = self.history_manager.prepare_dataset(curve_size_mode=self.meta.curve_size_mode)
+        train_dataset = self.history_manager.get_train_dataset(curve_size_mode=self.meta.curve_size_mode)
 
         if pretrain:
             should_refine = True,
             should_weight_last_sample = False
 
-        last_sample = self.history_manager.get_last_sample()
+        last_sample = self.history_manager.get_last_sample(curve_size_mode=self.meta.curve_size_mode)
 
         if should_refine:
             self.model.train_loop(train_dataset=train_dataset, should_refine=should_refine, reset_optimizer=True,
@@ -290,27 +291,14 @@ class PowerLawSurrogate:
                 configurations with their associated indices and budgets.
 
         """
-        configurations, hp_indices, budgets, real_budgets, hp_curves = self.generate_candidate_configurations()
-        # scale budgets to [0, 1]
-        budgets = np.array(budgets, dtype=np.single)
-        budgets = budgets / self.max_benchmark_epochs
-        real_budgets = np.array(real_budgets, dtype=np.single)
-        configurations = np.array(configurations, dtype=np.single)
 
-        configurations = torch.tensor(configurations, dtype=torch.float32)
-        budgets = torch.tensor(budgets, dtype=torch.float32)
-        hp_curves = torch.tensor(hp_curves, dtype=torch.float32) if hp_curves else None
-
-        train_data_fn = functools.partial(self.history_manager.prepare_dataset,
-                                          curve_size_mode=self.meta.curve_size_mode)
-
-        test_data = TabularDataset(
-            X=configurations,
-            budgets=budgets,
-            curves=hp_curves,
+        test_data, hp_indices, real_budgets = self.history_manager.get_candidate_configurations_dataset(
+            predict_mode=self.meta.predict_mode,
+            curve_size_mode=self.meta.curve_size_mode
         )
+        train_data = self.history_manager.get_train_dataset(curve_size_mode=self.meta.curve_size_mode)
 
-        mean_predictions, std_predictions = self.model.predict(test_data=test_data, train_data_fn=train_data_fn)
+        mean_predictions, std_predictions = self.model.predict(test_data=test_data, train_data=train_data)
 
         return mean_predictions, std_predictions, hp_indices, real_budgets
 
@@ -336,7 +324,7 @@ class PowerLawSurrogate:
         else:
             mean_predictions, std_predictions, hp_indices, real_budgets = self._predict()
 
-            best_prediction_index, acq_n = self.find_suggested_config(
+            best_prediction_index = self.find_suggested_config(
                 mean_predictions,
                 std_predictions,
                 real_budgets,
@@ -450,84 +438,26 @@ class PowerLawSurrogate:
             real_curve = np.subtract([self.max_value] * len(real_curve), real_curve)
             real_curve = real_curve.tolist()
 
-        curves, max_budget = self.history_manager.get_curves(hp_index=hp_index,
-                                                             curve_size_mode=self.meta.curve_size_mode)
-
-        p_config = self.prepare_examples([hp_index])[0]
-        p_config = torch.tensor(p_config, dtype=torch.float32)
-        p_config = p_config.expand(self.max_benchmark_epochs, -1)
-
-        x_data = np.arange(1, self.max_benchmark_epochs + 1)
-        p_budgets = torch.tensor(x_data / self.max_benchmark_epochs, dtype=torch.float32)
-
-        p_curve = None
-        if curves:
-            p_curve = torch.tensor(curves, dtype=torch.float32)
-            p_curve_last_row = p_curve[-1].unsqueeze(0)
-            p_curve_num_repeats = self.max_benchmark_epochs - p_curve.size(0)
-            repeated_last_row = p_curve_last_row.repeat_interleave(p_curve_num_repeats, dim=0)
-            p_curve = torch.cat((p_curve, repeated_last_row), dim=0)
-
-        plot_test_data = TabularDataset(
-            X=p_config,
-            budgets=p_budgets,
-            curves=p_curve
+        pred_test_data, real_budgets, max_budget = self.history_manager.get_predict_curves_dataset(
+            hp_index=hp_index,
+            curve_size_mode=self.meta.curve_size_mode
         )
 
-        train_data_fn = functools.partial(self.history_manager.prepare_dataset,
-                                          curve_size_mode=self.meta.curve_size_mode)
+        train_data = self.history_manager.get_train_dataset(curve_size_mode=self.meta.curve_size_mode)
 
-        mean_data, std_data = self.model.predict(test_data=plot_test_data, train_data_fn=train_data_fn)
+        mean_data, std_data = self.model.predict(test_data=pred_test_data, train_data=train_data)
 
         plt.clf()
-        p = sns.lineplot(x=x_data, y=mean_data)
+        p = sns.lineplot(x=real_budgets, y=mean_data)
 
-        p.axes.fill_between(x_data, mean_data + std_data, mean_data - std_data, alpha=0.3)
+        p.axes.fill_between(real_budgets, mean_data + std_data, mean_data - std_data, alpha=0.3)
 
-        p.plot(x_data[:max_budget], real_curve[:max_budget], 'k-')
-        p.plot(x_data[max_budget:], real_curve[max_budget:], 'k--')
+        p.plot(real_budgets[:max_budget], real_curve[:max_budget], 'k-')
+        p.plot(real_budgets[max_budget:], real_curve[max_budget:], 'k--')
 
         file_path = os.path.join(output_dir,
                                  f"{prefix}surrogatebudget_{method_budget}_budget_{max_budget}_hpindex_{hp_index}")
         plt.savefig(file_path, dpi=100)
-
-    def prepare_examples(self, hp_indices: List) -> List:
-        """
-        Prepare the examples to be given to the surrogate model.
-
-        Args:
-            hp_indices: List
-                The list of hp indices that are already evaluated.
-
-        Returns:
-            examples: List
-                A list of the hyperparameter configurations.
-        """
-        examples = []
-        for hp_index in hp_indices:
-            examples.append(self.hp_candidates[hp_index])
-
-        return examples
-
-    def generate_candidate_configurations(self) -> Tuple[List, List, List, List, List]:
-        """Generate candidate configurations that will be
-        fantasized upon.
-
-        Returns:
-            (configurations, hp_indices, hp_budgets, real_budgets, hp_curves): Tuple
-                A tuple of configurations, their indices in the hp list,
-                the budgets that they should be fantasized upon, the maximal
-                budgets they have been evaluated and their corresponding performance
-                curves.
-        """
-
-        hp_indices, hp_budgets, real_budgets, hp_curves = self.history_manager.generate_candidate_configurations(
-            predict_mode=self.meta.predict_mode,
-            curve_size_mode=self.meta.curve_size_mode
-        )
-        configurations = self.prepare_examples(hp_indices)
-
-        return configurations, hp_indices, hp_budgets, real_budgets, hp_curves
 
     @staticmethod
     def acq(
@@ -586,58 +516,6 @@ class PowerLawSurrogate:
 
         return acq_values
 
-    def acq_dyhpo(
-        self,
-        best_value: float,
-        mean: float,
-        std: float,
-        explore_factor: Optional[float] = 0.25,
-        acq_fc: str = 'ei',
-    ) -> float:
-        """
-        The acquisition function that will be called
-        to evaluate the score of a hyperparameter configuration.
-
-        Parameters
-        ----------
-        best_value: float
-            Best observed function evaluation. Individual per fidelity.
-        mean: float
-            Point mean of the posterior process.
-        std: float
-            Point std of the posterior process.
-        explore_factor: float
-            The exploration factor for when ucb is used as the
-            acquisition function.
-        ei_calibration_factor: float
-            The factor used to calibrate expected improvement.
-        acq_fc: str
-            The type of acquisition function to use.
-
-        Returns
-        -------
-        acq_value: float
-            The value of the acquisition function.
-        """
-        if acq_fc == 'ei':
-            if std == 0:
-                return 0
-            z = (best_value - mean) / std
-            acq_value = (best_value - mean) * norm.cdf(z) + std * norm.pdf(z)
-        elif acq_fc == 'ucb':
-            acq_value = -1 * mean + explore_factor * std
-        elif acq_fc == 'thompson':
-            acq_value = np.random.normal(mean, std)
-        elif acq_fc == 'exploit':
-            acq_value = mean
-        else:
-            raise NotImplementedError(
-                f'Acquisition function {acq_fc} has not been'
-                f'implemented',
-            )
-
-        return acq_value
-
     def find_suggested_config(
         self,
         mean_predictions: np.ndarray,
@@ -684,42 +562,4 @@ class PowerLawSurrogate:
 
         max_value_index = np.argmax(acq_func_values)
 
-        return max_value_index, acq_func_values
-
-    def find_suggested_config_dyhpo(
-        self,
-        mean_predictions: np.ndarray,
-        mean_stds: np.ndarray,
-        budgets: np.ndarray,
-    ) -> int:
-        """
-        Find the hyperparameter configuration that has the highest score
-        with the acquisition function.
-
-        Args:
-            mean_predictions: The mean predictions of the posterior.
-            mean_stds: The mean standard deviations of the posterior.
-            budgets: The next budgets that the hyperparameter configurations
-                will be evaluated for.
-
-        Returns:
-            best_index: The index of the hyperparameter configuration with the
-                highest score.
-        """
-        highest_acq_value = np.NINF
-        best_index = -1
-        acq_list = []
-        index = 0
-        for mean_value, std in zip(mean_predictions, mean_stds):
-            budget = int(budgets[index])
-            best_value = self.history_manager.calculate_fidelity_ymax_dyhpo(budget)
-            # best_value = np.float32(best_value)
-            acq_value = self.acq_dyhpo(best_value, mean_value, std, acq_fc='ei')
-            acq_list.append(acq_value)
-            if acq_value > highest_acq_value:
-                highest_acq_value = acq_value
-                best_index = index
-
-            index += 1
-
-        return best_index, np.array(acq_list)
+        return max_value_index
