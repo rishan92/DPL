@@ -119,9 +119,9 @@ class Framework:
             config=framework_meta,
             group=group_name,
             tags=[args.benchmark_name, args.dataset_name, args.surrogate_name, config_hash, commit_hash,
-                  str(args.index), local_name],
+                  str(self.seed), local_name],
             job_type=args.dataset_name,
-            name=f"{args.dataset_name}_{args.index}",
+            name=f"{args.dataset_name}_{self.seed}",
         )
 
         self.result_dir = os.path.join(

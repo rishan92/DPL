@@ -62,10 +62,10 @@ class HistoryManager:
     def get_last_sample(self):
         newp_index, newp_budget, newp_performance, newp_curve = self.last_point
 
-        new_example = torch.tensor(self.hp_candidates[newp_index])
+        new_example = torch.tensor(self.hp_candidates[newp_index], dtype=torch.float32)
         new_example = torch.unsqueeze(new_example, dim=0)
-        newp_budget = torch.tensor([newp_budget]) / self.max_benchmark_epochs
-        newp_performance = torch.tensor([newp_performance])
+        newp_budget = torch.tensor([newp_budget], dtype=torch.float32) / self.max_benchmark_epochs
+        newp_performance = torch.tensor([newp_performance], dtype=torch.float32)
 
         if self.use_learning_curve:
             modified_curve = deepcopy(newp_curve)
@@ -83,9 +83,9 @@ class HistoryManager:
             modified_curve = np.expand_dims(modified_curve, 1)
             newp_missing_values = np.expand_dims(newp_missing_values, 1)
             modified_curve = np.concatenate((modified_curve, newp_missing_values), axis=1)
-            modified_curve = torch.tensor(modified_curve)
+            modified_curve = torch.tensor(modified_curve, dtype=torch.float32)
         else:
-            modified_curve = torch.tensor([0])
+            modified_curve = torch.tensor([0], dtype=torch.float32)
             modified_curve = torch.unsqueeze(modified_curve, dim=1)
 
         last_sample = (new_example, newp_performance, newp_budget, modified_curve)
@@ -152,10 +152,10 @@ class HistoryManager:
         # scale budgets to [0, 1]
         train_budgets = train_budgets / self.max_benchmark_epochs
 
-        train_examples = torch.tensor(train_examples)
-        train_labels = torch.tensor(train_labels)
-        train_budgets = torch.tensor(train_budgets)
-        train_curves = torch.tensor(train_curves) if train_curves else None
+        train_examples = torch.tensor(train_examples, dtype=torch.float32)
+        train_labels = torch.tensor(train_labels, dtype=torch.float32)
+        train_budgets = torch.tensor(train_budgets, dtype=torch.float32)
+        train_curves = torch.tensor(train_curves, dtype=torch.float32) if train_curves else None
 
         train_dataset = TabularDataset(
             X=train_examples,
@@ -278,13 +278,13 @@ class HistoryManager:
                 learning_curve = self.performances[example_index]
                 # The hyperparameter was not evaluated until fidelity, or more.
                 # Take the maximum value from the curve.
-                lower_fidelity_config_values.append(max(learning_curve))
+                lower_fidelity_config_values.append(min(learning_curve))
 
         if len(exact_fidelity_config_values) > 0:
             # lowest error corresponds to best value
-            best_value = max(exact_fidelity_config_values)
+            best_value = min(exact_fidelity_config_values)
         else:
-            best_value = max(lower_fidelity_config_values)
+            best_value = min(lower_fidelity_config_values)
 
         return best_value
 

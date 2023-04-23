@@ -8,10 +8,10 @@ class TabularDataset(Dataset):
         self.X = X
         self.Y = Y
         self.budgets = budgets
-        if curves:
+        if curves is not None:
             self.curves = curves
         else:
-            self.curves = torch.tensor([0])
+            self.curves = torch.tensor([0], dtype=torch.float32)
             self.curves = self.curves.expand(self.X.size(0), -1)
 
     def __len__(self):

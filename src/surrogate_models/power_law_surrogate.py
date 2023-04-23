@@ -152,10 +152,8 @@ class PowerLawSurrogate:
         self.initial_random_index = 0
 
         self.nr_features = self.hp_candidates.shape[1]
-        if gv.IS_DYHPO:
-            self.best_value_observed = np.NINF
-        else:
-            self.best_value_observed = np.inf
+
+        self.best_value_observed = np.inf
 
         self.diverged_configs = set()
 
@@ -217,6 +215,8 @@ class PowerLawSurrogate:
                 'initial_full_training_trials': 10,
                 'predict_mode': 'end_budget',
                 'curve_size_mode': 'fixed',
+                'acq_mode': 'ei',
+                'acq_best_value_mode': 'normal',
             }
         elif model_class == DyHPOModel:
             hp = {
@@ -224,6 +224,8 @@ class PowerLawSurrogate:
                 'initial_full_training_trials': 10,
                 'predict_mode': 'next_budget',
                 'curve_size_mode': 'variable',
+                'acq_mode': 'ei',
+                'acq_best_value_mode': 'mf',  # mf - multi-fidelity, normal, None
             }
         else:
             raise NotImplementedError(f"{model_class=}")
@@ -295,9 +297,9 @@ class PowerLawSurrogate:
         real_budgets = np.array(real_budgets, dtype=np.single)
         configurations = np.array(configurations, dtype=np.single)
 
-        configurations = torch.tensor(configurations, device=self.dev)
-        budgets = torch.tensor(budgets, device=self.dev)
-        hp_curves = torch.tensor(hp_curves, device=self.dev) if hp_curves else None
+        configurations = torch.tensor(configurations, dtype=torch.float32)
+        budgets = torch.tensor(budgets, dtype=torch.float32)
+        hp_curves = torch.tensor(hp_curves, dtype=torch.float32) if hp_curves else None
 
         train_data_fn = functools.partial(self.history_manager.prepare_dataset,
                                           curve_size_mode=self.meta.curve_size_mode)
@@ -333,17 +335,15 @@ class PowerLawSurrogate:
             self.initial_random_index += 1
         else:
             mean_predictions, std_predictions, hp_indices, real_budgets = self._predict()
-            if gv.IS_DYHPO:
-                best_prediction_index = self.find_suggested_config_dyhpo(
-                    mean_predictions,
-                    std_predictions,
-                    real_budgets,
-                )
-            else:
-                best_prediction_index = self.find_suggested_config(
-                    mean_predictions,
-                    std_predictions,
-                )
+
+            best_prediction_index, acq_n = self.find_suggested_config(
+                mean_predictions,
+                std_predictions,
+                real_budgets,
+                acq_mode=self.meta.acq_mode,
+                acq_best_value_mode=self.meta.acq_best_value_mode
+            )
+
             """
             the best prediction index is not always matching with the actual hp index.
             Since when evaluating the acq function, we do not consider hyperparameter
@@ -395,24 +395,15 @@ class PowerLawSurrogate:
                 b = index
                 break
 
-        if gv.IS_DYHPO:
-            if self.minimization:
-                hp_curve = np.subtract([self.max_value] * len(hp_curve), hp_curve)
-                hp_curve = hp_curve.tolist()
-        else:
-            if not self.minimization:
-                hp_curve = np.subtract([self.max_value] * len(hp_curve), hp_curve)
-                hp_curve = hp_curve.tolist()
+        if not self.minimization:
+            hp_curve = np.subtract([self.max_value] * len(hp_curve), hp_curve)
+            hp_curve = hp_curve.tolist()
 
-        if gv.IS_DYHPO:
-            best_curve_value = max(hp_curve)
-        else:
-            best_curve_value = min(hp_curve)
+        best_curve_value = min(hp_curve)
 
         self.history_manager.add(hp_index, b, hp_curve)
 
-        if (self.best_value_observed > best_curve_value and not gv.IS_DYHPO) or \
-            (self.best_value_observed < best_curve_value and gv.IS_DYHPO):
+        if self.best_value_observed > best_curve_value:
             self.best_value_observed = best_curve_value
             self.no_improvement_patience = 0
             self.logger.info(f'New Incumbent value found '
@@ -454,28 +445,24 @@ class PowerLawSurrogate:
             return
 
         real_curve = benchmark.get_curve(hp_index, self.max_benchmark_epochs)
-        if gv.IS_DYHPO:
-            if self.minimization:
-                real_curve = np.subtract([self.max_value] * len(real_curve), real_curve)
-                real_curve = real_curve.tolist()
-        else:
-            if not self.minimization:
-                real_curve = np.subtract([self.max_value] * len(real_curve), real_curve)
-                real_curve = real_curve.tolist()
+
+        if not self.minimization:
+            real_curve = np.subtract([self.max_value] * len(real_curve), real_curve)
+            real_curve = real_curve.tolist()
 
         curves, max_budget = self.history_manager.get_curves(hp_index=hp_index,
                                                              curve_size_mode=self.meta.curve_size_mode)
 
         p_config = self.prepare_examples([hp_index])[0]
-        p_config = torch.Tensor(p_config)
+        p_config = torch.tensor(p_config, dtype=torch.float32)
         p_config = p_config.expand(self.max_benchmark_epochs, -1)
 
         x_data = np.arange(1, self.max_benchmark_epochs + 1)
-        p_budgets = torch.Tensor(x_data / self.max_benchmark_epochs)
+        p_budgets = torch.tensor(x_data / self.max_benchmark_epochs, dtype=torch.float32)
 
         p_curve = None
         if curves:
-            p_curve = torch.Tensor(curves)
+            p_curve = torch.tensor(curves, dtype=torch.float32)
             p_curve_last_row = p_curve[-1].unsqueeze(0)
             p_curve_num_repeats = self.max_benchmark_epochs - p_curve.size(0)
             repeated_last_row = p_curve_last_row.repeat_interleave(p_curve_num_repeats, dim=0)
@@ -548,7 +535,7 @@ class PowerLawSurrogate:
         mean_predictions: np.ndarray,
         std_predictions: np.ndarray,
         explore_factor: float = 0.25,
-        acq_choice: str = 'ei',
+        acq_mode: str = 'ei',
     ) -> np.ndarray:
         """
         Calculate the acquisition function based on the network predictions.
@@ -574,21 +561,28 @@ class PowerLawSurrogate:
         acq_values: np.ndarray
             The values of the acquisition function for every configuration.
         """
-        if acq_choice == 'ei':
-            z = (np.subtract(best_values, mean_predictions))
-            difference = deepcopy(z)
-            not_zero_std_indicator = [False if example_std == 0.0 else True for example_std in std_predictions]
-            zero_std_indicator = np.invert(not_zero_std_indicator)
-            z = np.divide(z, std_predictions, where=not_zero_std_indicator)
-            np.place(z, zero_std_indicator, 0)
+        if acq_mode == 'ei':
+            difference = np.subtract(best_values, mean_predictions)
+
+            zero_std_indicator = np.zeros_like(std_predictions, dtype=bool)
+            zero_std_indicator[std_predictions == 0] = True
+            not_zero_std_indicator = np.invert(zero_std_indicator)
+            z = np.divide(difference, std_predictions, where=not_zero_std_indicator)
+            z[zero_std_indicator] = 0
+
             acq_values = np.add(np.multiply(difference, norm.cdf(z)), np.multiply(std_predictions, norm.pdf(z)))
-        elif acq_choice == 'ucb':
+        elif acq_mode == 'ucb':
             # we are working with error rates so we multiply the mean with -1
             acq_values = np.add(-1 * mean_predictions, explore_factor * std_predictions)
-        elif acq_choice == 'thompson':
+        elif acq_mode == 'thompson':
             acq_values = np.random.normal(mean_predictions, std_predictions)
-        else:
+        elif acq_mode == 'exploit':
             acq_values = mean_predictions
+        else:
+            raise NotImplementedError(
+                f'Acquisition function {acq_mode} has not been'
+                f'implemented',
+            )
 
         return acq_values
 
@@ -628,10 +622,10 @@ class PowerLawSurrogate:
         if acq_fc == 'ei':
             if std == 0:
                 return 0
-            z = (mean - best_value) / std
-            acq_value = (mean - best_value) * norm.cdf(z) + std * norm.pdf(z)
+            z = (best_value - mean) / std
+            acq_value = (best_value - mean) * norm.cdf(z) + std * norm.pdf(z)
         elif acq_fc == 'ucb':
-            acq_value = mean + explore_factor * std
+            acq_value = -1 * mean + explore_factor * std
         elif acq_fc == 'thompson':
             acq_value = np.random.normal(mean, std)
         elif acq_fc == 'exploit':
@@ -648,6 +642,9 @@ class PowerLawSurrogate:
         self,
         mean_predictions: np.ndarray,
         mean_stds: np.ndarray,
+        budgets: np.ndarray = None,
+        acq_mode: str = 'ei',
+        acq_best_value_mode: str = None,
     ) -> int:
         """Return the hyperparameter with the highest acq function value.
 
@@ -668,23 +665,32 @@ class PowerLawSurrogate:
                 the index of the maximal value.
 
         """
-        best_values = np.array([self.best_value_observed] * mean_predictions.shape[0])
+
+        if acq_best_value_mode == 'mf':
+            best_values = np.empty_like(budgets)
+            for i, budget in enumerate(budgets):
+                budget = int(budget)
+                best_value = self.history_manager.calculate_fidelity_ymax_dyhpo(budget)
+                best_values[i] = best_value
+        else:
+            best_values = np.full_like(mean_predictions, self.best_value_observed)
+
         acq_func_values = self.acq(
             best_values,
             mean_predictions,
             mean_stds,
-            acq_choice='ei',
+            acq_mode=acq_mode,
         )
 
         max_value_index = np.argmax(acq_func_values)
 
-        return max_value_index
+        return max_value_index, acq_func_values
 
     def find_suggested_config_dyhpo(
         self,
         mean_predictions: np.ndarray,
         mean_stds: np.ndarray,
-        budgets: List,
+        budgets: np.ndarray,
     ) -> int:
         """
         Find the hyperparameter configuration that has the highest score
@@ -702,16 +708,18 @@ class PowerLawSurrogate:
         """
         highest_acq_value = np.NINF
         best_index = -1
-
+        acq_list = []
         index = 0
         for mean_value, std in zip(mean_predictions, mean_stds):
             budget = int(budgets[index])
             best_value = self.history_manager.calculate_fidelity_ymax_dyhpo(budget)
+            # best_value = np.float32(best_value)
             acq_value = self.acq_dyhpo(best_value, mean_value, std, acq_fc='ei')
+            acq_list.append(acq_value)
             if acq_value > highest_acq_value:
                 highest_acq_value = acq_value
                 best_index = index
 
             index += 1
 
-        return best_index
+        return best_index, np.array(acq_list)

@@ -96,6 +96,8 @@ class DyHPOModel(BasePytorchModule):
             'refine_nr_epochs': 50,
             'use_learning_curve': True,
             'use_learning_curve_mask': False,
+            'feature_class_name': 'FeatureExtractor',
+            'gp_class_name': 'GPRegressionModel',
         }
         return hp
 
