@@ -1,11 +1,8 @@
-from src.models.power_law.conditioned_power_law_model import ConditionedPowerLawModel
 import numpy as np
-from copy import deepcopy
-from typing import List, Tuple, Dict, Optional, Any, Type
-from src.models.power_law.base_pytorch_module import BasePytorchModule
-import torch
+from typing import List, Type
+from src.models.base.base_pytorch_module import BasePytorchModule
 from src.data_loader.surrogate_data_loader import SurrogateDataLoader
-from src.utils.utils import merge_dicts, get_class
+from src.utils.utils import get_class
 from types import SimpleNamespace
 import torch.nn as nn
 from src.utils.utils import classproperty
@@ -15,23 +12,23 @@ class EnsembleModel(BasePytorchModule):
     def __init__(self, nr_features, seed=None, checkpoint_path: str = '.'):
         super().__init__(nr_features=nr_features, seed=seed, checkpoint_path=checkpoint_path)
 
-        model_class = get_class("src/models/power_law", self.hp.model_class_name)
-        self.model_instances: List[Type[model_class]] = [model_class] * self.hp.ensemble_size
+        model_class = get_class("src/models/power_law", self.meta.model_class_name)
+        self.model_instances: List[Type[model_class]] = [model_class] * self.meta.ensemble_size
 
         # set a seed already, so that it is deterministic when
         # generating the seeds of the ensemble
-        self.model_seeds = np.random.choice(100, self.hp.ensemble_size, replace=False)
+        self.model_seeds = np.random.choice(100, self.meta.ensemble_size, replace=False)
 
         # Where the models of the ensemble will be stored
         self.models = nn.ModuleList([])
 
-        self.model_train_dataloaders = [None] * self.hp.ensemble_size
+        self.model_train_dataloaders = [None] * self.meta.ensemble_size
 
-        for i in range(self.hp.ensemble_size):
+        for i in range(self.meta.ensemble_size):
             self.models.append(
                 self.model_instances[i](
                     nr_features=self.nr_features,
-                    max_instances=self.hp.ensemble_size,
+                    max_instances=self.meta.ensemble_size,
                     checkpoint_path=self.checkpoint_path,
                     seed=self.model_seeds[i]
                 )
@@ -40,7 +37,7 @@ class EnsembleModel(BasePytorchModule):
     def set_dataloader(self, train_dataloader):
         if train_dataloader is not None:
             self.train_dataloader = train_dataloader
-            for i in range(self.hp.ensemble_size):
+            for i in range(self.meta.ensemble_size):
                 model_train_dataloader = train_dataloader.make_dataloader(seed=self.model_seeds[i])
                 self.model_train_dataloaders[i] = model_train_dataloader
 
@@ -82,12 +79,12 @@ class EnsembleModel(BasePytorchModule):
 
     def train_loop(self, train_dataset, should_refine=False, reset_optimizer=False, last_sample=None, **kwargs):
         if should_refine:
-            nr_epochs = self.hp.refine_nr_epochs
-            batch_size = self.hp.refine_batch_size
+            nr_epochs = self.meta.refine_nr_epochs
+            batch_size = self.meta.refine_batch_size
             should_weight_last_sample = True
         else:
-            nr_epochs = self.hp.nr_epochs
-            batch_size = self.hp.batch_size
+            nr_epochs = self.meta.nr_epochs
+            batch_size = self.meta.batch_size
             should_weight_last_sample = False
 
         model_device = next(self.parameters()).device

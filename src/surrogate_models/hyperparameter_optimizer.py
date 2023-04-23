@@ -20,10 +20,9 @@ from src.data_loader.surrogate_data_loader import SurrogateDataLoader
 from src.models.deep_kernel_learning.dyhpo_model import DyHPOModel
 import global_variables as gv
 from src.history.history_manager import HistoryManager
-from src.plot.wandb_logger import WANDBLogger
 
 
-class PowerLawSurrogate:
+class HyperparameterOptimizer:
     model_types = {
         'power_law': EnsembleModel,
         'dyhpo': DyHPOModel,
@@ -95,11 +94,11 @@ class PowerLawSurrogate:
         torch.backends.cudnn.benchmark = False
 
         self.model_type = surrogate_name
-        self.model_class: Union[Type[EnsembleModel], Type[DyHPOModel]] = PowerLawSurrogate.model_types[surrogate_name]
+        self.model_class: Union[Type[EnsembleModel], Type[DyHPOModel]] = HyperparameterOptimizer.model_types[
+            surrogate_name]
         self.model = None
 
-        assert PowerLawSurrogate.meta is not None, "Meta parameters are not set"
-        self.hp = PowerLawSurrogate.meta
+        assert HyperparameterOptimizer.meta is not None, "Meta parameters are not set"
 
         self.total_budget = total_budget
         self.fill_value = fill_value
@@ -126,7 +125,7 @@ class PowerLawSurrogate:
         self.logger = logger
 
         # with what percentage configurations will be taken randomly instead of being sampled from the model
-        self.fraction_random_configs = self.hp.fraction_random_configs
+        self.fraction_random_configs = self.meta.fraction_random_configs
         # self.iteration_probabilities = np.random.rand(self.total_budget)
 
         self.max_benchmark_epochs = max_benchmark_epochs
@@ -165,7 +164,7 @@ class PowerLawSurrogate:
 
         # the number of initial points for which we will retrain fully from scratch
         # This is basically equal to the dimensionality of the search space + 1.
-        self.initial_full_training_trials = self.hp.initial_full_training_trials
+        self.initial_full_training_trials = self.meta.initial_full_training_trials
 
         # a flag if the surrogate should be trained
         self.train = True
@@ -206,7 +205,7 @@ class PowerLawSurrogate:
         )
 
     def get_meta(self):
-        return vars(self.hp)
+        return vars(self.meta)
 
     @staticmethod
     def get_default_meta(model_class):
@@ -278,7 +277,7 @@ class PowerLawSurrogate:
             self.model.to(self.dev)
             self.model.train_loop(train_dataset=train_dataset)
 
-    def _predict(self) -> Tuple[np.ndarray, np.ndarray, List, np.ndarray]:
+    def _predict(self) -> Tuple[NDArray[np.float32], NDArray[np.float32], NDArray[int], NDArray[int]]:
         """
         Predict the performances of the hyperparameter configurations
         as well as the standard deviations based on the ensemble.
@@ -338,7 +337,7 @@ class PowerLawSurrogate:
             candidates that diverged or that are evaluated fully.
             """
             # actually do the mapping between the configuration indices and the best prediction index
-            suggested_hp_index = hp_indices[best_prediction_index]
+            suggested_hp_index: int = hp_indices[best_prediction_index]
 
             # decide for what budget we will evaluate the most
             # promising hyperparameter configuration next.
@@ -513,9 +512,9 @@ class PowerLawSurrogate:
 
     def find_suggested_config(
         self,
-        mean_predictions: np.ndarray,
-        mean_stds: np.ndarray,
-        budgets: np.ndarray = None,
+        mean_predictions: NDArray[np.float32],
+        mean_stds: NDArray[np.float32],
+        budgets: NDArray[int] = None,
         acq_mode: str = 'ei',
         acq_best_value_mode: str = None,
     ) -> int:
@@ -540,7 +539,7 @@ class PowerLawSurrogate:
         """
 
         if acq_best_value_mode == 'mf':
-            best_values = np.empty_like(budgets)
+            best_values = np.empty(shape=budgets.shape, dtype=np.float32)
             for i, budget in enumerate(budgets):
                 budget = int(budget)
                 best_value = self.history_manager.calculate_fidelity_ymax_dyhpo(budget)
@@ -556,5 +555,6 @@ class PowerLawSurrogate:
         )
 
         max_value_index = np.argmax(acq_func_values)
+        max_value_index = int(max_value_index)
 
         return max_value_index

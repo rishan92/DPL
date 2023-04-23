@@ -29,8 +29,8 @@ class HistoryManager:
         # the keys will be hyperparameter indices while the value
         # will be a list with all the budgets evaluated for examples
         # and with all performances for the performances
-        self.examples = dict()
-        self.performances = dict()
+        self.examples: Dict[int, NDArray[int]] = dict()
+        self.performances: Dict[int, List[float]] = dict()
 
         self.last_point = None
 
@@ -45,7 +45,7 @@ class HistoryManager:
         initial_empty_value = self.get_mean_initial_value() if self.fill_value == 'last' else 0
         return initial_empty_value
 
-    def add(self, hp_index, b, hp_curve):
+    def add(self, hp_index: int, b: int, hp_curve: List[float]):
         # TODO: check if arange should start with 1 or zero
         self.examples[hp_index] = np.arange(1, b + 1)
         self.performances[hp_index] = hp_curve

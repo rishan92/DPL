@@ -1,20 +1,18 @@
-import random
 from copy import deepcopy
-import logging
 import os
 from typing import Dict, Tuple, Any
+from numpy.typing import NDArray
 
 import numpy as np
 import torch
-import torch.nn as nn
-from torch import cat
 from loguru import logger
 
 import gpytorch
 
 from src.models.deep_kernel_learning.feature_extractor import FeatureExtractor
 from src.models.deep_kernel_learning.gp_regression_model import GPRegressionModel
-from src.models.power_law.base_pytorch_module import BasePytorchModule
+from src.models.base.base_pytorch_module import BasePytorchModule
+from src.dataset.tabular_dataset import TabularDataset
 
 
 class DyHPOModel(BasePytorchModule):
@@ -43,22 +41,19 @@ class DyHPOModel(BasePytorchModule):
                 properly.
         """
         super().__init__(nr_features=nr_features, seed=seed)
-        check_seed_torch = torch.random.get_rng_state().sum()
-        check_seed_np = np.sum(np.random.get_state()[1])
-        check_seed_random = np.sum(random.getstate()[1])
-        self.hp.nr_features = nr_features
-        self.feature_extractor = FeatureExtractor(self.hp)
+        self.meta.nr_features = nr_features
+        self.feature_extractor = FeatureExtractor(self.meta)
 
-        self.early_stopping_patience = self.hp.nr_patience_epochs
+        self.early_stopping_patience = self.meta.nr_patience_epochs
         self.seed = seed
         self.model, self.likelihood, self.mll = \
             self.get_model_likelihood_mll(
-                getattr(self.hp, f'layer{self.feature_extractor.nr_layers}_units')
+                getattr(self.meta, f'layer{self.feature_extractor.nr_layers}_units')
             )
 
         self.optimizer = torch.optim.Adam([
-            {'params': self.model.parameters(), 'lr': self.hp.learning_rate},
-            {'params': self.feature_extractor.parameters(), 'lr': self.hp.learning_rate}],
+            {'params': self.model.parameters(), 'lr': self.meta.learning_rate},
+            {'params': self.feature_extractor.parameters(), 'lr': self.meta.learning_rate}],
         )
 
         # the number of initial points for which we will retrain fully from scratch
@@ -120,24 +115,21 @@ class DyHPOModel(BasePytorchModule):
         """
         Restart the surrogate model from scratch.
         """
-        check_seed_torch = torch.random.get_rng_state().sum()
-        check_seed_np = np.sum(np.random.get_state()[1])
-        check_seed_random = np.sum(random.getstate()[1])
-        self.feature_extractor = FeatureExtractor(self.hp)
+        self.feature_extractor = FeatureExtractor(self.meta)
         self.model, self.likelihood, self.mll = \
             self.get_model_likelihood_mll(
-                getattr(self.hp, f'layer{self.feature_extractor.nr_layers}_units'),
+                getattr(self.meta, f'layer{self.feature_extractor.nr_layers}_units'),
             )
 
         self.optimizer = torch.optim.Adam([
-            {'params': self.model.parameters(), 'lr': self.hp.learning_rate},
-            {'params': self.feature_extractor.parameters(), 'lr': self.hp.learning_rate}],
+            {'params': self.model.parameters(), 'lr': self.meta.learning_rate},
+            {'params': self.feature_extractor.parameters(), 'lr': self.meta.learning_rate}],
         )
 
     def get_model_likelihood_mll(
         self,
         train_size: int,
-    ) -> Tuple[GPRegressionModel, gpytorch.likelihoods.GaussianLikelihood, gpytorch.mlls.ExactMarginalLogLikelihood]:
+    ) -> Tuple[gpytorch.models.GP, gpytorch.likelihoods.Likelihood, gpytorch.mlls.MarginalLogLikelihood]:
         """
         Called when the surrogate is first initialized or restarted.
 
@@ -157,21 +149,21 @@ class DyHPOModel(BasePytorchModule):
 
         return model, likelihood, mll
 
-    def train_loop(self, train_dataset, should_refine=False, load_checkpoint: bool = False,
+    def train_loop(self, train_dataset: TabularDataset, should_refine: bool = False, load_checkpoint: bool = False,
                    **kwargs):
         """
         Train the surrogate model.
 
         Args:
-            data: A dictionary which has the training examples, training features,
+            train_dataset: A Dataset which has the training examples, training features,
                 training budgets and in the end the training curves.
             load_checkpoint: A flag whether to load the state from a previous checkpoint,
                 or whether to start from scratch.
         """
         if should_refine:
-            nr_epochs = self.hp.refine_nr_epochs
+            nr_epochs = self.meta.refine_nr_epochs
         else:
-            nr_epochs = self.hp.nr_epochs
+            nr_epochs = self.meta.nr_epochs
 
         self.set_seed(self.seed)
         self.train()
@@ -183,8 +175,8 @@ class DyHPOModel(BasePytorchModule):
                                   f'Training the GP from the beginning')
 
         self.optimizer = torch.optim.Adam([
-            {'params': self.model.parameters(), 'lr': self.hp.learning_rate},
-            {'params': self.feature_extractor.parameters(), 'lr': self.hp.learning_rate}],
+            {'params': self.model.parameters(), 'lr': self.meta.learning_rate},
+            {'params': self.feature_extractor.parameters(), 'lr': self.meta.learning_rate}],
         )
         model_device = next(self.parameters()).device
         train_dataset.to(model_device)
@@ -249,9 +241,9 @@ class DyHPOModel(BasePytorchModule):
 
     def predict(
         self,
-        test_data,
-        train_data
-    ) -> Tuple[np.ndarray, np.ndarray]:
+        test_data: TabularDataset,
+        train_data: TabularDataset
+    ) -> Tuple[NDArray[np.float32], NDArray[np.float32]]:
         """
 
         Args:
@@ -269,9 +261,7 @@ class DyHPOModel(BasePytorchModule):
         test_data.to(model_device)
 
         self.eval()
-        check_seed_torch = torch.random.get_rng_state().sum()
-        check_seed_np = np.sum(np.random.get_state()[1])
-        check_seed_random = np.sum(random.getstate()[1])
+
         with torch.no_grad():  # gpytorch.settings.fast_pred_var():
             projected_train_x = self.feature_extractor(
                 train_data.X,

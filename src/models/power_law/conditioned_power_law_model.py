@@ -3,63 +3,11 @@ import torch.nn as nn
 from copy import deepcopy
 import numpy as np
 import wandb
-from typing import List, Tuple, Dict, Optional, Any
 
-from src.models.power_law.base_pytorch_module import BasePytorchModule
+from src.models.power_law.power_law_model import PowerLawModel
 
 
-class ConditionedPowerLawModel(BasePytorchModule):
-    _instance_counter = 0
-    _global_epoch = {}
-
-    def __init__(
-        self,
-        nr_features,
-        max_instances,
-        seed=None,
-        checkpoint_path='.'
-    ):
-        """
-        Args:
-            nr_initial_features: int
-                The number of features per example.
-            nr_units: int
-                The number of units for every layer.
-            nr_layers: int
-                The number of layers for the neural network.
-            use_learning_curve: bool
-                If the learning curve should be use in the network.
-            kernel_size: int
-                The size of the kernel that is applied in the cnn layer.
-            nr_filters: int
-                The number of filters that are used in the cnn layers.
-            nr_cnn_layers: int
-                The number of cnn layers to be used.
-        """
-        super().__init__(nr_features=nr_features, seed=seed, checkpoint_path=checkpoint_path)
-        self.max_instances = max_instances
-        self.instance_id = ConditionedPowerLawModel._instance_counter
-        ConditionedPowerLawModel._instance_counter += 1
-        ConditionedPowerLawModel._instance_counter %= self.max_instances
-        if self.instance_id not in ConditionedPowerLawModel._global_epoch:
-            ConditionedPowerLawModel._global_epoch[self.instance_id] = 0
-
-        self.act_func = self.get_class(torch.nn, self.hp.act_func)()
-        self.last_act_func = self.get_class(torch.nn, self.hp.last_act_func)()
-
-        self.layers = self.get_linear_net(self.hp)
-        self.cnn = self.get_cnn_net(self.hp)
-
-        self.criterion = self.get_class(torch.nn, self.hp.loss_function)()
-
-        self.has_batchnorm_layers = self.get_has_batchnorm_layers()
-        self.has_batchnorm_layers = True
-
-        self.optimizer = None
-        self.set_optimizer(self.hp)
-
-        self.logger.info(f"Surrogate initialized")
-
+class ConditionedPowerLawModel(PowerLawModel):
     @staticmethod
     def get_default_meta():
         hp = {
@@ -72,7 +20,7 @@ class ConditionedPowerLawModel(BasePytorchModule):
             'use_learning_curve_mask': False,
             'learning_rate': 0.001,
             'act_func': 'LeakyReLU',
-            'last_act_func': 'GLU',
+            'last_act_func': 'SelfGLU',
             'loss_function': 'L1Loss',
             'optimizer': 'Adam',
             'activate_early_stopping': False,
@@ -80,51 +28,43 @@ class ConditionedPowerLawModel(BasePytorchModule):
         }
         return hp
 
-    def get_has_batchnorm_layers(self):
-        for module in self.modules():
-            if isinstance(module, (nn.BatchNorm1d, nn.BatchNorm2d, nn.BatchNorm3d)):
-                return True
-        return False
-
-    def get_linear_net(self, hp):
+    def get_linear_net(self):
         layers = []
         # adding one since we concatenate the features with the budget
         nr_initial_features = self.nr_features
-        if hp.use_learning_curve:
-            nr_initial_features = self.nr_features + hp.nr_filters
+        if self.meta.use_learning_curve:
+            nr_initial_features = self.nr_features + self.meta.nr_filters
 
-        act_func = self.get_class(torch.nn, hp.act_func)()
-        layers.append(nn.Linear(nr_initial_features, hp.nr_units))
-        layers.append(act_func)
+        layers.append(nn.Linear(nr_initial_features, self.meta.nr_units))
+        layers.append(self.act_func)
 
-        for i in range(2, hp.nr_layers + 1):
-            layers.append(nn.Linear(hp.nr_units, hp.nr_units))
-            layers.append(act_func)
+        for i in range(2, self.meta.nr_layers + 1):
+            layers.append(nn.Linear(self.meta.nr_units, self.meta.nr_units))
+            layers.append(self.act_func)
 
-        last_layer = nn.Linear(hp.nr_units, 3)
+        last_layer = nn.Linear(self.meta.nr_units, 3)
         layers.append(last_layer)
 
         net = torch.nn.Sequential(*layers)
         return net
 
-    def get_cnn_net(self, hp):
+    def get_cnn_net(self):
         cnn_part = []
-        if hp.use_learning_curve:
-            act_func = self.get_class(torch.nn, hp.act_func)()
+        if self.meta.use_learning_curve:
             cnn_part.append(
                 nn.Conv1d(
                     in_channels=2,
-                    kernel_size=(hp.kernel_size,),
-                    out_channels=hp.nr_filters,
+                    kernel_size=(self.meta.kernel_size,),
+                    out_channels=self.meta.nr_filters,
                 ),
             )
-            for i in range(1, hp.nr_cnn_layers):
-                cnn_part.append(act_func)
+            for i in range(1, self.meta.nr_cnn_layers):
+                cnn_part.append(self.act_func)
                 cnn_part.append(
                     nn.Conv1d(
-                        in_channels=hp.nr_filters,
-                        kernel_size=(hp.kernel_size,),
-                        out_channels=hp.nr_filters,
+                        in_channels=self.meta.nr_filters,
+                        kernel_size=(self.meta.kernel_size,),
+                        out_channels=self.meta.nr_filters,
                     ),
                 ),
             cnn_part.append(nn.AdaptiveAvgPool1d(1))
@@ -149,7 +89,7 @@ class ConditionedPowerLawModel(BasePytorchModule):
         x, predict_budgets, learning_curves = batch
 
         # x = torch.cat((x, torch.unsqueeze(evaluated_budgets, 1)), dim=1)
-        if self.hp.use_learning_curve:
+        if self.meta.use_learning_curve:
             lc_features = self.cnn(learning_curves)
             # revert the output from the cnn into nr_rows x nr_kernels.
             lc_features = torch.squeeze(lc_features, 2)
@@ -163,97 +103,12 @@ class ConditionedPowerLawModel(BasePytorchModule):
         output = torch.add(
             alphas,
             torch.mul(
-                self.last_act_func(torch.cat((betas, betas))),
+                self.last_act_func(betas),
                 torch.pow(
                     predict_budgets,
-                    torch.mul(self.last_act_func(torch.cat((gammas, gammas))), -1)
+                    torch.mul(self.last_act_func(gammas), -1)
                 )
             ),
         )
 
         return output
-
-    def set_optimizer(self, hp):
-        optimizer_class = self.get_class(torch.optim, hp.optimizer)
-        self.optimizer = optimizer_class(self.parameters(), lr=hp.learning_rate)
-
-    def get_class(self, package, name):
-        return getattr(package, name)
-
-    def training_step(self):
-        batch = next(self.train_dataloader_it)
-        batch_examples, batch_labels, batch_budgets, batch_curves = batch
-        nr_examples_batch = batch_examples.shape[0]
-        # if only one example in the batch, skip the batch.
-        # Otherwise, the code will fail because of batchnormalization.
-        if self.has_batchnorm_layers and nr_examples_batch == 1:
-            return 0
-
-        # zero the parameter gradients
-        self.optimizer.zero_grad(set_to_none=True)
-        outputs = self((batch_examples, batch_budgets, batch_curves))
-        loss = self.criterion(outputs, batch_labels)
-        loss.backward()
-        self.optimizer.step()
-        return loss.item()
-
-    def train_epoch(self):
-        running_loss = 0
-        while True:
-            try:
-                loss = self.training_step()
-                running_loss += loss
-            except StopIteration:
-                self.train_dataloader_it = iter(self.train_dataloader)
-                break
-        normalized_loss = running_loss / len(self.train_dataloader)
-        return normalized_loss
-
-    def train_loop(self, nr_epochs, train_dataloader=None, reset_optimizer=False):
-        self.set_dataloader(train_dataloader)
-
-        if reset_optimizer:
-            self.set_optimizer(self.hp)
-
-        self.set_seed(self.seed)
-        self.train()
-
-        patience_rounds = 0
-        best_loss = np.inf
-        best_state = deepcopy(self.state_dict())
-
-        for epoch in range(0, nr_epochs):
-            normalized_loss = self.train_epoch()
-            self.logger.info(f'Epoch {epoch + 1}, Loss:{normalized_loss}')
-            ConditionedPowerLawModel._global_epoch[self.instance_id] += 1
-            wandb.log({f"surrogate/model_{self.instance_id}/training_loss": normalized_loss,
-                       f"surrogate/model_{self.instance_id}/epoch": ConditionedPowerLawModel._global_epoch[
-                           self.instance_id]})
-            if self.hp.activate_early_stopping:
-                if normalized_loss < best_loss:
-                    best_state = deepcopy(self.state_dict())
-                    best_loss = normalized_loss
-                    patience_rounds = 0
-                elif normalized_loss > best_loss:
-                    patience_rounds += 1
-                    if patience_rounds == self.hp.early_stopping_it:
-                        self.load_state_dict(best_state)
-                        self.logger.info(f'Stopping training since validation loss is not improving')
-                        break
-        check_seed_torch = torch.random.get_rng_state().sum()
-        self.logger.info(f"end rng_state {check_seed_torch}")
-        if self.hp.activate_early_stopping:
-            self.load_state_dict(best_state)
-
-    def predict(self, test_data):
-        self.eval()
-        predictions = self((test_data.X, test_data.budgets, test_data.curves))
-        return predictions
-
-    def __del__(self):
-        ConditionedPowerLawModel._instance_counter = 0
-
-    def print_parameters(self):
-        for name, param in self.named_parameters():
-            a = param
-            print(f"{name}: {param}")

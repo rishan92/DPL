@@ -18,11 +18,10 @@ from pathlib import Path
 from src.benchmarks.lcbench import LCBench
 from src.benchmarks.taskset import TaskSet
 # from benchmarks.hyperbo import PD1
-from src.surrogate_models.power_law_surrogate import PowerLawSurrogate
+from src.surrogate_models.hyperparameter_optimizer import HyperparameterOptimizer
 from src.surrogate_models.asha import AHBOptimizer
 from src.surrogate_models.dehb.interface import DEHBOptimizer
 from src.surrogate_models.random_search import RandomOptimizer
-from src.surrogate_models.hpo_method import DyHPOAlgorithm
 import global_variables as gv
 import subprocess
 
@@ -34,8 +33,8 @@ import subprocess
 
 class Framework:
     surrogate_types = {
-        'power_law': PowerLawSurrogate,
-        'dyhpo': PowerLawSurrogate,
+        'power_law': HyperparameterOptimizer,
+        'dyhpo': HyperparameterOptimizer,
         'asha': AHBOptimizer,
         'dehb': DEHBOptimizer,
         # 'dragonfly': DragonFlyOptimizer,

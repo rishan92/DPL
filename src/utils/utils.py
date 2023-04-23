@@ -1,5 +1,6 @@
 import os
 from importlib import import_module
+from typing import List, Tuple, Dict, Optional, Any, Union, Type
 
 
 def get_class(folder_path, class_name):
@@ -19,6 +20,24 @@ def get_class(folder_path, class_name):
     return None
 
 
+def get_class_from_package(package, name):
+    return getattr(package, name)
+
+
+def get_class_from_packages(packages: List, name):
+    attribute = None
+    for package in packages:
+        try:
+            attribute = getattr(package, name)
+            break
+        except AttributeError:
+            continue
+
+    if attribute is None:
+        raise AttributeError(f"Attribute '{name}' not found in any of the given packages.")
+    return attribute
+
+
 def merge_dicts(dict1, dict2):
     merged = dict1.copy()
     for key, value in dict2.items():
@@ -32,5 +51,3 @@ def merge_dicts(dict1, dict2):
 class classproperty(property):
     def __get__(self, cls, owner):
         return classmethod(self.fget).__get__(None, owner)()
-
-

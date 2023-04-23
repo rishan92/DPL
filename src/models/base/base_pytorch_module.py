@@ -26,14 +26,13 @@ class BasePytorchModule(nn.Module):
         self.logger = logger
 
         assert self.meta is not None, "Meta parameters are not set"
-        self.hp = self.meta
 
         self.nr_features = nr_features
         self.seed = seed
         self.set_seed(self.seed)
 
     def get_meta(self):
-        return vars(self.hp)
+        return vars(self.meta)
 
     @staticmethod
     def get_default_meta() -> Dict[str, Any]:
@@ -66,10 +65,6 @@ class BasePytorchModule(nn.Module):
     def use_learning_curve_mask(cls):
         return cls.meta.use_learning_curve_mask
 
-    @classproperty
-    def predict_mode(cls):
-        return cls.meta.predict_mode
-
-    @classproperty
-    def curve_size_mode(cls):
-        return cls.meta.curve_size_mode
+    def print_parameters(self):
+        for name, param in self.named_parameters():
+            print(f"{name}: {param}")

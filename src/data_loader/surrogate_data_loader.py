@@ -5,13 +5,14 @@ import random
 from typing import List, Tuple, Any, Type, Optional
 
 
+def seed_worker(worker_id):
+    worker_seed = torch.initial_seed() % 2 ** 32
+    np.random.seed(worker_seed)
+    random.seed(worker_seed)
+
+
 class SurrogateDataLoader(DataLoader):
     def __init__(self, seed=0, dev='cpu', should_weight_last_sample=False, last_sample=None, **kwargs):
-        def seed_worker(worker_id):
-            worker_seed = torch.initial_seed() % 2 ** 32
-            np.random.seed(worker_seed)
-            random.seed(worker_seed)
-
         if seed is not None:
             g = torch.Generator()
             g.manual_seed(int(seed))
