@@ -414,16 +414,11 @@ class PowerLawSurrogate:
                     pass
 
                 self._train_surrogate(pretrain=self.pretrain)
-                if gv.IS_DYHPO:
-                    if self.iterations_counter < self.initial_full_training_trials:
-                        self.train = True
-                    else:
-                        self.train = False
+
+                if self.iterations_counter <= self.initial_full_training_trials:
+                    self.train = True
                 else:
-                    if self.iterations_counter <= self.initial_full_training_trials:
-                        self.train = True
-                    else:
-                        self.train = False
+                    self.train = False
             else:
                 self.refine_counter += 1
                 self._train_surrogate(should_refine=True)

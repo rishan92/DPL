@@ -2,7 +2,7 @@ from torch.utils.data import DataLoader
 import torch
 import numpy as np
 import random
-from typing import List, Tuple, Any, Type
+from typing import List, Tuple, Any, Type, Optional
 
 
 class SurrogateDataLoader(DataLoader):
@@ -30,7 +30,7 @@ class SurrogateDataLoader(DataLoader):
     def __iter__(self):
         batches = super().__iter__()
         if self.should_weight_last_sample:
-            weighted_batch = [None] * 4
+            weighted_batch: List[Optional[torch.Tensor]] = [None] * 4
             for b in batches:
                 for i in range(4):
                     weighted_batch[i] = torch.cat((b[i], self.last_sample[i]))
