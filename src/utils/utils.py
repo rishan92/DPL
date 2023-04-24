@@ -1,6 +1,7 @@
 import os
 from importlib import import_module
 from typing import List, Tuple, Dict, Optional, Any, Union, Type
+import shutil
 
 
 def get_class(folder_path, class_name):
@@ -51,3 +52,13 @@ def merge_dicts(dict1, dict2):
 class classproperty(property):
     def __get__(self, cls, owner):
         return classmethod(self.fget).__get__(None, owner)()
+
+
+def delete_folder_content(folder_path: str):
+    for item in os.listdir(folder_path):
+        item_path = os.path.join(folder_path, item)
+
+        if os.path.isfile(item_path):
+            os.remove(item_path)  # Remove file
+        elif os.path.isdir(item_path):
+            shutil.rmtree(item_path)

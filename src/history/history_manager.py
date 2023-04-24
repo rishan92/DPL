@@ -16,7 +16,7 @@ from numpy.typing import NDArray
 
 class HistoryManager:
     def __init__(self, hp_candidates, max_benchmark_epochs, fantasize_step, use_learning_curve, use_learning_curve_mask,
-                 fill_value='zero'):
+                 fill_value='zero', use_target_normalization=False, use_scaled_budgets=True):
         assert fill_value in ["zero", "last"], "Invalid fill value mode"
         # assert predict_mode in ["end_budget", "next_budget"], "Invalid predict mode"
         # assert curve_size_mode in ["fixed", "variable"], "Invalid curve size mode"
@@ -25,6 +25,8 @@ class HistoryManager:
         self.fill_value = fill_value
         self.use_learning_curve = use_learning_curve
         self.use_learning_curve_mask = use_learning_curve_mask
+        self.use_target_normalization = use_target_normalization
+        self.use_scaled_budgets = use_scaled_budgets
 
         # the keys will be hyperparameter indices while the value
         # will be a list with all the budgets evaluated for examples
@@ -41,6 +43,8 @@ class HistoryManager:
         self.is_history_modified = True
         self.cached_train_dataset = None
 
+        self.max_curve_value = 0
+
     def get_initial_empty_value(self):
         initial_empty_value = self.get_mean_initial_value() if self.fill_value == 'last' else 0
         return initial_empty_value
@@ -52,6 +56,10 @@ class HistoryManager:
 
         initial_empty_value = self.get_initial_empty_value()
         self.last_point = (hp_index, b, hp_curve[b - 1], hp_curve[0:b - 1] if b > 1 else [initial_empty_value])
+
+        max_curve = np.max(hp_curve)
+        self.max_curve_value = max(self.max_curve_value, max_curve)
+        # self.max_curve_value = 10
 
         self.is_history_modified = True
 
@@ -69,7 +77,11 @@ class HistoryManager:
 
         new_example = torch.tensor(self.hp_candidates[newp_index], dtype=torch.float32)
         new_example = torch.unsqueeze(new_example, dim=0)
-        newp_budget = torch.tensor([newp_budget], dtype=torch.float32) / self.max_benchmark_epochs
+
+        newp_budget = torch.tensor([newp_budget], dtype=torch.float32)
+        if self.use_scaled_budgets:
+            newp_budget = newp_budget / self.max_benchmark_epochs
+
         newp_performance = torch.tensor([newp_performance], dtype=torch.float32)
 
         if modified_curve is not None:
@@ -131,8 +143,12 @@ class HistoryManager:
 
         hp_indices, train_labels, train_budgets, train_curves = self.history_configurations(curve_size_mode)
 
-        # scale budgets to [0, 1]
-        train_budgets = train_budgets / self.max_benchmark_epochs
+        if self.use_scaled_budgets:
+            # scale budgets to [0, 1]
+            train_budgets = train_budgets / self.max_benchmark_epochs
+
+        if self.use_target_normalization:
+            train_labels = train_labels / self.max_curve_value
 
         # This creates a copy
         train_examples = self.hp_candidates[hp_indices]
@@ -177,7 +193,10 @@ class HistoryManager:
         p_config = p_config.expand(self.max_benchmark_epochs, -1)
 
         real_budgets = np.arange(1, self.max_benchmark_epochs + 1)
-        p_budgets = torch.tensor(real_budgets / self.max_benchmark_epochs, dtype=torch.float32)
+
+        p_budgets = torch.tensor(real_budgets, dtype=torch.float32)
+        if self.use_scaled_budgets:
+            p_budgets = p_budgets / self.max_benchmark_epochs
 
         p_curve = None
         if curves is not None:
@@ -353,8 +372,10 @@ class HistoryManager:
         Tuple[TabularDataset, NDArray[int], NDArray[int]]:
         hp_indices, budgets, real_budgets, hp_curves = self.generate_candidate_configurations(predict_mode,
                                                                                               curve_size_mode)
-        # scale budgets to [0, 1]
-        budgets = budgets / self.max_benchmark_epochs
+
+        if self.use_scaled_budgets:
+            # scale budgets to [0, 1]
+            budgets = budgets / self.max_benchmark_epochs
 
         # This creates a copy
         configurations = self.hp_candidates[hp_indices]

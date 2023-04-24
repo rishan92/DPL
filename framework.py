@@ -24,6 +24,7 @@ from src.surrogate_models.dehb.interface import DEHBOptimizer
 from src.surrogate_models.random_search import RandomOptimizer
 import global_variables as gv
 import subprocess
+from src.utils.utils import delete_folder_content
 
 
 # if warnings.catch_warnings():
@@ -122,6 +123,7 @@ class Framework:
             job_type=args.dataset_name,
             name=f"{args.dataset_name}_{self.seed}",
         )
+        print(f"group_name {group_name}")
 
         self.result_dir = os.path.join(
             args.output_dir,
@@ -138,6 +140,7 @@ class Framework:
         self.incumbent_hp_index = self.benchmark.get_incumbent_config_id()
         self.pred_curves_path = os.path.join(self.result_dir, "pred_curves", self.dataset_name, str(self.seed))
         os.makedirs(self.pred_curves_path, exist_ok=True)
+        delete_folder_content(self.pred_curves_path)
 
         if args.surrogate_name not in disable_preprocessing:
             self.hp_candidates = self.preprocess(self.benchmark.get_hyperparameter_candidates())

@@ -202,6 +202,8 @@ class HyperparameterOptimizer:
             use_learning_curve=self.model_class.use_learning_curve,
             use_learning_curve_mask=self.model_class.use_learning_curve_mask,
             fantasize_step=self.fantasize_step,  # TODO: remove this dependency
+            use_target_normalization=self.meta.use_target_normalization,
+            use_scaled_budgets=self.meta.use_scaled_budgets,
         )
 
     def get_meta(self):
@@ -217,6 +219,8 @@ class HyperparameterOptimizer:
                 'curve_size_mode': 'fixed',
                 'acq_mode': 'ei',
                 'acq_best_value_mode': 'normal',
+                'use_target_normalization': False,
+                'use_scaled_budgets': True,
             }
         elif model_class == DyHPOModel:
             hp = {
@@ -226,6 +230,8 @@ class HyperparameterOptimizer:
                 'curve_size_mode': 'variable',
                 'acq_mode': 'ei',
                 'acq_best_value_mode': 'mf',  # mf - multi-fidelity, normal, None
+                'use_target_normalization': False,
+                'use_scaled_budgets': True,
             }
         else:
             raise NotImplementedError(f"{model_class=}")
@@ -298,6 +304,9 @@ class HyperparameterOptimizer:
         train_data = self.history_manager.get_train_dataset(curve_size_mode=self.meta.curve_size_mode)
 
         mean_predictions, std_predictions = self.model.predict(test_data=test_data, train_data=train_data)
+
+        if self.meta.use_target_normalization:
+            mean_predictions = mean_predictions * self.history_manager.max_curve_value
 
         return mean_predictions, std_predictions, hp_indices, real_budgets
 
@@ -440,6 +449,9 @@ class HyperparameterOptimizer:
         train_data = self.history_manager.get_train_dataset(curve_size_mode=self.meta.curve_size_mode)
 
         mean_data, std_data = self.model.predict(test_data=pred_test_data, train_data=train_data)
+
+        if self.meta.use_target_normalization:
+            mean_data = mean_data * self.history_manager.max_curve_value
 
         plt.clf()
         p = sns.lineplot(x=real_budgets, y=mean_data)
