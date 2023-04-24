@@ -111,4 +111,32 @@ class ConditionedPowerLawModel(PowerLawModel):
             ),
         )
 
+        # budget_lower_limit = torch.tensor(1 / 51)
+        # budget_upper_limit = torch.tensor(1)
+        # constrained_alpha = alphas
+        # constrained_beta = betas
+        # constrained_gamma = gammas
+        # start_output = torch.add(
+        #     constrained_alpha,
+        #     torch.mul(
+        #         constrained_beta,
+        #         torch.pow(
+        #             budget_lower_limit,
+        #             torch.mul(constrained_gamma, -1)
+        #         )
+        #     ),
+        # )
+        # end_output = torch.add(
+        #     constrained_alpha,
+        #     torch.mul(
+        #         constrained_beta,
+        #         torch.pow(
+        #             budget_upper_limit,
+        #             torch.mul(constrained_gamma, -1)
+        #         )
+        #     ),
+        # )
+        # print(f"start {start_output}")
+        # print(f"end {end_output}")
+
         return output

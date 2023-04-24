@@ -8,17 +8,22 @@ import torch
 from loguru import logger
 
 import gpytorch
+import wandb
+from gpytorch.constraints import Interval
 
 from src.models.deep_kernel_learning.feature_extractor import FeatureExtractor
 from src.models.deep_kernel_learning.gp_regression_model import GPRegressionModel
 from src.models.base.base_pytorch_module import BasePytorchModule
 from src.dataset.tabular_dataset import TabularDataset
+from src.utils.utils import get_class_from_package, get_class_from_packages
+import src.models.deep_kernel_learning
 
 
 class DyHPOModel(BasePytorchModule):
     """
     The DyHPO DeepGP model.
     """
+    _global_epoch = 0
 
     def __init__(
         self,
@@ -42,13 +47,22 @@ class DyHPOModel(BasePytorchModule):
         """
         super().__init__(nr_features=nr_features, seed=seed)
         self.meta.nr_features = nr_features
-        self.feature_extractor = FeatureExtractor(self.meta)
+        self.feature_extractor_class = get_class_from_package(src.models.deep_kernel_learning,
+                                                              self.meta.feature_class_name)
+        self.gp_class = get_class_from_package(src.models.deep_kernel_learning,
+                                               self.meta.gp_class_name)
+        self.likelihood_class = get_class_from_packages([gpytorch.likelihoods, src.models.deep_kernel_learning],
+                                                        self.meta.likelihood_class_name)
+        self.mll_class = get_class_from_packages([gpytorch.mlls, src.models.deep_kernel_learning],
+                                                 self.meta.mll_class_name)
+        self.feature_extractor = self.feature_extractor_class(self.meta)
+        self.feature_output_size = 4
 
         self.early_stopping_patience = self.meta.nr_patience_epochs
         self.seed = seed
         self.model, self.likelihood, self.mll = \
             self.get_model_likelihood_mll(
-                getattr(self.meta, f'layer{self.feature_extractor.nr_layers}_units')
+                self.feature_output_size
             )
 
         self.optimizer = torch.optim.Adam([
@@ -80,6 +94,7 @@ class DyHPOModel(BasePytorchModule):
     def get_default_meta(**kwargs) -> Dict[str, Any]:
         hp = {
             'nr_layers': 2,
+            'nr_units': 128,
             'layer1_units': 64,
             'layer2_units': 128,
             'cnn_nr_channels': 4,
@@ -89,36 +104,28 @@ class DyHPOModel(BasePytorchModule):
             'learning_rate': 0.001,
             'nr_epochs': 1000,
             'refine_nr_epochs': 50,
-            'use_learning_curve': True,
+            'use_learning_curve': False,
             'use_learning_curve_mask': False,
-            'feature_class_name': 'FeatureExtractor',
-            'gp_class_name': 'GPRegressionModel',
+            'feature_class_name': 'FeatureExtractorPowerLaw',
+            'gp_class_name': 'GPRegressionPowerLawMeanModel',  # 'GPRegressionModel',  #
+            'likelihood_class_name': 'GaussianLikelihood',
+            'mll_class_name': 'ExactMarginalLogLikelihood',
+            'noise_lower_bound': 1e-4,
+            'noise_upper_bound': 1e-3,
+            'act_func': 'LeakyReLU',
+            'last_act_func': 'SelfGLU',
         }
+
         return hp
-
-    def to(self, dev):
-        self.feature_extractor.to(dev)
-        self.model.to(dev)
-        self.likelihood.to(dev)
-
-    def train(self, **kwargs):
-        self.feature_extractor.train(**kwargs)
-        self.model.train(**kwargs)
-        self.likelihood.train(**kwargs)
-
-    def eval(self):
-        self.feature_extractor.eval()
-        self.model.eval()
-        self.likelihood.eval()
 
     def restart_optimization(self):
         """
         Restart the surrogate model from scratch.
         """
-        self.feature_extractor = FeatureExtractor(self.meta)
+        self.feature_extractor = self.feature_extractor_class(self.meta)
         self.model, self.likelihood, self.mll = \
             self.get_model_likelihood_mll(
-                getattr(self.meta, f'layer{self.feature_extractor.nr_layers}_units'),
+                self.feature_output_size
             )
 
         self.optimizer = torch.optim.Adam([
@@ -142,10 +149,11 @@ class DyHPOModel(BasePytorchModule):
         """
         train_x = torch.ones(train_size, train_size)
         train_y = torch.ones(train_size)
+        noise_constraint = Interval(lower_bound=self.meta.noise_lower_bound, upper_bound=self.meta.noise_upper_bound)
 
-        likelihood = gpytorch.likelihoods.GaussianLikelihood()
-        model = GPRegressionModel(train_x=train_x, train_y=train_y, likelihood=likelihood)
-        mll = gpytorch.mlls.ExactMarginalLogLikelihood(likelihood, model)
+        likelihood = self.likelihood_class(noise_constraint=noise_constraint)
+        model = self.gp_class(train_x=train_x, train_y=train_y, likelihood=likelihood)
+        mll = self.mll_class(likelihood, model)
 
         return model, likelihood, mll
 
@@ -218,6 +226,12 @@ class DyHPOModel(BasePytorchModule):
                     f'lengthscale: {self.model.covar_module.base_kernel.lengthscale.item()}, '
                     f'noise: {self.model.likelihood.noise.item()}, '
                 )
+                DyHPOModel._global_epoch += 1
+                wandb.log({f"surrogate/dyhpo/training_loss": loss_value,
+                           f"surrogate/dyhpo/training_mse": mse,
+                           f"surrogate/dyhpo/training_lengthscale": self.model.covar_module.base_kernel.lengthscale.item(),
+                           f"surrogate/dyhpo/training_noise": self.model.likelihood.noise.item(),
+                           f"surrogate/dyhpo/epoch": DyHPOModel._global_epoch})
                 loss.backward()
                 self.optimizer.step()
             except Exception as training_error:
@@ -326,3 +340,18 @@ class DyHPOModel(BasePytorchModule):
         }
 
         return current_state
+
+    def to(self, dev):
+        self.feature_extractor.to(dev)
+        self.model.to(dev)
+        self.likelihood.to(dev)
+
+    def train(self, **kwargs):
+        self.feature_extractor.train(**kwargs)
+        self.model.train(**kwargs)
+        self.likelihood.train(**kwargs)
+
+    def eval(self):
+        self.feature_extractor.eval()
+        self.model.eval()
+        self.likelihood.eval()

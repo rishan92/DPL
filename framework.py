@@ -203,7 +203,7 @@ class Framework:
             start_time = time.time()
             hp_index, budget = self.surrogate.suggest()
 
-            if budget == 10 or budget == 20 or budget == 40:
+            if budget == 1 or budget == 10 or budget == 20 or budget == 40:
                 self.surrogate.plot_pred_curve(hp_index, self.benchmark, surrogate_budget, self.pred_curves_path)
                 self.surrogate.plot_pred_curve(self.incumbent_hp_index, self.benchmark, surrogate_budget,
                                                self.pred_curves_path, prefix="incumbent_")

@@ -226,10 +226,10 @@ class HyperparameterOptimizer:
             hp = {
                 'fraction_random_configs': 0.1,
                 'initial_full_training_trials': 10,
-                'predict_mode': 'next_budget',
+                'predict_mode': 'end_budget',  # 'next_budget',
                 'curve_size_mode': 'variable',
                 'acq_mode': 'ei',
-                'acq_best_value_mode': 'mf',  # mf - multi-fidelity, normal, None
+                'acq_best_value_mode': 'normal',  # 'mf',  # mf - multi-fidelity, normal, None
                 'use_target_normalization': False,
                 'use_scaled_budgets': True,
             }
