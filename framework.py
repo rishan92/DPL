@@ -124,6 +124,7 @@ class Framework:
             name=f"{args.dataset_name}_{self.seed}",
         )
         print(f"group_name {group_name}")
+        # wandb.init(mode="disabled")
 
         self.result_dir = os.path.join(
             args.output_dir,
