@@ -38,6 +38,14 @@ class GPRegressionPowerLawMeanModel(gpytorch.models.ExactGP):
         self.mean_module = PowerLawMean()
         self.covar_module = gpytorch.kernels.ScaleKernel(gpytorch.kernels.RBFKernel())
 
+        # grid_size = gpytorch.utils.grid.choose_grid_size(train_x, 1.0)
+        #
+        # self.covar_module = gpytorch.kernels.ScaleKernel(
+        #     gpytorch.kernels.GridInterpolationKernel(
+        #         gpytorch.kernels.RBFKernel(ard_num_dims=3), grid_size=grid_size, num_dims=3
+        #     )
+        # )
+
     def forward(self, x):
         mean_x = self.mean_module(x)
         x_wo_output = x[:, :-1]

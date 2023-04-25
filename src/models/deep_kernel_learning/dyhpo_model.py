@@ -9,7 +9,7 @@ from loguru import logger
 
 import gpytorch
 import wandb
-from gpytorch.constraints import Interval
+from gpytorch.constraints import Interval, GreaterThan, LessThan
 
 from src.models.deep_kernel_learning.feature_extractor import FeatureExtractor
 from src.models.deep_kernel_learning.gp_regression_model import GPRegressionModel
@@ -106,14 +106,14 @@ class DyHPOModel(BasePytorchModule):
             'refine_nr_epochs': 50,
             'use_learning_curve': False,
             'use_learning_curve_mask': False,
-            'feature_class_name': 'FeatureExtractorPowerLaw',
-            'gp_class_name': 'GPRegressionPowerLawMeanModel',  # 'GPRegressionModel',  #
+            'feature_class_name': 'FeatureExtractorD vYHPO',  # 'FeatureExtractorPowerLaw',
+            'gp_class_name': 'GPRegressionModel',  # 'GPRegressionPowerLawMeanModel',  #
             'likelihood_class_name': 'GaussianLikelihood',
             'mll_class_name': 'ExactMarginalLogLikelihood',
-            'noise_lower_bound': 1e-4,
-            'noise_upper_bound': 1e-3,
+            'noise_lower_bound': 1e-4,  # None,  #
+            'noise_upper_bound': 1e-3,  # None,  #
             'act_func': 'LeakyReLU',
-            'last_act_func': 'SelfGLU',
+            'last_act_func': 'GELU',
         }
 
         return hp
@@ -149,7 +149,15 @@ class DyHPOModel(BasePytorchModule):
         """
         train_x = torch.ones(train_size, train_size)
         train_y = torch.ones(train_size)
-        noise_constraint = Interval(lower_bound=self.meta.noise_lower_bound, upper_bound=self.meta.noise_upper_bound)
+        if self.meta.noise_lower_bound is not None and self.meta.noise_upper_bound is not None:
+            noise_constraint = Interval(lower_bound=self.meta.noise_lower_bound,
+                                        upper_bound=self.meta.noise_upper_bound)
+        elif self.meta.noise_lower_bound is not None:
+            noise_constraint = GreaterThan(lower_bound=self.meta.noise_lower_bound)
+        elif self.meta.noise_upper_bound is not None:
+            noise_constraint = LessThan(upper_bound=self.meta.noise_upper_bound)
+        else:
+            noise_constraint = None
 
         likelihood = self.likelihood_class(noise_constraint=noise_constraint)
         model = self.gp_class(train_x=train_x, train_y=train_y, likelihood=likelihood)
@@ -229,13 +237,15 @@ class DyHPOModel(BasePytorchModule):
                 DyHPOModel._global_epoch += 1
                 wandb.log({f"surrogate/dyhpo/training_loss": loss_value,
                            f"surrogate/dyhpo/training_mse": mse,
-                           f"surrogate/dyhpo/training_lengthscale": self.model.covar_module.base_kernel.lengthscale.item(),
+                           f"surrogate/dyhpo/training_lengthscale":
+                               self.model.covar_module.base_kernel.lengthscale.item(),
                            f"surrogate/dyhpo/training_noise": self.model.likelihood.noise.item(),
                            f"surrogate/dyhpo/epoch": DyHPOModel._global_epoch})
                 loss.backward()
                 self.optimizer.step()
             except Exception as training_error:
                 self.logger.error(f'The following error happened while training: {training_error}')
+                raise training_error
                 # An error has happened, trigger the restart of the optimization and restart
                 # the model with default hyperparameters.
                 self.restart = True
