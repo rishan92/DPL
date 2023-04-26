@@ -64,10 +64,19 @@ class Framework:
                 The seed for the experiment.
         """
 
+        self.start_time = time.perf_counter()
+
         logger.remove()
-        # logger.add(sys.stderr, format="{level} | {message}")
+
         self.log_path = Path(f'./logs/power_law_surrogate_{args.dataset_name}_{seed}.log')
-        logger.add(self.log_path, mode='w', format="{level} | {message}")
+
+        if args.verbose:
+            log_level = "TRACE"
+            format_str = "{level} | {message}"
+            logger.add(self.log_path, mode='w', format=format_str, level=log_level)
+        else:
+            log_level = "SUCCESS"
+            logger.add(self.log_path, mode='w', level=log_level)
 
         if args.benchmark_name == 'lcbench':
             benchmark_extension = os.path.join('lc_bench', 'results', 'data_2k.json')
@@ -85,8 +94,8 @@ class Framework:
             benchmark_extension,
         )
 
-        benchmark_types = Framework.benchmark_types
-        surrogate_types = Framework.surrogate_types
+        benchmark_types = self.benchmark_types
+        surrogate_types = self.surrogate_types
 
         disable_preprocessing = {
             'dehb',
@@ -100,6 +109,7 @@ class Framework:
         self.min_value = self.benchmark.min_value
         self.total_budget = args.budget_limit
         self.fantasize_step = args.fantasize_step
+        self.surrogate_budget = 0
 
         self.categorical_indicator = self.benchmark.categorical_indicator
         self.log_indicator = self.benchmark.log_indicator
@@ -109,22 +119,25 @@ class Framework:
 
         # set up wandb
         commit_hash = subprocess.check_output(["git", "rev-parse", "HEAD"]).decode("ascii").strip()
-        framework_meta = Framework.set_meta(args.surrogate_name, configs)
+        framework_meta = self.set_meta(args.surrogate_name, configs)
         serialized_dict = json.dumps(framework_meta, sort_keys=True, ensure_ascii=True).encode('utf-8')
         config_hash = hashlib.md5(serialized_dict).hexdigest()
-        local_name = "local" if gv.IS_DEBUG else "nemo"
+        local_name = "nemo" if gv.IS_NEMO else "local"
         group_name = f"{args.benchmark_name}_{args.surrogate_name}_{commit_hash}_{config_hash}_{local_name}"
-        wandb.init(
-            project="power_law_hpo",
-            config=framework_meta,
-            group=group_name,
-            tags=[args.benchmark_name, args.dataset_name, args.surrogate_name, config_hash, commit_hash,
-                  str(self.seed), local_name],
-            job_type=args.dataset_name,
-            name=f"{args.dataset_name}_{self.seed}",
-        )
+        if gv.IS_WANDB:
+            wandb.init(
+                project="power_law_hpo",
+                config=framework_meta,
+                group=group_name,
+                tags=[args.benchmark_name, args.dataset_name, args.surrogate_name, config_hash, commit_hash,
+                      str(self.seed), local_name],
+                job_type=args.dataset_name,
+                name=f"{args.dataset_name}_{self.seed}",
+            )
+        else:
+            wandb.init(mode="disabled")
+
         print(f"group_name {group_name}")
-        # wandb.init(mode="disabled")
 
         self.result_dir = os.path.join(
             args.output_dir,
@@ -149,7 +162,6 @@ class Framework:
             self.hp_candidates = self.benchmark.get_hyperparameter_candidates()
 
         if args.surrogate_name == 'power_law' or args.surrogate_name == 'dyhpo':
-            gv.IS_DYHPO = (args.surrogate_name == 'dyhpo')
             self.surrogate = surrogate_types[args.surrogate_name](
                 self.hp_candidates,
                 surrogate_name=args.surrogate_name,
@@ -176,21 +188,30 @@ class Framework:
                 maximization=not self.benchmark.minimization_metric,
             )
 
-    def finish(self):
+    def finish(self, is_failed=False):
         wandb.log_artifact(str(self.log_path), name='debug_log', type='log')
         wandb.log_artifact(str(self.result_file), name='result_json', type='result')
         wandb.finish()
 
+        end_time = time.perf_counter()
+        run_time = (end_time - self.start_time) / 60
+        if not is_failed:
+            logger.success(f"Successfully finished. Execution time: {run_time} minutes.")
+        else:
+            logger.error(
+                f"Successfully halted at {self.surrogate_budget} surrogate iteration. "
+                f"Execution time: {run_time} minutes."
+            )
+
     @classmethod
     def set_meta(cls, surrogate_name, configs):
         model_class = cls.surrogate_types[surrogate_name]
-        meta = model_class.set_meta(surrogate_name, configs)
+        meta = model_class.set_meta(surrogate_name=surrogate_name, configs=configs)
         return meta
 
     def run(self):
 
         evaluated_configs = dict()
-        surrogate_budget = 0
 
         if self.benchmark.minimization_metric:
             best_value = np.inf
@@ -199,14 +220,14 @@ class Framework:
 
         incumbent_value = self.benchmark.get_best_performance()
 
-        while surrogate_budget < self.total_budget:
+        while self.surrogate_budget < self.total_budget:
 
             start_time = time.time()
             hp_index, budget = self.surrogate.suggest()
 
-            if budget == 1 or budget == 10 or budget == 20 or budget == 40:
-                self.surrogate.plot_pred_curve(hp_index, self.benchmark, surrogate_budget, self.pred_curves_path)
-                self.surrogate.plot_pred_curve(self.incumbent_hp_index, self.benchmark, surrogate_budget,
+            if gv.PLOT_PRED_CURVES and (budget == 10 or budget == 10 or budget == 20 or budget == 40):
+                self.surrogate.plot_pred_curve(hp_index, self.benchmark, self.surrogate_budget, self.pred_curves_path)
+                self.surrogate.plot_pred_curve(self.incumbent_hp_index, self.benchmark, self.surrogate_budget,
                                                self.pred_curves_path, prefix="incumbent_")
 
             hp_curve = self.benchmark.get_curve(hp_index, budget)
@@ -232,9 +253,9 @@ class Framework:
                     if best_value < epoch_performance:
                         best_value = epoch_performance
 
-                surrogate_budget += 1
+                self.surrogate_budget += 1
 
-                if surrogate_budget > self.total_budget:
+                if self.surrogate_budget > self.total_budget:
                     self.finish()
                     return
 
@@ -256,7 +277,7 @@ class Framework:
                     'hpo/epochs': epoch,
                     'hpo/curve': best_value,
                     'hpo/overhead': step_time_duration,
-                    'hpo/surrogate_budget': surrogate_budget,
+                    'hpo/surrogate_budget': self.surrogate_budget,
                     'hpo/regret': regret,
                 }
                 wandb.log(metrics)

@@ -50,24 +50,24 @@ class ConditionedPowerLawModel(PowerLawModel):
 
     def get_cnn_net(self):
         cnn_part = []
-        if self.meta.use_learning_curve:
+
+        cnn_part.append(
+            nn.Conv1d(
+                in_channels=2,
+                kernel_size=(self.meta.kernel_size,),
+                out_channels=self.meta.nr_filters,
+            ),
+        )
+        for i in range(1, self.meta.nr_cnn_layers):
+            cnn_part.append(self.act_func)
             cnn_part.append(
                 nn.Conv1d(
-                    in_channels=2,
+                    in_channels=self.meta.nr_filters,
                     kernel_size=(self.meta.kernel_size,),
                     out_channels=self.meta.nr_filters,
                 ),
-            )
-            for i in range(1, self.meta.nr_cnn_layers):
-                cnn_part.append(self.act_func)
-                cnn_part.append(
-                    nn.Conv1d(
-                        in_channels=self.meta.nr_filters,
-                        kernel_size=(self.meta.kernel_size,),
-                        out_channels=self.meta.nr_filters,
-                    ),
-                ),
-            cnn_part.append(nn.AdaptiveAvgPool1d(1))
+            ),
+        cnn_part.append(nn.AdaptiveAvgPool1d(1))
 
         net = torch.nn.Sequential(*cnn_part)
         return net
@@ -90,12 +90,12 @@ class ConditionedPowerLawModel(PowerLawModel):
 
         # x = torch.cat((x, torch.unsqueeze(evaluated_budgets, 1)), dim=1)
         if self.meta.use_learning_curve:
-            lc_features = self.cnn(learning_curves)
+            lc_features = self.cnn_net(learning_curves)
             # revert the output from the cnn into nr_rows x nr_kernels.
             lc_features = torch.squeeze(lc_features, 2)
             x = torch.cat((x, lc_features), dim=1)
 
-        x = self.layers(x)
+        x = self.linear_net(x)
         alphas = x[:, 0]
         betas = x[:, 1]
         gammas = x[:, 2]

@@ -20,14 +20,14 @@ from src.data_loader.surrogate_data_loader import SurrogateDataLoader
 from src.models.deep_kernel_learning.dyhpo_model import DyHPOModel
 import global_variables as gv
 from src.history.history_manager import HistoryManager
+from src.models.base.meta import Meta
 
 
-class HyperparameterOptimizer:
+class HyperparameterOptimizer(Meta):
     model_types = {
         'power_law': EnsembleModel,
         'dyhpo': DyHPOModel,
     }
-    meta = None
 
     def __init__(
         self,
@@ -93,12 +93,14 @@ class HyperparameterOptimizer:
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False
 
+        super().__init__()
+
         self.model_type = surrogate_name
-        self.model_class: Union[Type[EnsembleModel], Type[DyHPOModel]] = HyperparameterOptimizer.model_types[
+        self.model_class: Union[Type[EnsembleModel], Type[DyHPOModel]] = self.model_types[
             surrogate_name]
         self.model = None
 
-        assert HyperparameterOptimizer.meta is not None, "Meta parameters are not set"
+        assert self.meta is not None, "Meta parameters are not set"
 
         self.total_budget = total_budget
         self.fill_value = fill_value
@@ -206,9 +208,6 @@ class HyperparameterOptimizer:
             use_scaled_budgets=self.meta.use_scaled_budgets,
         )
 
-    def get_meta(self):
-        return vars(self.meta)
-
     @staticmethod
     def get_default_meta(model_class):
         if model_class == EnsembleModel:
@@ -229,7 +228,7 @@ class HyperparameterOptimizer:
                 'predict_mode': 'next_budget',  # 'end_budget',  #
                 'curve_size_mode': 'variable',  # 'fixed',
                 'acq_mode': 'ei',
-                'acq_best_value_mode': 'mf',  # 'normal',  #  mf - multi-fidelity, normal, None
+                'acq_best_value_mode': 'mf',  # 'normal',  #    mf - multi-fidelity, normal, None
                 'use_target_normalization': False,
                 'use_scaled_budgets': True,
             }
@@ -238,7 +237,8 @@ class HyperparameterOptimizer:
         return hp
 
     @classmethod
-    def set_meta(cls, surrogate_name, config=None):
+    def set_meta(cls, config=None, **kwargs):
+        surrogate_name = kwargs.pop('surrogate_name', None)
         config = {} if config is None else config
         model_class = cls.model_types[surrogate_name]
         default_meta = cls.get_default_meta(model_class)
@@ -323,7 +323,7 @@ class HyperparameterOptimizer:
 
         if self.initial_random_index < len(self.rand_init_conf_indices):
             self.logger.info(
-                'Not enough configurations to build a model. \n'
+                f'Not enough configurations to build a model at iteration. \n'
                 'Returning randomly sampled configuration'
             )
             suggested_hp_index = self.rand_init_conf_indices[self.initial_random_index]
@@ -402,7 +402,7 @@ class HyperparameterOptimizer:
         if self.best_value_observed > best_curve_value:
             self.best_value_observed = best_curve_value
             self.no_improvement_patience = 0
-            self.logger.info(f'New Incumbent value found '
+            self.logger.info(f'New Incumbent value found at iteration'
                              f'{1 - best_curve_value if not self.minimization else best_curve_value}')
         else:
             self.no_improvement_patience += 1
@@ -413,7 +413,9 @@ class HyperparameterOptimizer:
                     'No improvement in the incumbent value threshold reached, '
                     'restarting training from scratch'
                 )
+
         self.logger.debug(f"no_improvement_patience {self.no_improvement_patience}")
+
         if self.initial_random_index >= len(self.rand_init_conf_indices):
 
             if self.train:

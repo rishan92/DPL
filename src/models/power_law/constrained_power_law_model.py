@@ -66,7 +66,7 @@ class ConstrainedPowerLawModel(PowerLawModel):
         """
         x, predict_budgets, learning_curves = batch
 
-        x = self.layers(x)
+        x = self.linear_net(x)
         alphas = x[:, 0]
         betas = x[:, 1]
         gammas = x[:, 2]

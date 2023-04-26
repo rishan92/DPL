@@ -2,10 +2,9 @@ import numpy as np
 from typing import List, Type
 from src.models.base.base_pytorch_module import BasePytorchModule
 from src.data_loader.surrogate_data_loader import SurrogateDataLoader
-from src.utils.utils import get_class
 from types import SimpleNamespace
 import torch.nn as nn
-from src.utils.utils import classproperty
+from src.utils.utils import get_class, classproperty
 
 
 class EnsembleModel(BasePytorchModule):
@@ -54,7 +53,7 @@ class EnsembleModel(BasePytorchModule):
         return hp
 
     @classmethod
-    def set_meta(cls, config=None):
+    def set_meta(cls, config=None, **kwargs):
         config = {} if config is None else config
         default_meta = cls.get_default_meta()
         meta = {**default_meta, **config}

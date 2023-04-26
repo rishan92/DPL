@@ -9,6 +9,7 @@ from loguru import logger
 from pathlib import Path
 import wandb
 import signal
+import time
 
 from framework import Framework
 
@@ -98,6 +99,13 @@ def main():
         help='configuration in json syntax',
     )
 
+    parser.add_argument(
+        '--verbose',
+        '-v',
+        action='store_true',
+        help="Enable the debug logging"
+    )
+
     args = parser.parse_args()
     seeds = np.arange(10)
     seed = seeds[args.index - 1]
@@ -117,7 +125,7 @@ def main():
     framework = Framework(args=args, seed=seed, configs=configs)
 
     def signal_handler(sig, frame):
-        framework.finish()
+        framework.finish(is_failed=True)
         sys.exit(0)
 
     # Register the signal handler for SIGINT (Ctrl+C) and SIGTERM
@@ -127,7 +135,7 @@ def main():
     try:
         framework.run()
     except Exception as ex:
-        framework.finish()
+        framework.finish(is_failed=True)
         raise ex
 
 

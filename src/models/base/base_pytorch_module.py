@@ -1,3 +1,5 @@
+from abc import ABC
+
 import torch
 import torch.nn as nn
 import numpy as np
@@ -9,9 +11,11 @@ from types import SimpleNamespace
 from torch.utils.data import DataLoader
 from src.data_loader.surrogate_data_loader import SurrogateDataLoader
 from src.utils.utils import classproperty
+from .meta import Meta
+from abc import ABC, abstractmethod
 
 
-class BasePytorchModule(nn.Module):
+class BasePytorchModule(nn.Module, Meta, ABC):
     meta = None
 
     def __init__(self, nr_features, seed=None, checkpoint_path='.'):
@@ -31,22 +35,8 @@ class BasePytorchModule(nn.Module):
         self.seed = seed
         self.set_seed(self.seed)
 
-    def get_meta(self):
-        return vars(self.meta)
-
     @staticmethod
-    def get_default_meta() -> Dict[str, Any]:
-        raise NotImplementedError
-
-    @classmethod
-    def set_meta(cls, config=None):
-        config = {} if config is None else config
-        default_meta = cls.get_default_meta()
-        meta = {**default_meta, **config}
-        cls.meta = SimpleNamespace(**meta)
-        return meta
-
-    def set_seed(self, seed):
+    def set_seed(seed):
         if seed is not None:
             torch.manual_seed(seed)
             np.random.seed(seed)

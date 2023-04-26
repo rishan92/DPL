@@ -12,26 +12,33 @@ from loguru import logger
 
 import gpytorch
 from src.models.activation_functions import SelfGLU, Abs, SelfAbsGLU
+from src.models.deep_kernel_learning.base_feature_extractor import BaseFeatureExtractor
 
 
-class FeatureExtractorPowerLaw(nn.Module):
+class FeatureExtractorPowerLaw(BaseFeatureExtractor):
     """
     The feature extractor that is part of the deep kernel.
     """
 
-    def __init__(self, configuration):
-        super().__init__()
-
-        self.meta = configuration
-
-        self.nr_layers = self.meta.nr_layers
-        self.act_func = nn.LeakyReLU()
-        self.last_act_func = SelfGLU()
-        # adding one to the dimensionality of the initial input features
-        # for the concatenation with the budget.
-        self.nr_features = self.meta.nr_features
+    def __init__(self, nr_features, seed=None):
+        super().__init__(nr_features, seed=seed)
 
         self.layers = self.get_linear_net()
+
+    @staticmethod
+    def get_default_meta():
+        hp = {
+            'nr_layers': 2,
+            'nr_units': 128,
+            'cnn_nr_channels': 4,
+            'cnn_kernel_size': 3,
+            'cnn_nr_layers': 1,
+            'use_learning_curve': False,
+            'use_learning_curve_mask': False,
+            'act_func': 'LeakyReLU',
+            'last_act_func': 'SelfGLU',
+        }
+        return hp
 
     def get_linear_net(self):
         layers = []
@@ -76,7 +83,7 @@ class FeatureExtractorPowerLaw(nn.Module):
         gammas = torch.unsqueeze(gammas, dim=1)
         output = torch.unsqueeze(output, dim=1)
 
-        x = cat((alphas, betas, gammas, output), dim=1)
+        x = cat((alphas, betas, gammas, budgets, output), dim=1)
         # x = cat((budgets, output), dim=1)
         # x = output
 

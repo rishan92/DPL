@@ -3,13 +3,14 @@ import torch.nn as nn
 from copy import deepcopy
 import numpy as np
 import wandb
+from abc import ABC, abstractmethod
 
 from src.models.base.base_pytorch_module import BasePytorchModule
 import src.models.activation_functions
 from src.utils.utils import get_class_from_package, get_class_from_packages
 
 
-class PowerLawModel(BasePytorchModule):
+class PowerLawModel(BasePytorchModule, ABC):
     _instance_counter = 0
     _global_epoch = {}
 
@@ -39,18 +40,19 @@ class PowerLawModel(BasePytorchModule):
         """
         super().__init__(nr_features=nr_features, seed=seed, checkpoint_path=checkpoint_path)
         self.max_instances = max_instances
-        self.instance_id = PowerLawModel._instance_counter
-        PowerLawModel._instance_counter += 1
-        PowerLawModel._instance_counter %= self.max_instances
-        if self.instance_id not in PowerLawModel._global_epoch:
-            PowerLawModel._global_epoch[self.instance_id] = 0
+        self.instance_id = self._instance_counter
+        self._instance_counter += 1
+        self._instance_counter %= self.max_instances
+        if self.instance_id not in self._global_epoch:
+            self._global_epoch[self.instance_id] = 0
 
         self.act_func = None
         self.last_act_func = None
         self.alpha_act_func = None
         self.beta_act_func = None
         self.gamma_act_func = None
-        self.cnn = None
+        self.linear_net = None
+        self.cnn_net = None
 
         if hasattr(self.meta, "act_func"):
             self.act_func = get_class_from_packages([torch.nn, src.models.activation_functions], self.meta.act_func)()
@@ -67,10 +69,10 @@ class PowerLawModel(BasePytorchModule):
             self.gamma_act_func = get_class_from_packages([torch.nn, src.models.activation_functions],
                                                           self.meta.gamma_act_func)()
 
-        self.layers = self.get_linear_net()
+        self.linear_net = self.get_linear_net()
 
         if hasattr(self.meta, "use_learning_curve") and self.meta.use_learning_curve:
-            self.cnn = self.get_cnn_net()
+            self.cnn_net = self.get_cnn_net()
 
         self.criterion = get_class_from_package(torch.nn, self.meta.loss_function)()
 
@@ -83,7 +85,7 @@ class PowerLawModel(BasePytorchModule):
         self.has_batchnorm_layers = self.get_has_batchnorm_layers()
         self.has_batchnorm_layers = 1
 
-        self.set_optimizer(self.meta)
+        self.set_optimizer()
 
     def get_has_batchnorm_layers(self):
         for module in self.modules():
@@ -100,9 +102,9 @@ class PowerLawModel(BasePytorchModule):
     def forward(self, batch):
         raise NotImplementedError
 
-    def set_optimizer(self, hp):
-        optimizer_class = get_class_from_package(torch.optim, hp.optimizer)
-        self.optimizer = optimizer_class(self.parameters(), lr=hp.learning_rate)
+    def set_optimizer(self):
+        optimizer_class = get_class_from_package(torch.optim, self.meta.optimizer)
+        self.optimizer = optimizer_class(self.parameters(), lr=self.meta.learning_rate)
 
     def training_step(self):
         batch = next(self.train_dataloader_it)
@@ -137,7 +139,7 @@ class PowerLawModel(BasePytorchModule):
         self.set_dataloader(train_dataloader)
 
         if reset_optimizer:
-            self.set_optimizer(self.meta)
+            self.set_optimizer()
 
         self.set_seed(self.seed)
         self.train()
@@ -148,11 +150,10 @@ class PowerLawModel(BasePytorchModule):
 
         for epoch in range(0, nr_epochs):
             normalized_loss = self.train_epoch()
-            self.logger.info(f'Epoch {epoch + 1}, Loss:{normalized_loss}')
-            PowerLawModel._global_epoch[self.instance_id] += 1
+            self.logger.debug(f'Epoch {epoch + 1}, Loss:{normalized_loss}')
+            self._global_epoch[self.instance_id] += 1
             wandb.log({f"surrogate/model_{self.instance_id}/training_loss": normalized_loss,
-                       f"surrogate/model_{self.instance_id}/epoch": PowerLawModel._global_epoch[
-                           self.instance_id]})
+                       f"surrogate/model_{self.instance_id}/epoch": self._global_epoch[self.instance_id]})
             if self.meta.activate_early_stopping:
                 if normalized_loss < best_loss:
                     best_state = deepcopy(self.state_dict())
@@ -164,8 +165,10 @@ class PowerLawModel(BasePytorchModule):
                         self.load_state_dict(best_state)
                         self.logger.info(f'Stopping training since validation loss is not improving')
                         break
+
         check_seed_torch = torch.random.get_rng_state().sum()
-        self.logger.info(f"end rng_state {check_seed_torch}")
+        self.logger.debug(f"end rng_state {check_seed_torch}")
+
         if self.meta.activate_early_stopping:
             self.load_state_dict(best_state)
 
@@ -175,4 +178,4 @@ class PowerLawModel(BasePytorchModule):
         return predictions
 
     def __del__(self):
-        PowerLawModel._instance_counter = 0
+        self._instance_counter = 0
