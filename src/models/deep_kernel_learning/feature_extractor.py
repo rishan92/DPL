@@ -160,7 +160,7 @@ class FeatureExtractor(BaseFeatureExtractor):
         x = cat((x, lc_features), dim=1)
         x = self.act_func(getattr(self, f'fc{self.meta.nr_layers}')(x))
 
-        return x
+        return x, None
 
     # def forward(self, x, budgets, learning_curves):
     #
@@ -182,4 +182,4 @@ class FeatureExtractor(BaseFeatureExtractor):
     #     x = cat((x, lc_features), dim=1)
     #     x = self.after_cnn_linear_net(x)
     #
-    #     return x
+    #     return x, None

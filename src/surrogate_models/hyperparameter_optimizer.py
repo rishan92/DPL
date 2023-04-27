@@ -205,7 +205,7 @@ class HyperparameterOptimizer(Meta):
             fill_value=self.fill_value,
             use_learning_curve=self.model_class.use_learning_curve,
             use_learning_curve_mask=self.model_class.use_learning_curve_mask,
-            fantasize_step=self.fantasize_step,  # TODO: remove this dependency
+            fantasize_step=self.fantasize_step,
             use_target_normalization=self.meta.use_target_normalization,
             use_scaled_budgets=self.meta.use_scaled_budgets,
         )
@@ -316,7 +316,7 @@ class HyperparameterOptimizer(Meta):
 
         if self.meta.use_target_normalization:
             mean_predictions = mean_predictions * self.history_manager.max_curve_value
-            if hasattr(predict_infos, 'pl_output'):
+            if predict_infos is not None and hasattr(predict_infos, 'pl_output'):
                 predict_infos['pl_output'] = predict_infos['pl_output'] * self.history_manager.max_curve_value
 
         return mean_predictions, std_predictions, hp_indices, real_budgets, predict_infos
@@ -371,7 +371,7 @@ class HyperparameterOptimizer(Meta):
             else:
                 budget = self.fantasize_step
 
-            if gv.PLOT_PRED_CURVES:
+            if gv.PLOT_PRED_CURVES and predict_infos is not None:
                 if self.prediction_params_pd is None:
                     column_indexes = pd.MultiIndex.from_product([
                         hp_indices,
@@ -485,21 +485,27 @@ class HyperparameterOptimizer(Meta):
 
         if self.meta.use_target_normalization:
             mean_data = mean_data * self.history_manager.max_curve_value
-            if hasattr(predict_infos, 'pl_output'):
+            if predict_infos is not None and hasattr(predict_infos, 'pl_output'):
                 predict_infos['pl_output'] = predict_infos['pl_output'] * self.history_manager.max_curve_value
 
         plt.clf()
-        fig, axes = plt.subplots(nrows=1, ncols=2, figsize=(10, 6))
+        if predict_infos is not None:
+            nrows, ncols, figsize = 1, 2, (10, 6)
+        else:
+            nrows, ncols, figsize = 1, 1, (6.4, 4.8)
+
+        fig, axes = plt.subplots(nrows=nrows, ncols=ncols, figsize=figsize)
         fig.suptitle(
             f'hp index {hp_index} at surrogate budget {surrogate_budget} and budget {max_train_budget}'
         )
 
-        predict_curve_axes = axes[0]
-        param_axes = axes[1]
+        predict_curve_axes = axes[0] if predict_infos is not None else axes
+        param_axes = axes[1] if predict_infos is not None else None
 
         sns.lineplot(x=real_budgets, y=mean_data, ax=predict_curve_axes, color='blue', label='mean prediction')
-        sns.lineplot(x=real_budgets, y=predict_infos['pl_output'], ax=predict_curve_axes, color='red',
-                     label='power law output')
+        if predict_infos is not None:
+            sns.lineplot(x=real_budgets, y=predict_infos['pl_output'], ax=predict_curve_axes, color='red',
+                         label='power law output')
         predict_curve_axes.set_xlabel('Budget')
 
         predict_curve_axes.fill_between(real_budgets, mean_data + std_data, mean_data - std_data, alpha=0.3)
@@ -507,9 +513,10 @@ class HyperparameterOptimizer(Meta):
         predict_curve_axes.plot(real_budgets[:max_train_budget], real_curve[:max_train_budget], 'k-')
         predict_curve_axes.plot(real_budgets[max_train_budget:], real_curve[max_train_budget:], 'k--')
 
-        data = self.prediction_params_pd.loc[:, hp_index]
-        sns.lineplot(data=data, ax=param_axes)
-        param_axes.set_xlabel('Surrogate Budget')
+        if predict_infos is not None:
+            data = self.prediction_params_pd.loc[:, hp_index]
+            sns.lineplot(data=data, ax=param_axes)
+            param_axes.set_xlabel('Surrogate Budget')
 
         plt.tight_layout()
         file_path = os.path.join(
@@ -548,34 +555,42 @@ class HyperparameterOptimizer(Meta):
 
         if self.meta.use_target_normalization:
             mean_data = mean_data * self.history_manager.max_curve_value
-            if hasattr(predict_infos, 'pl_output'):
+            if predict_infos is not None and hasattr(predict_infos, 'pl_output'):
                 predict_infos['pl_output'] = predict_infos['pl_output'] * self.history_manager.max_curve_value
 
         difference = real_curve_targets - mean_data
 
         plt.clf()
-        fig, axes = plt.subplots(nrows=3, ncols=2, figsize=(10, 10))
+        if predict_infos is not None:
+            nrows, ncols, figsize = 3, 2, (10, 6)
+        else:
+            nrows, ncols, figsize = 1, 2, (10, 4)
+
+        fig, axes = plt.subplots(nrows=nrows, ncols=ncols, figsize=figsize)
         fig.suptitle(
             f'Distributions at surrogate budget {surrogate_budget}'
         )
+        target_axes = axes[0, 0] if predict_infos is not None else axes[0]
+        difference_axes = axes[0, 1] if predict_infos is not None else axes[1]
 
         bin_width = 0.001
-        sns.histplot(data=real_curve_targets, kde=False, ax=axes[0, 0], color='blue', label='Real Target', alpha=0.5,
+        sns.histplot(data=real_curve_targets, kde=False, ax=target_axes, color='blue', label='Real Target', alpha=0.5,
                      binwidth=bin_width)
-        sns.histplot(data=mean_data, kde=False, ax=axes[0, 0], color='red', label='Predicted Target', alpha=0.5,
+        sns.histplot(data=mean_data, kde=False, ax=target_axes, color='red', label='Predicted Target', alpha=0.5,
                      binwidth=bin_width)
-        axes[0, 0].set_title('Real & Predicted Targets')
-        axes[0, 0].legend()
+        target_axes.set_title('Real & Predicted Targets')
+        target_axes.legend(loc='upper right')
 
-        sns.histplot(data=difference, kde=False, ax=axes[0, 1], label='Real Target - Predicted Target')
-        axes[0, 1].set_title('Real Target - Predicted Target')
+        sns.histplot(data=difference, kde=False, ax=difference_axes, label='Real Target - Predicted Target')
+        difference_axes.set_title('Real Target - Predicted Target')
 
-        sns.histplot(data=predict_infos['alpha'], kde=False, ax=axes[1, 0], label='alpha')
-        axes[1, 0].set_title('alpha')
-        sns.histplot(data=predict_infos['beta'], kde=False, ax=axes[1, 1], label='beta')
-        axes[1, 1].set_title('beta')
-        sns.histplot(data=predict_infos['gamma'], kde=False, ax=axes[2, 0], label='gamma')
-        axes[2, 0].set_title('gamma')
+        if predict_infos is not None:
+            sns.histplot(data=predict_infos['alpha'], kde=False, ax=axes[1, 0], label='alpha')
+            axes[1, 0].set_title('alpha')
+            sns.histplot(data=predict_infos['beta'], kde=False, ax=axes[1, 1], label='beta')
+            axes[1, 1].set_title('beta')
+            sns.histplot(data=predict_infos['gamma'], kde=False, ax=axes[2, 0], label='gamma')
+            axes[2, 0].set_title('gamma')
 
         plt.tight_layout()
         file_path = os.path.join(output_dir, f"{prefix}distributions_surrogateBudget_{surrogate_budget}")

@@ -27,6 +27,7 @@ class DyHPOModel(BasePytorchModule):
     The DyHPO DeepGP model.
     """
     _global_epoch = 0
+    _training_errors = 0
 
     def __init__(
         self,
@@ -200,6 +201,8 @@ class DyHPOModel(BasePytorchModule):
             return
 
         for epoch_nr in range(0, nr_epochs):
+            DyHPOModel._global_epoch += 1
+
             # Zero backprop gradients
             self.optimizer.zero_grad()
 
@@ -218,21 +221,28 @@ class DyHPOModel(BasePytorchModule):
                     f'lengthscale: {self.model.covar_module.base_kernel.lengthscale.item()}, '
                     f'noise: {self.model.likelihood.noise.item()}, '
                 )
-                DyHPOModel._global_epoch += 1
-                wandb.log({f"surrogate/dyhpo/training_loss": loss_value,
-                           f"surrogate/dyhpo/training_mse": mse,
-                           f"surrogate/dyhpo/training_lengthscale":
-                               self.model.covar_module.base_kernel.lengthscale.item(),
-                           f"surrogate/dyhpo/training_noise": self.model.likelihood.noise.item(),
-                           f"surrogate/dyhpo/epoch": DyHPOModel._global_epoch})
+
+                wandb.log({
+                    f"surrogate/dyhpo/training_loss": loss_value,
+                    f"surrogate/dyhpo/training_mse": mse,
+                    f"surrogate/dyhpo/training_lengthscale": self.model.covar_module.base_kernel.lengthscale.item(),
+                    f"surrogate/dyhpo/training_noise": self.model.likelihood.noise.item(),
+                    f"surrogate/dyhpo/epoch": DyHPOModel._global_epoch,
+                    f"surrogate/dyhpo/training_errors": DyHPOModel._training_errors,
+                })
                 loss.backward()
                 self.optimizer.step()
             except Exception as training_error:
-                self.logger.error(f'The following error happened while training: {training_error}')
+                self.logger.error(f'The following error happened at epoch {nr_epochs} while training: {training_error}')
+                # raise training_error
                 # An error has happened, trigger the restart of the optimization and restart
                 # the model with default hyperparameters.
-                self.restart = True
                 training_errored = True
+                DyHPOModel._training_errors += 1
+                wandb.log({
+                    f"surrogate/dyhpo/epoch": DyHPOModel._global_epoch,
+                    f"surrogate/dyhpo/training_errors": DyHPOModel._training_errors,
+                })
                 break
 
         check_seed_torch = torch.random.get_rng_state().sum()
@@ -292,7 +302,8 @@ class DyHPOModel(BasePytorchModule):
         stds = preds.stddev.detach().to('cpu').numpy().reshape(-1, )
 
         predict_infos = test_predict_infos
-        predict_infos = {key: value.detach().to('cpu').numpy() for key, value in predict_infos.items()}
+        if predict_infos is not None:
+            predict_infos = {key: value.detach().to('cpu').numpy() for key, value in predict_infos.items()}
 
         return means, stds, predict_infos
 

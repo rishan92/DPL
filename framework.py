@@ -66,18 +66,6 @@ class Framework:
 
         self.start_time = time.perf_counter()
 
-        logger.remove()
-
-        self.log_path = Path(f'./logs/power_law_surrogate_{args.dataset_name}_{seed}.log')
-
-        if args.verbose:
-            log_level = "TRACE"
-            format_str = "{level} | {message}"
-            logger.add(self.log_path, mode='w', format=format_str, level=log_level)
-        else:
-            log_level = "SUCCESS"
-            logger.add(self.log_path, mode='w', level=log_level)
-
         if args.benchmark_name == 'lcbench':
             benchmark_extension = os.path.join('lc_bench', 'results', 'data_2k.json')
         elif args.benchmark_name == 'lcbench_mini':
@@ -151,6 +139,16 @@ class Framework:
             f'{self.dataset_name}_{self.seed}.json',
         )
 
+        logger.remove()
+        self.log_path = Path(self.result_dir, 'logs', f'{args.surrogate_name}_surrogate_{args.dataset_name}_{seed}.log')
+        if args.verbose:
+            log_level = "TRACE"
+            format_str = "{level} | {message}"
+            logger.add(self.log_path, mode='w', format=format_str, level=log_level)
+        else:
+            log_level = "SUCCESS"
+            logger.add(self.log_path, mode='w', level=log_level)
+
         self.incumbent_hp_index = self.benchmark.get_incumbent_config_id()
         self.pred_curves_path = None
         if gv.PLOT_PRED_CURVES:
@@ -198,6 +196,25 @@ class Framework:
     def finish(self, is_failed=False):
         wandb.log_artifact(str(self.log_path), name='debug_log', type='log')
         wandb.log_artifact(str(self.result_file), name='result_json', type='result')
+
+        if gv.IS_WANDB and gv.PLOT_PRED_CURVES:
+            table = wandb.Table(columns=["plot"])
+            file_list = os.listdir(self.pred_curves_path)
+            for file_name in file_list:
+                file_path = os.path.join(self.pred_curves_path, file_name)
+                table.add_data(wandb.Image(file_path))
+
+            wandb.log({"table_of_prediction_curves": table})
+
+        if gv.IS_WANDB and gv.PLOT_PRED_DIST:
+            table = wandb.Table(columns=["plot"])
+            file_list = os.listdir(self.pred_dist_path)
+            for file_name in file_list:
+                file_path = os.path.join(self.pred_dist_path, file_name)
+                table.add_data(wandb.Image(file_path))
+
+            wandb.log({"table_of_prediction_distributions": table})
+
         wandb.finish()
 
         end_time = time.perf_counter()
@@ -247,7 +264,7 @@ class Framework:
                     prefix="incumbent_"
                 )
 
-            if gv.PLOT_PRED_DIST and self.surrogate_budget % 10 == 1:
+            if gv.PLOT_PRED_DIST and self.surrogate_budget % 100 == 1:
                 self.surrogate.plot_pred_dist(
                     benchmark=self.benchmark,
                     surrogate_budget=self.surrogate_budget,
