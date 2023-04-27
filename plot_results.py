@@ -84,7 +84,8 @@ def main():
     project_folder = Path(".")
     dataset_files_path = Path("./bash_scripts")
 
-    method_names = ['power_law', 'dyhpo', 'dyhpo_pl_out', 'dyhpo_pl_wobudget', 'dehb', 'random']
+    method_names = ['power_law', 'dyhpo', 'dyhpo_nc', 'dyhpo_pl_wobudget', 'dehb',
+                    'random']
     benchmark_names = ['taskset', 'lcbench']
     benchmark_names = ['lcbench']
     dataset_names = None

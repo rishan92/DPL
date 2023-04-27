@@ -94,8 +94,8 @@ class Framework:
             benchmark_extension,
         )
 
-        benchmark_types = self.benchmark_types
-        surrogate_types = self.surrogate_types
+        benchmark_types = Framework.benchmark_types
+        surrogate_types = Framework.surrogate_types
 
         disable_preprocessing = {
             'dehb',
@@ -152,9 +152,16 @@ class Framework:
         )
 
         self.incumbent_hp_index = self.benchmark.get_incumbent_config_id()
-        self.pred_curves_path = os.path.join(self.result_dir, "pred_curves", self.dataset_name, str(self.seed))
-        os.makedirs(self.pred_curves_path, exist_ok=True)
-        delete_folder_content(self.pred_curves_path)
+        self.pred_curves_path = None
+        if gv.PLOT_PRED_CURVES:
+            self.pred_curves_path = os.path.join(self.result_dir, "pred_curves", self.dataset_name, str(self.seed))
+            os.makedirs(self.pred_curves_path, exist_ok=True)
+            delete_folder_content(self.pred_curves_path)
+
+        if gv.PLOT_PRED_DIST:
+            self.pred_dist_path = os.path.join(self.result_dir, "pred_dist", self.dataset_name, str(self.seed))
+            os.makedirs(self.pred_dist_path, exist_ok=True)
+            delete_folder_content(self.pred_dist_path)
 
         if args.surrogate_name not in disable_preprocessing:
             self.hp_candidates = self.preprocess(self.benchmark.get_hyperparameter_candidates())
@@ -226,9 +233,26 @@ class Framework:
             hp_index, budget = self.surrogate.suggest()
 
             if gv.PLOT_PRED_CURVES and (budget == 10 or budget == 10 or budget == 20 or budget == 40):
-                self.surrogate.plot_pred_curve(hp_index, self.benchmark, self.surrogate_budget, self.pred_curves_path)
-                self.surrogate.plot_pred_curve(self.incumbent_hp_index, self.benchmark, self.surrogate_budget,
-                                               self.pred_curves_path, prefix="incumbent_")
+                self.surrogate.plot_pred_curve(
+                    hp_index=hp_index,
+                    benchmark=self.benchmark,
+                    surrogate_budget=self.surrogate_budget,
+                    output_dir=self.pred_curves_path
+                )
+                self.surrogate.plot_pred_curve(
+                    hp_index=self.incumbent_hp_index,
+                    benchmark=self.benchmark,
+                    surrogate_budget=self.surrogate_budget,
+                    output_dir=self.pred_curves_path,
+                    prefix="incumbent_"
+                )
+
+            if gv.PLOT_PRED_DIST and self.surrogate_budget % 10 == 1:
+                self.surrogate.plot_pred_dist(
+                    benchmark=self.benchmark,
+                    surrogate_budget=self.surrogate_budget,
+                    output_dir=self.pred_dist_path
+                )
 
             hp_curve = self.benchmark.get_curve(hp_index, budget)
             self.surrogate.observe(hp_index, budget, hp_curve)

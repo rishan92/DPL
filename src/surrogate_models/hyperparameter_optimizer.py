@@ -2,6 +2,8 @@ from copy import deepcopy
 import os
 import time
 from typing import List, Tuple, Dict, Optional, Any, Union, Type
+
+import pandas as pd
 from numpy.typing import NDArray
 from loguru import logger
 import numpy as np
@@ -96,7 +98,7 @@ class HyperparameterOptimizer(Meta):
         super().__init__()
 
         self.model_type = surrogate_name
-        self.model_class: Union[Type[EnsembleModel], Type[DyHPOModel]] = self.model_types[
+        self.model_class: Union[Type[EnsembleModel], Type[DyHPOModel]] = HyperparameterOptimizer.model_types[
             surrogate_name]
         self.model = None
 
@@ -208,6 +210,9 @@ class HyperparameterOptimizer(Meta):
             use_scaled_budgets=self.meta.use_scaled_budgets,
         )
 
+        self.real_curve_targets_map_pd: Optional[pd.DataFrame] = None
+        self.prediction_params_pd: Optional[pd.DataFrame] = None
+
     @staticmethod
     def get_default_meta(model_class):
         if model_class == EnsembleModel:
@@ -272,8 +277,9 @@ class HyperparameterOptimizer(Meta):
         last_sample = self.history_manager.get_last_sample(curve_size_mode=self.meta.curve_size_mode)
 
         if should_refine:
-            self.model.train_loop(train_dataset=train_dataset, should_refine=should_refine, reset_optimizer=True,
-                                  last_sample=last_sample)
+            return_state = self.model.train_loop(
+                train_dataset=train_dataset, should_refine=should_refine, reset_optimizer=True, last_sample=last_sample
+            )
         else:
             self.model = self.model_class(
                 nr_features=train_dataset.X.shape[1],
@@ -281,9 +287,11 @@ class HyperparameterOptimizer(Meta):
                 seed=self.seed
             )
             self.model.to(self.dev)
-            self.model.train_loop(train_dataset=train_dataset)
+            return_state = self.model.train_loop(train_dataset=train_dataset)
 
-    def _predict(self) -> Tuple[NDArray[np.float32], NDArray[np.float32], NDArray[int], NDArray[int]]:
+        return return_state
+
+    def _predict(self) -> Tuple[NDArray[np.float32], NDArray[np.float32], NDArray[int], NDArray[int], Optional[Dict]]:
         """
         Predict the performances of the hyperparameter configurations
         as well as the standard deviations based on the ensemble.
@@ -303,12 +311,15 @@ class HyperparameterOptimizer(Meta):
         )
         train_data = self.history_manager.get_train_dataset(curve_size_mode=self.meta.curve_size_mode)
 
-        mean_predictions, std_predictions = self.model.predict(test_data=test_data, train_data=train_data)
+        mean_predictions, std_predictions, predict_infos = self.model.predict(test_data=test_data,
+                                                                              train_data=train_data)
 
         if self.meta.use_target_normalization:
             mean_predictions = mean_predictions * self.history_manager.max_curve_value
+            if hasattr(predict_infos, 'pl_output'):
+                predict_infos['pl_output'] = predict_infos['pl_output'] * self.history_manager.max_curve_value
 
-        return mean_predictions, std_predictions, hp_indices, real_budgets
+        return mean_predictions, std_predictions, hp_indices, real_budgets, predict_infos
 
     def suggest(self) -> Tuple[int, int]:
         """Suggest a hyperparameter configuration and a budget
@@ -330,7 +341,7 @@ class HyperparameterOptimizer(Meta):
             budget = self.rand_init_budgets[self.initial_random_index]
             self.initial_random_index += 1
         else:
-            mean_predictions, std_predictions, hp_indices, real_budgets = self._predict()
+            mean_predictions, std_predictions, hp_indices, real_budgets, predict_infos = self._predict()
 
             best_prediction_index = self.find_suggested_config(
                 mean_predictions,
@@ -359,6 +370,23 @@ class HyperparameterOptimizer(Meta):
                     budget = self.max_benchmark_epochs
             else:
                 budget = self.fantasize_step
+
+            if gv.PLOT_PRED_CURVES:
+                if self.prediction_params_pd is None:
+                    column_indexes = pd.MultiIndex.from_product([
+                        hp_indices,
+                        ['alpha', 'beta', 'gamma', 'pl_output']
+                    ], names=['hp_index', 'parameter_type'])
+                    self.prediction_params_pd = pd.DataFrame(
+                        index=np.arange(1, self.total_budget),
+                        columns=column_indexes
+                    )
+
+                self.prediction_params_pd.loc[self.iterations_counter, (hp_indices, 'alpha')] = predict_infos['alpha']
+                self.prediction_params_pd.loc[self.iterations_counter, (hp_indices, 'beta')] = predict_infos['beta']
+                self.prediction_params_pd.loc[self.iterations_counter, (hp_indices, 'gamma')] = predict_infos['gamma']
+                self.prediction_params_pd.loc[self.iterations_counter, (hp_indices, 'pl_output')] = predict_infos[
+                    'pl_output']
 
         suggest_time_end = time.time()
         self.suggest_time_duration = suggest_time_end - suggest_time_start
@@ -392,7 +420,7 @@ class HyperparameterOptimizer(Meta):
                 break
 
         if not self.minimization:
-            hp_curve = np.subtract([self.max_value] * len(hp_curve), hp_curve)
+            hp_curve = self.max_value - np.array(hp_curve)
             hp_curve = hp_curve.tolist()
 
         best_curve_value = min(hp_curve)
@@ -423,7 +451,7 @@ class HyperparameterOptimizer(Meta):
                     # TODO Load the pregiven weights.
                     pass
 
-                self._train_surrogate(pretrain=self.pretrain)
+                return_state = self._train_surrogate(pretrain=self.pretrain)
 
                 if self.iterations_counter <= self.initial_full_training_trials:
                     self.train = True
@@ -431,41 +459,129 @@ class HyperparameterOptimizer(Meta):
                     self.train = False
             else:
                 self.refine_counter += 1
-                self._train_surrogate(should_refine=True)
+                return_state = self._train_surrogate(should_refine=True)
 
-    def plot_pred_curve(self, hp_index, benchmark, method_budget, output_dir, prefix=""):
+            # If the training has failed, restart training
+            if return_state is not None and return_state < 0:
+                self.train = True
+
+    def plot_pred_curve(self, hp_index, benchmark, surrogate_budget, output_dir, prefix=""):
         if self.model is None:
             return
 
         real_curve = benchmark.get_curve(hp_index, self.max_benchmark_epochs)
 
         if not self.minimization:
-            real_curve = np.subtract([self.max_value] * len(real_curve), real_curve)
-            real_curve = real_curve.tolist()
+            real_curve = self.max_value - np.array(real_curve)
 
-        pred_test_data, real_budgets, max_budget = self.history_manager.get_predict_curves_dataset(
+        pred_test_data, real_budgets, max_train_budget = self.history_manager.get_predict_curves_dataset(
             hp_index=hp_index,
             curve_size_mode=self.meta.curve_size_mode
         )
 
         train_data = self.history_manager.get_train_dataset(curve_size_mode=self.meta.curve_size_mode)
 
-        mean_data, std_data = self.model.predict(test_data=pred_test_data, train_data=train_data)
+        mean_data, std_data, predict_infos = self.model.predict(test_data=pred_test_data, train_data=train_data)
 
         if self.meta.use_target_normalization:
             mean_data = mean_data * self.history_manager.max_curve_value
+            if hasattr(predict_infos, 'pl_output'):
+                predict_infos['pl_output'] = predict_infos['pl_output'] * self.history_manager.max_curve_value
 
         plt.clf()
-        p = sns.lineplot(x=real_budgets, y=mean_data)
+        fig, axes = plt.subplots(nrows=1, ncols=2, figsize=(10, 6))
+        fig.suptitle(
+            f'hp index {hp_index} at surrogate budget {surrogate_budget} and budget {max_train_budget}'
+        )
 
-        p.axes.fill_between(real_budgets, mean_data + std_data, mean_data - std_data, alpha=0.3)
+        predict_curve_axes = axes[0]
+        param_axes = axes[1]
 
-        p.plot(real_budgets[:max_budget], real_curve[:max_budget], 'k-')
-        p.plot(real_budgets[max_budget:], real_curve[max_budget:], 'k--')
+        sns.lineplot(x=real_budgets, y=mean_data, ax=predict_curve_axes, color='blue', label='mean prediction')
+        sns.lineplot(x=real_budgets, y=predict_infos['pl_output'], ax=predict_curve_axes, color='red',
+                     label='power law output')
+        predict_curve_axes.set_xlabel('Budget')
 
-        file_path = os.path.join(output_dir,
-                                 f"{prefix}surrogatebudget_{method_budget}_budget_{max_budget}_hpindex_{hp_index}")
-        plt.savefig(file_path, dpi=100)
+        predict_curve_axes.fill_between(real_budgets, mean_data + std_data, mean_data - std_data, alpha=0.3)
+
+        predict_curve_axes.plot(real_budgets[:max_train_budget], real_curve[:max_train_budget], 'k-')
+        predict_curve_axes.plot(real_budgets[max_train_budget:], real_curve[max_train_budget:], 'k--')
+
+        data = self.prediction_params_pd.loc[:, hp_index]
+        sns.lineplot(data=data, ax=param_axes)
+        param_axes.set_xlabel('Surrogate Budget')
+
+        plt.tight_layout()
+        file_path = os.path.join(
+            output_dir,
+            f"{prefix}surrogateBudget_{surrogate_budget}_trainBudget_{max_train_budget}_hpIndex_{hp_index}"
+        )
+        plt.savefig(file_path, dpi=200)
+
+        plt.close()
+
+    def plot_pred_dist(self, benchmark, surrogate_budget, output_dir, prefix=""):
+        if self.model is None:
+            return
+
+        test_data, hp_indices, real_budgets = self.history_manager.get_candidate_configurations_dataset(
+            predict_mode=self.meta.predict_mode,
+            curve_size_mode=self.meta.curve_size_mode
+        )
+
+        if self.real_curve_targets_map_pd is None:
+            real_curve_targets = np.empty(shape=(len(hp_indices),), dtype=np.float32)
+            for i, hp_index in enumerate(hp_indices):
+                real_curve = benchmark.get_curve(hp_index, self.max_benchmark_epochs)
+
+                if not self.minimization:
+                    real_curve = self.max_value - np.array(real_curve)
+
+                real_curve_targets[i] = min(real_curve)
+            self.real_curve_targets_map_pd = pd.DataFrame(real_curve_targets, index=hp_indices)
+        else:
+            real_curve_targets = self.real_curve_targets_map_pd.iloc[hp_indices, 0]
+
+        train_data = self.history_manager.get_train_dataset(curve_size_mode=self.meta.curve_size_mode)
+
+        mean_data, std_data, predict_infos = self.model.predict(test_data=test_data, train_data=train_data)
+
+        if self.meta.use_target_normalization:
+            mean_data = mean_data * self.history_manager.max_curve_value
+            if hasattr(predict_infos, 'pl_output'):
+                predict_infos['pl_output'] = predict_infos['pl_output'] * self.history_manager.max_curve_value
+
+        difference = real_curve_targets - mean_data
+
+        plt.clf()
+        fig, axes = plt.subplots(nrows=3, ncols=2, figsize=(10, 10))
+        fig.suptitle(
+            f'Distributions at surrogate budget {surrogate_budget}'
+        )
+
+        bin_width = 0.001
+        sns.histplot(data=real_curve_targets, kde=False, ax=axes[0, 0], color='blue', label='Real Target', alpha=0.5,
+                     binwidth=bin_width)
+        sns.histplot(data=mean_data, kde=False, ax=axes[0, 0], color='red', label='Predicted Target', alpha=0.5,
+                     binwidth=bin_width)
+        axes[0, 0].set_title('Real & Predicted Targets')
+        axes[0, 0].legend()
+
+        sns.histplot(data=difference, kde=False, ax=axes[0, 1], label='Real Target - Predicted Target')
+        axes[0, 1].set_title('Real Target - Predicted Target')
+
+        sns.histplot(data=predict_infos['alpha'], kde=False, ax=axes[1, 0], label='alpha')
+        axes[1, 0].set_title('alpha')
+        sns.histplot(data=predict_infos['beta'], kde=False, ax=axes[1, 1], label='beta')
+        axes[1, 1].set_title('beta')
+        sns.histplot(data=predict_infos['gamma'], kde=False, ax=axes[2, 0], label='gamma')
+        axes[2, 0].set_title('gamma')
+
+        plt.tight_layout()
+        file_path = os.path.join(output_dir, f"{prefix}distributions_surrogateBudget_{surrogate_budget}")
+        plt.savefig(file_path, dpi=200)
+
+        plt.close()
 
     @staticmethod
     def acq(

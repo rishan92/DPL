@@ -1,6 +1,6 @@
 from copy import deepcopy
 import os
-from typing import Dict, Tuple, Any
+from typing import Dict, Tuple, Any, Optional
 from numpy.typing import NDArray
 
 import numpy as np
@@ -69,15 +69,6 @@ class DyHPOModel(BasePytorchModule):
 
         self.set_optimizer()
 
-        # the number of initial points for which we will retrain fully from scratch
-        # This is basically equal to the dimensionality of the search space + 1.
-        self.initial_nr_points = 10
-        # keeping track of the total hpo iterations. It will be used during the optimization
-        # process to switch from fully training the model, to refining.
-        self.iterations = 0
-        # flag for when the optimization of the model should start from scratch.
-        self.restart = True
-
         self.logger = logger
 
         self.checkpoint_path = checkpoint_path
@@ -88,17 +79,6 @@ class DyHPOModel(BasePytorchModule):
             self.checkpoint_path,
             'checkpoint.pth'
         )
-
-    def get_feature_extractor_output_size(self, nr_features):
-        valid_budget_size = 50
-        # Create a dummy input with the appropriate input size
-        dummy_x_input = torch.zeros(4, nr_features)
-        dummy_budget_input = torch.zeros(4)
-        dummy_learning_curves_input = torch.zeros(4, valid_budget_size)
-        self.feature_extractor.eval()
-        output = self.feature_extractor(dummy_x_input, dummy_budget_input, dummy_learning_curves_input)
-        output_size = output.shape[-1]
-        return output_size
 
     @staticmethod
     def get_default_meta(**kwargs) -> Dict[str, Any]:
@@ -112,8 +92,8 @@ class DyHPOModel(BasePytorchModule):
             'gp_class_name': 'GPRegressionModel',  # 'GPRegressionPowerLawMeanModel',  #
             'likelihood_class_name': 'GaussianLikelihood',
             'mll_class_name': 'ExactMarginalLogLikelihood',
-            'noise_lower_bound': 1e-4,  # None,  #
-            'noise_upper_bound': 1e-3,  # None,  #
+            'noise_lower_bound': None,  # 1e-4,  #
+            'noise_upper_bound': None,  # 1e-3,  #
             'optimizer': 'Adam',
         }
 
@@ -171,8 +151,7 @@ class DyHPOModel(BasePytorchModule):
         return model, likelihood, mll
 
     def train_loop(self, train_dataset: TabularDataset, should_refine: bool = False, load_checkpoint: bool = False,
-                   reset_optimizer=False,
-                   **kwargs):
+                   reset_optimizer=False, **kwargs):
         """
         Train the surrogate model.
 
@@ -224,7 +203,7 @@ class DyHPOModel(BasePytorchModule):
             # Zero backprop gradients
             self.optimizer.zero_grad()
 
-            projected_x = self.feature_extractor(X_train, train_budgets, train_curves)
+            projected_x, _ = self.feature_extractor(X_train, train_budgets, train_curves)
             self.model.set_train_data(projected_x, y_train, strict=False)
             output = self.model(projected_x)
 
@@ -239,18 +218,17 @@ class DyHPOModel(BasePytorchModule):
                     f'lengthscale: {self.model.covar_module.base_kernel.lengthscale.item()}, '
                     f'noise: {self.model.likelihood.noise.item()}, '
                 )
-                self._global_epoch += 1
+                DyHPOModel._global_epoch += 1
                 wandb.log({f"surrogate/dyhpo/training_loss": loss_value,
                            f"surrogate/dyhpo/training_mse": mse,
                            f"surrogate/dyhpo/training_lengthscale":
                                self.model.covar_module.base_kernel.lengthscale.item(),
                            f"surrogate/dyhpo/training_noise": self.model.likelihood.noise.item(),
-                           f"surrogate/dyhpo/epoch": self._global_epoch})
+                           f"surrogate/dyhpo/epoch": DyHPOModel._global_epoch})
                 loss.backward()
                 self.optimizer.step()
             except Exception as training_error:
                 self.logger.error(f'The following error happened while training: {training_error}')
-                raise training_error
                 # An error has happened, trigger the restart of the optimization and restart
                 # the model with default hyperparameters.
                 self.restart = True
@@ -270,11 +248,14 @@ class DyHPOModel(BasePytorchModule):
             self.save_checkpoint(initial_state)
             self.load_checkpoint()
 
+        return_state = -1 if training_errored else 0
+        return return_state
+
     def predict(
         self,
         test_data: TabularDataset,
         train_data: TabularDataset
-    ) -> Tuple[NDArray[np.float32], NDArray[np.float32]]:
+    ) -> Tuple[NDArray[np.float32], NDArray[np.float32], Optional[Dict[str, Any]]]:
         """
 
         Args:
@@ -294,13 +275,13 @@ class DyHPOModel(BasePytorchModule):
         self.eval()
 
         with torch.no_grad():  # gpytorch.settings.fast_pred_var():
-            projected_train_x = self.feature_extractor(
+            projected_train_x, _ = self.feature_extractor(
                 train_data.X,
                 train_data.budgets,
                 train_data.curves,
             )
             self.model.set_train_data(inputs=projected_train_x, targets=train_data.Y, strict=False)
-            projected_test_x = self.feature_extractor(
+            projected_test_x, test_predict_infos = self.feature_extractor(
                 test_data.X,
                 test_data.budgets,
                 test_data.curves,
@@ -310,7 +291,10 @@ class DyHPOModel(BasePytorchModule):
         means = preds.mean.detach().to('cpu').numpy().reshape(-1, )
         stds = preds.stddev.detach().to('cpu').numpy().reshape(-1, )
 
-        return means, stds
+        predict_infos = test_predict_infos
+        predict_infos = {key: value.detach().to('cpu').numpy() for key, value in predict_infos.items()}
+
+        return means, stds, predict_infos
 
     def load_checkpoint(self):
         """
@@ -382,3 +366,14 @@ class DyHPOModel(BasePytorchModule):
     def use_learning_curve_mask(cls):
         model_class = get_class("src/models/deep_kernel_learning", cls.meta.feature_class_name)
         return model_class.use_learning_curve_mask
+
+    def get_feature_extractor_output_size(self, nr_features):
+        valid_budget_size = 50
+        # Create a dummy input with the appropriate input size
+        dummy_x_input = torch.zeros(4, nr_features)
+        dummy_budget_input = torch.zeros(4)
+        dummy_learning_curves_input = torch.zeros(4, valid_budget_size)
+        self.feature_extractor.eval()
+        output, _ = self.feature_extractor(dummy_x_input, dummy_budget_input, dummy_learning_curves_input)
+        output_size = output.shape[-1]
+        return output_size

@@ -77,13 +77,21 @@ class FeatureExtractorPowerLaw(BaseFeatureExtractor):
                 )
             ),
         )
+
+        info = {
+            'alpha': alphas,
+            'beta': betas,
+            'gamma': gammas,
+            'pl_output': output,
+        }
+        
         budgets = torch.unsqueeze(budgets, dim=1)
         alphas = torch.unsqueeze(alphas, dim=1)
         betas = torch.unsqueeze(betas, dim=1)
         gammas = torch.unsqueeze(gammas, dim=1)
         output = torch.unsqueeze(output, dim=1)
 
-        x = cat((alphas, betas, gammas, budgets, output), dim=1)
+        x = cat((alphas, betas, gammas, output), dim=1)
         # x = cat((budgets, output), dim=1)
         # x = output
 
@@ -116,4 +124,4 @@ class FeatureExtractorPowerLaw(BaseFeatureExtractor):
         # print(f"start {start_output}")
         # print(f"end {end_output}")
 
-        return x
+        return x, info

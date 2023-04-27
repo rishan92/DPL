@@ -139,4 +139,11 @@ class ConditionedPowerLawModel(PowerLawModel):
         # print(f"start {start_output}")
         # print(f"end {end_output}")
 
-        return output
+        info = {
+            'alpha': alphas,
+            'beta': betas,
+            'gamma': gammas,
+            'pl_output': output,
+        }
+
+        return output, info

@@ -66,15 +66,20 @@ class EnsembleModel(BasePytorchModule):
     def predict(self, test_data, **kwargs):
         self.eval()
         all_predictions = []
+        predict_infos = []
 
         for model in self.models:
-            predictions = model.predict(test_data)
+            predictions, predict_info = model.predict(test_data)
             all_predictions.append(predictions.detach().cpu().numpy())
+            predict_infos.append(predict_info)
 
         mean_predictions = np.mean(all_predictions, axis=0)
         std_predictions = np.std(all_predictions, axis=0)
 
-        return mean_predictions, std_predictions
+        predict_infos = predict_infos[0]
+        predict_infos = {key: value.detach().to('cpu').numpy() for key, value in predict_infos.items()}
+
+        return mean_predictions, std_predictions, predict_infos
 
     def train_loop(self, train_dataset, should_refine=False, reset_optimizer=False, last_sample=None, **kwargs):
         if should_refine:

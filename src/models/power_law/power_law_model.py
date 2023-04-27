@@ -40,11 +40,11 @@ class PowerLawModel(BasePytorchModule, ABC):
         """
         super().__init__(nr_features=nr_features, seed=seed, checkpoint_path=checkpoint_path)
         self.max_instances = max_instances
-        self.instance_id = self._instance_counter
-        self._instance_counter += 1
-        self._instance_counter %= self.max_instances
-        if self.instance_id not in self._global_epoch:
-            self._global_epoch[self.instance_id] = 0
+        self.instance_id = PowerLawModel._instance_counter
+        PowerLawModel._instance_counter += 1
+        PowerLawModel._instance_counter %= self.max_instances
+        if self.instance_id not in PowerLawModel._global_epoch:
+            PowerLawModel._global_epoch[self.instance_id] = 0
 
         self.act_func = None
         self.last_act_func = None
@@ -117,7 +117,7 @@ class PowerLawModel(BasePytorchModule, ABC):
 
         # zero the parameter gradients
         self.optimizer.zero_grad(set_to_none=True)
-        outputs = self((batch_examples, batch_budgets, batch_curves))
+        outputs, _ = self((batch_examples, batch_budgets, batch_curves))
         loss = self.criterion(outputs, batch_labels)
         loss.backward()
         self.optimizer.step()
@@ -151,9 +151,9 @@ class PowerLawModel(BasePytorchModule, ABC):
         for epoch in range(0, nr_epochs):
             normalized_loss = self.train_epoch()
             self.logger.debug(f'Epoch {epoch + 1}, Loss:{normalized_loss}')
-            self._global_epoch[self.instance_id] += 1
+            PowerLawModel._global_epoch[self.instance_id] += 1
             wandb.log({f"surrogate/model_{self.instance_id}/training_loss": normalized_loss,
-                       f"surrogate/model_{self.instance_id}/epoch": self._global_epoch[self.instance_id]})
+                       f"surrogate/model_{self.instance_id}/epoch": PowerLawModel._global_epoch[self.instance_id]})
             if self.meta.activate_early_stopping:
                 if normalized_loss < best_loss:
                     best_state = deepcopy(self.state_dict())
@@ -172,10 +172,12 @@ class PowerLawModel(BasePytorchModule, ABC):
         if self.meta.activate_early_stopping:
             self.load_state_dict(best_state)
 
+        return 0
+
     def predict(self, test_data):
         self.eval()
-        predictions = self((test_data.X, test_data.budgets, test_data.curves))
-        return predictions
+        predictions, predict_infos = self((test_data.X, test_data.budgets, test_data.curves))
+        return predictions, predict_infos
 
     def __del__(self):
-        self._instance_counter = 0
+        PowerLawModel._instance_counter = 0

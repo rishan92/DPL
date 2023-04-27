@@ -40,8 +40,10 @@ class HistoryManager:
 
         self.cnn_kernel_size = 3  # TODO: get this from dyhpo model hyperparameters
 
-        self.is_history_modified = True
+        self.is_train_data_modified = True
         self.cached_train_dataset = None
+        self.is_test_data_modified = True
+        self.cached_test_dataset = None
 
         self.max_curve_value = 0
 
@@ -50,7 +52,6 @@ class HistoryManager:
         return initial_empty_value
 
     def add(self, hp_index: int, b: int, hp_curve: List[float]):
-        # TODO: check if arange should start with 1 or zero
         self.examples[hp_index] = np.arange(1, b + 1)
         self.performances[hp_index] = hp_curve
 
@@ -61,7 +62,8 @@ class HistoryManager:
         self.max_curve_value = max(self.max_curve_value, max_curve)
         # self.max_curve_value = 10
 
-        self.is_history_modified = True
+        self.is_train_data_modified = True
+        self.is_test_data_modified = True
 
     def get_evaluated_budgets(self, suggested_hp_index):
         if suggested_hp_index in self.examples:
@@ -138,7 +140,7 @@ class HistoryManager:
             train_dataset: A dataset consisting of examples, labels, budgets
                 and learning curves.
         """
-        if not self.is_history_modified:
+        if not self.is_train_data_modified:
             return self.cached_train_dataset
 
         hp_indices, train_labels, train_budgets, train_curves = self.history_configurations(curve_size_mode)
@@ -166,7 +168,7 @@ class HistoryManager:
         )
 
         self.cached_train_dataset = train_dataset
-        self.is_history_modified = False
+        self.is_train_data_modified = False
 
         return train_dataset
 
@@ -175,14 +177,14 @@ class HistoryManager:
         real_budgets = []
         if hp_index in self.examples:
             budgets = self.examples[hp_index]
-            max_budget = max(budgets)
+            max_train_budget = max(budgets)
             performances = self.performances[hp_index]
             for budget, performance in zip(budgets, performances):
                 real_budgets.append(budget)
                 train_curve = performances[:budget - 1] if budget > 1 else [0.0]
                 curves.append(train_curve)
         else:
-            max_budget = 0
+            max_train_budget = 0
             real_budgets.append(0)
             curves.append([0])
 
@@ -212,7 +214,7 @@ class HistoryManager:
             curves=p_curve
         )
 
-        return pred_test_data, real_budgets, max_budget
+        return pred_test_data, real_budgets, max_train_budget
 
     def get_processed_curves(self, curves, curve_size_mode, real_budgets) -> Optional[NDArray[np.float32]]:
         if self.use_learning_curve:
@@ -370,6 +372,10 @@ class HistoryManager:
 
     def get_candidate_configurations_dataset(self, predict_mode, curve_size_mode) -> \
         Tuple[TabularDataset, NDArray[int], NDArray[int]]:
+
+        if not self.is_test_data_modified:
+            return self.cached_test_dataset
+
         hp_indices, budgets, real_budgets, hp_curves = self.generate_candidate_configurations(predict_mode,
                                                                                               curve_size_mode)
 
@@ -389,6 +395,10 @@ class HistoryManager:
             budgets=budgets,
             curves=hp_curves,
         )
+
+        self.cached_test_dataset = (test_data, hp_indices, real_budgets)
+        self.is_test_data_modified = False
+
         return test_data, hp_indices, real_budgets
 
     # TODO: break this function to only handle candidates in history and make config manager handle configs

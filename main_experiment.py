@@ -10,8 +10,13 @@ from pathlib import Path
 import wandb
 import signal
 import time
+import matplotlib
 
 from framework import Framework
+import global_variables as gv
+
+if gv.IS_NEMO:
+    matplotlib.use('Agg')
 
 
 def main():

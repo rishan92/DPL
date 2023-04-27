@@ -119,15 +119,23 @@ class FeatureExtractorDYHPO(BaseFeatureExtractor):
                 )
             ),
         )
+
+        info = {
+            'alpha': alphas,
+            'beta': betas,
+            'gamma': gammas,
+            'pl_output': output,
+        }
+
         budgets = torch.unsqueeze(budgets, dim=1)
         alphas = torch.unsqueeze(alphas, dim=1)
         betas = torch.unsqueeze(betas, dim=1)
         gammas = torch.unsqueeze(gammas, dim=1)
         output = torch.unsqueeze(output, dim=1)
 
-        x = cat((alphas, betas, gammas, budgets, output), dim=1)
+        x = cat((alphas, betas, gammas, output), dim=1)
 
-        return x
+        return x, info
 
     def get_linear_net(self):
         layers = []
@@ -175,6 +183,6 @@ class FeatureExtractorDYHPO(BaseFeatureExtractor):
     #     gammas = torch.unsqueeze(gammas, dim=1)
     #     output = torch.unsqueeze(output, dim=1)
     #
-    #     x = cat((alphas, betas, gammas, budgets, output), dim=1)
+    #     x = cat((alphas, betas, gammas, output), dim=1)
     #
     #     return x
