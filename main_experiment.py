@@ -1,4 +1,5 @@
 import argparse
+import json
 import os
 import sys
 import numpy as np
@@ -6,8 +7,16 @@ import random
 import torch
 from loguru import logger
 from pathlib import Path
+import wandb
+import signal
+import time
+import matplotlib
 
 from framework import Framework
+import global_variables as gv
+
+if gv.IS_NEMO:
+    matplotlib.use('Agg')
 
 
 def main():
@@ -82,6 +91,25 @@ def main():
         default='./output',
         help='The directory where the project output files will be stored.',
     )
+    parser.add_argument(
+        '--config_file',
+        type=str,
+        default=None,
+        help='The file where the project configuration is stored.',
+    )
+    parser.add_argument(
+        '--config',
+        type=str,
+        default=None,
+        help='configuration in json syntax',
+    )
+
+    parser.add_argument(
+        '--verbose',
+        '-v',
+        action='store_true',
+        help="Enable the debug logging"
+    )
 
     args = parser.parse_args()
     seeds = np.arange(10)
@@ -92,13 +120,28 @@ def main():
     torch.manual_seed(seed)
     torch.use_deterministic_algorithms(True)
 
-    logger.remove()
-    # logger.add(sys.stderr, format="{level} | {message}")
-    logger.add(Path(f'./logs/power_law_surrogate_{args.dataset_name}_{seed}.log'), mode='w',
-               format="{level} | {message}")
+    configs = {}
+    if args.config_file:
+        configs = json.loads(args.config_file)
+    if args.config:
+        arg_configs = json.loads(args.config)
+        configs = {**configs, **arg_configs}
 
-    framework = Framework(args, seed)
-    framework.run()
+    framework = Framework(args=args, seed=seed, configs=configs)
+
+    def signal_handler(sig, frame):
+        framework.finish(is_failed=True)
+        sys.exit(0)
+
+    # Register the signal handler for SIGINT (Ctrl+C) and SIGTERM
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+
+    try:
+        framework.run()
+    except Exception as ex:
+        framework.finish(is_failed=True)
+        raise ex
 
 
 if __name__ == "__main__":

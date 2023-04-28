@@ -159,8 +159,7 @@ class TaskSet(BaseBenchmark):
 
         return worst_value - best_value
 
-    def get_incumbent_config_index(self):
-
+    def get_incumbent_config_id(self):
         best_value = np.inf
         best_index = -1
         for index in range(0, self.validation_curves.shape[0]):

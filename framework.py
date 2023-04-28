@@ -4,22 +4,27 @@ import os
 import time
 import numpy as np
 import pandas as pd
+import sklearn
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import FunctionTransformer, OneHotEncoder
+import wandb
+import hashlib
+from typing import List, Tuple, Dict, Optional, Any, Type
+from loguru import logger
+from pathlib import Path
 
 from src.benchmarks.lcbench import LCBench
 from src.benchmarks.taskset import TaskSet
 # from benchmarks.hyperbo import PD1
-from src.surrogate_models.power_law_surrogate import PowerLawSurrogate
+from src.surrogate_models.hyperparameter_optimizer import HyperparameterOptimizer
 from src.surrogate_models.asha import AHBOptimizer
 from src.surrogate_models.dehb.interface import DEHBOptimizer
 from src.surrogate_models.random_search import RandomOptimizer
-from src.surrogate_models.hpo_method import DyHPOAlgorithm
 import global_variables as gv
-
-import sklearn
+import subprocess
+from src.utils.utils import delete_folder_content
 
 
 # if warnings.catch_warnings():
@@ -28,11 +33,27 @@ import sklearn
 
 
 class Framework:
+    surrogate_types = {
+        'power_law': HyperparameterOptimizer,
+        'dyhpo': HyperparameterOptimizer,
+        'asha': AHBOptimizer,
+        'dehb': DEHBOptimizer,
+        # 'dragonfly': DragonFlyOptimizer,
+        'random': RandomOptimizer,
+    }
+
+    benchmark_types = {
+        'lcbench': LCBench,
+        'taskset': TaskSet,
+        'lcbench_mini': LCBench,
+        # 'pd1': PD1,
+    }
 
     def __init__(
         self,
         args: argparse.Namespace,
         seed: int,
+        configs: Dict[str, Any] = None
     ):
         """
         Args:
@@ -43,10 +64,12 @@ class Framework:
                 The seed for the experiment.
         """
 
+        self.start_time = time.perf_counter()
+
         if args.benchmark_name == 'lcbench':
             benchmark_extension = os.path.join('lc_bench', 'results', 'data_2k.json')
         elif args.benchmark_name == 'lcbench_mini':
-            benchmark_extension = os.path.join('lc_bench', 'results', 'lcbench_credit-g.json')
+            benchmark_extension = os.path.join('lc_bench', 'results', 'lcbench_airlines.json')
         elif args.benchmark_name == 'taskset':
             benchmark_extension = os.path.join('data', 'taskset')
         elif args.benchmark_name == 'pd1':
@@ -59,21 +82,8 @@ class Framework:
             benchmark_extension,
         )
 
-        benchmark_types = {
-            'lcbench': LCBench,
-            'taskset': TaskSet,
-            'lcbench_mini': LCBench,
-            # 'pd1': PD1,
-        }
-
-        surrogate_types = {
-            'power_law': PowerLawSurrogate,
-            'dyhpo': PowerLawSurrogate,
-            'asha': AHBOptimizer,
-            'dehb': DEHBOptimizer,
-            # 'dragonfly': DragonFlyOptimizer,
-            'random': RandomOptimizer,
-        }
+        benchmark_types = Framework.benchmark_types
+        surrogate_types = Framework.surrogate_types
 
         disable_preprocessing = {
             'dehb',
@@ -87,16 +97,40 @@ class Framework:
         self.min_value = self.benchmark.min_value
         self.total_budget = args.budget_limit
         self.fantasize_step = args.fantasize_step
+        self.surrogate_budget = 0
 
         self.categorical_indicator = self.benchmark.categorical_indicator
         self.log_indicator = self.benchmark.log_indicator
         self.hp_names = self.benchmark.hp_names
         self.minimization_metric = self.benchmark.minimization_metric
         self.info_dict = dict()
+
+        # set up wandb
+        commit_hash = subprocess.check_output(["git", "rev-parse", "HEAD"]).decode("ascii").strip()
+        framework_meta = self.set_meta(args.surrogate_name, configs)
+        serialized_dict = json.dumps(framework_meta, sort_keys=True, ensure_ascii=True).encode('utf-8')
+        config_hash = hashlib.md5(serialized_dict).hexdigest()
+        local_name = "nemo" if gv.IS_NEMO else "local"
+        group_name = f"{args.benchmark_name}_{args.surrogate_name}_{commit_hash}_{config_hash}_{local_name}"
+        if gv.IS_WANDB:
+            wandb.init(
+                project="power_law_hpo",
+                config=framework_meta,
+                group=group_name,
+                tags=[args.benchmark_name, args.dataset_name, args.surrogate_name, config_hash, commit_hash,
+                      str(self.seed), local_name],
+                job_type=args.dataset_name,
+                name=f"{args.dataset_name}_{self.seed}",
+            )
+        else:
+            wandb.init(mode="disabled")
+
+        print(f"group_name {group_name}")
+
         self.result_dir = os.path.join(
             args.output_dir,
             args.benchmark_name,
-            args.surrogate_name,
+            f"{args.surrogate_name}_{commit_hash}_{config_hash}_{local_name}",
         )
         os.makedirs(self.result_dir, exist_ok=True)
 
@@ -105,19 +139,39 @@ class Framework:
             f'{self.dataset_name}_{self.seed}.json',
         )
 
+        logger.remove()
+        self.log_path = Path(self.result_dir, 'logs', f'{args.surrogate_name}_surrogate_{args.dataset_name}_{seed}.log')
+        if args.verbose:
+            log_level = "TRACE"
+            format_str = "{level} | {message}"
+            logger.add(self.log_path, mode='w', format=format_str, level=log_level)
+        else:
+            log_level = "SUCCESS"
+            logger.add(self.log_path, mode='w', level=log_level)
+
+        self.incumbent_hp_index = self.benchmark.get_incumbent_config_id()
+        self.pred_curves_path = None
+        if gv.PLOT_PRED_CURVES:
+            self.pred_curves_path = os.path.join(self.result_dir, "pred_curves", self.dataset_name, str(self.seed))
+            os.makedirs(self.pred_curves_path, exist_ok=True)
+            delete_folder_content(self.pred_curves_path)
+
+        if gv.PLOT_PRED_DIST:
+            self.pred_dist_path = os.path.join(self.result_dir, "pred_dist", self.dataset_name, str(self.seed))
+            os.makedirs(self.pred_dist_path, exist_ok=True)
+            delete_folder_content(self.pred_dist_path)
+
         if args.surrogate_name not in disable_preprocessing:
             self.hp_candidates = self.preprocess(self.benchmark.get_hyperparameter_candidates())
         else:
             self.hp_candidates = self.benchmark.get_hyperparameter_candidates()
 
         if args.surrogate_name == 'power_law' or args.surrogate_name == 'dyhpo':
-            gv.IS_DYHPO = (args.surrogate_name == 'dyhpo')
             self.surrogate = surrogate_types[args.surrogate_name](
                 self.hp_candidates,
+                surrogate_name=args.surrogate_name,
                 seed=seed,
                 max_benchmark_epochs=self.benchmark.max_budget,
-                ensemble_size=args.ensemble_size,
-                nr_epochs=args.nr_epochs,
                 fantasize_step=self.fantasize_step,
                 minimization=self.minimization_metric,
                 total_budget=args.budget_limit,
@@ -139,20 +193,84 @@ class Framework:
                 maximization=not self.benchmark.minimization_metric,
             )
 
+    def finish(self, is_failed=False):
+        wandb.log_artifact(str(self.log_path), name='debug_log', type='log')
+        wandb.log_artifact(str(self.result_file), name='result_json', type='result')
+
+        if gv.IS_WANDB and gv.PLOT_PRED_CURVES:
+            table = wandb.Table(columns=["plot"])
+            file_list = os.listdir(self.pred_curves_path)
+            for file_name in file_list:
+                file_path = os.path.join(self.pred_curves_path, file_name)
+                table.add_data(wandb.Image(file_path))
+
+            wandb.log({"table_of_prediction_curves": table})
+
+        if gv.IS_WANDB and gv.PLOT_PRED_DIST:
+            table = wandb.Table(columns=["plot"])
+            file_list = os.listdir(self.pred_dist_path)
+            for file_name in file_list:
+                file_path = os.path.join(self.pred_dist_path, file_name)
+                table.add_data(wandb.Image(file_path))
+
+            wandb.log({"table_of_prediction_distributions": table})
+
+        wandb.finish()
+
+        end_time = time.perf_counter()
+        run_time = (end_time - self.start_time) / 60
+        if not is_failed:
+            logger.success(f"Successfully finished. Execution time: {run_time} minutes.")
+        else:
+            logger.error(
+                f"Successfully halted at {self.surrogate_budget} surrogate iteration. "
+                f"Execution time: {run_time} minutes."
+            )
+
+    @classmethod
+    def set_meta(cls, surrogate_name, configs):
+        model_class = cls.surrogate_types[surrogate_name]
+        meta = model_class.set_meta(surrogate_name=surrogate_name, configs=configs)
+        return meta
+
     def run(self):
 
         evaluated_configs = dict()
-        surrogate_budget = 0
 
         if self.benchmark.minimization_metric:
             best_value = np.inf
         else:
             best_value = 0
 
-        while surrogate_budget < self.total_budget:
+        incumbent_value = self.benchmark.get_best_performance()
+
+        while self.surrogate_budget < self.total_budget:
 
             start_time = time.time()
             hp_index, budget = self.surrogate.suggest()
+
+            if gv.PLOT_PRED_CURVES and (budget == 10 or budget == 10 or budget == 20 or budget == 40):
+                self.surrogate.plot_pred_curve(
+                    hp_index=hp_index,
+                    benchmark=self.benchmark,
+                    surrogate_budget=self.surrogate_budget,
+                    output_dir=self.pred_curves_path
+                )
+                self.surrogate.plot_pred_curve(
+                    hp_index=self.incumbent_hp_index,
+                    benchmark=self.benchmark,
+                    surrogate_budget=self.surrogate_budget,
+                    output_dir=self.pred_curves_path,
+                    prefix="incumbent_"
+                )
+
+            if gv.PLOT_PRED_DIST and self.surrogate_budget % 100 == 1:
+                self.surrogate.plot_pred_dist(
+                    benchmark=self.benchmark,
+                    surrogate_budget=self.surrogate_budget,
+                    output_dir=self.pred_dist_path
+                )
+
             hp_curve = self.benchmark.get_curve(hp_index, budget)
             self.surrogate.observe(hp_index, budget, hp_curve)
             time_duration = time.time() - start_time
@@ -176,10 +294,16 @@ class Framework:
                     if best_value < epoch_performance:
                         best_value = epoch_performance
 
-                surrogate_budget += 1
+                self.surrogate_budget += 1
 
-                if surrogate_budget > self.total_budget:
-                    exit(0)
+                if self.surrogate_budget > self.total_budget:
+                    self.finish()
+                    return
+
+                if self.minimization_metric:
+                    regret = best_value - incumbent_value
+                else:
+                    regret = incumbent_value - best_value
 
                 self.log_info(
                     int(hp_index),
@@ -188,8 +312,18 @@ class Framework:
                     best_value,
                     step_time_duration,
                 )
+                metrics = {
+                    'hpo/hp': int(hp_index),
+                    'hpo/scores': epoch_performance,
+                    'hpo/epochs': epoch,
+                    'hpo/curve': best_value,
+                    'hpo/overhead': step_time_duration,
+                    'hpo/surrogate_budget': self.surrogate_budget,
+                    'hpo/regret': regret,
+                }
+                wandb.log(metrics)
 
-        exit(0)
+        self.finish()
 
     def preprocess(self, hp_candidates: np.ndarray) -> np.ndarray:
         """Preprocess the hyperparameter candidates.

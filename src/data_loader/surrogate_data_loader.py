@@ -2,16 +2,17 @@ from torch.utils.data import DataLoader
 import torch
 import numpy as np
 import random
-from typing import List, Tuple, Any, Type
+from typing import List, Tuple, Any, Type, Optional
+
+
+def seed_worker(worker_id):
+    worker_seed = torch.initial_seed() % 2 ** 32
+    np.random.seed(worker_seed)
+    random.seed(worker_seed)
 
 
 class SurrogateDataLoader(DataLoader):
     def __init__(self, seed=0, dev='cpu', should_weight_last_sample=False, last_sample=None, **kwargs):
-        def seed_worker(worker_id):
-            worker_seed = torch.initial_seed() % 2 ** 32
-            np.random.seed(worker_seed)
-            random.seed(worker_seed)
-
         if seed is not None:
             g = torch.Generator()
             g.manual_seed(int(seed))
@@ -30,7 +31,7 @@ class SurrogateDataLoader(DataLoader):
     def __iter__(self):
         batches = super().__iter__()
         if self.should_weight_last_sample:
-            weighted_batch = [None] * 4
+            weighted_batch: List[Optional[torch.Tensor]] = [None] * 4
             for b in batches:
                 for i in range(4):
                     weighted_batch[i] = torch.cat((b[i], self.last_sample[i]))

@@ -1,10 +1,23 @@
 #!/bin/bash
 
+unique_id=$(date +"%Y%m%d_%H%M%S")
+job_directory="$JOB_PATH/job_$unique_id"
+mkdir -p "$job_directory"
+
+cp -R "$ROOT_PATH"/src "$job_directory/"
+cp -R "$ROOT_PATH"/*.py "$job_directory/"
+ln -s "$ROOT_PATH"/lc_bench "$job_directory/"
+ln -s "$ROOT_PATH"/data "$job_directory/"
+ln -s "$ROOT_PATH"/cached "$job_directory/"
+
 export benchmark=$1
 
 if [ "$benchmark" == "lcbench" ]
 then
   file="$ROOT_PATH/bash_scripts/lcbench_dataset_names.txt"
+elif [ "$benchmark" == "lcbench_mini" ]
+then
+  file="$ROOT_PATH/bash_scripts/lcbench_mini_dataset_names.txt"
 elif [ "$benchmark" == "taskset" ]
 then
   file="$ROOT_PATH/bash_scripts/taskset_dataset_names.txt"
@@ -28,4 +41,5 @@ for NAME in $NAMES
 do
    export dataset=$(echo $NAME)
    msub -V -t 1-10 "$ROOT_PATH"/bash_scripts/experiment_array.moab
+#   "$ROOT_PATH"/bash_scripts/experiment_array.moab
 done

@@ -7,7 +7,7 @@ import wandb
 from src.models.power_law.power_law_model import PowerLawModel
 
 
-class ConditionedPowerLawModel(PowerLawModel):
+class ConstrainedPowerLawModel(PowerLawModel):
     @staticmethod
     def get_default_meta():
         hp = {
@@ -20,7 +20,9 @@ class ConditionedPowerLawModel(PowerLawModel):
             'use_learning_curve_mask': False,
             'learning_rate': 0.001,
             'act_func': 'LeakyReLU',
-            'last_act_func': 'SelfGLU',
+            'alpha_act_func': 'Identity',
+            'beta_act_func': 'Abs',
+            'gamma_act_func': 'Abs',
             'loss_function': 'L1Loss',
             'optimizer': 'Adam',
             'activate_early_stopping': False,
@@ -48,30 +50,6 @@ class ConditionedPowerLawModel(PowerLawModel):
         net = torch.nn.Sequential(*layers)
         return net
 
-    def get_cnn_net(self):
-        cnn_part = []
-
-        cnn_part.append(
-            nn.Conv1d(
-                in_channels=2,
-                kernel_size=(self.meta.kernel_size,),
-                out_channels=self.meta.nr_filters,
-            ),
-        )
-        for i in range(1, self.meta.nr_cnn_layers):
-            cnn_part.append(self.act_func)
-            cnn_part.append(
-                nn.Conv1d(
-                    in_channels=self.meta.nr_filters,
-                    kernel_size=(self.meta.kernel_size,),
-                    out_channels=self.meta.nr_filters,
-                ),
-            ),
-        cnn_part.append(nn.AdaptiveAvgPool1d(1))
-
-        net = torch.nn.Sequential(*cnn_part)
-        return net
-
     def forward(self, batch):
         """
         Args:
@@ -88,34 +66,66 @@ class ConditionedPowerLawModel(PowerLawModel):
         """
         x, predict_budgets, learning_curves = batch
 
-        # x = torch.cat((x, torch.unsqueeze(evaluated_budgets, 1)), dim=1)
-        if self.meta.use_learning_curve:
-            lc_features = self.cnn_net(learning_curves)
-            # revert the output from the cnn into nr_rows x nr_kernels.
-            lc_features = torch.squeeze(lc_features, 2)
-            x = torch.cat((x, lc_features), dim=1)
-
         x = self.linear_net(x)
         alphas = x[:, 0]
         betas = x[:, 1]
         gammas = x[:, 2]
 
+        constrained_alpha = self.alpha_act_func(alphas)
+        constrained_beta = self.beta_act_func(betas)
+        constrained_gamma = self.gamma_act_func(gammas)
+
+        # constrain_sum = constrained_alpha + constrained_beta
+        # lower_ab_constraint = torch.clamp(0 - constrain_sum, min=0)
+        # lower_a_constraint = torch.clamp(-1 * constrained_alpha, min=0)
+        # # lower_b_constraint = torch.clamp(-1 * constrained_beta, min=0)
+        #
+        # lower_constraint = torch.max(lower_ab_constraint, lower_a_constraint)
+        #
+        # # a = torch.sum(lower_constraint)
+        # # if a > 0:
+        # #     print(f"adjustment {a}")
+        #
+        # constrained_alpha = constrained_alpha + lower_constraint
+        # constrained_beta = constrained_beta + lower_constraint
+        #
+        # constrain_sum = constrained_alpha + constrained_beta
+        # upper_constraint = torch.clamp(constrain_sum - 1, min=0)
+        #
+        # # a = torch.sum(upper_constraint)
+        # # if a > 0:
+        # #     print(f"adjustment {a}")
+        #
+        # constrained_alpha = constrained_alpha / (1 + upper_constraint)
+        # constrained_beta = constrained_beta / (1 + upper_constraint)
+
+        # constrained_beta = 1 - constrained_beta
+        # constrained_beta = self.beta_act_func(constrained_beta)
+
+        budget_lower_limit = torch.tensor(1 / 51)
+        budget_upper_limit = torch.tensor(1)
+        # budget_lower_limit = torch.tensor(1)
+        # budget_upper_limit = torch.tensor(51)
+        # factor = torch.log(constrained_beta) / torch.log(budget_limit)
+        y_limit = torch.tensor(0.001)
+        # factor = (torch.log(constrained_beta) - torch.log(y_limit)) / torch.log(budget_limit)
+        # factor = (-1 * torch.log(y_limit)) / torch.log(budget_upper_limit)
+        # constrained_gamma = factor * (1 - constrained_gamma)
+        # constrained_gamma = self.gamma_act_func(constrained_gamma)
+
+        # constrained_gamma = constrained_gamma * factor
+
         output = torch.add(
-            alphas,
+            constrained_alpha,
             torch.mul(
-                self.last_act_func(betas),
+                constrained_beta,
                 torch.pow(
                     predict_budgets,
-                    torch.mul(self.last_act_func(gammas), -1)
+                    torch.mul(constrained_gamma, -1)
                 )
             ),
         )
 
-        # budget_lower_limit = torch.tensor(1 / 51)
-        # budget_upper_limit = torch.tensor(1)
-        # constrained_alpha = alphas
-        # constrained_beta = betas
-        # constrained_gamma = gammas
         # start_output = torch.add(
         #     constrained_alpha,
         #     torch.mul(
@@ -139,11 +149,4 @@ class ConditionedPowerLawModel(PowerLawModel):
         # print(f"start {start_output}")
         # print(f"end {end_output}")
 
-        info = {
-            'alpha': alphas,
-            'beta': betas,
-            'gamma': gammas,
-            'pl_output': output,
-        }
-
-        return output, info
+        return output  # , constrained_alpha, constrained_beta, constrained_gamma
