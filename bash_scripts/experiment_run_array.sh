@@ -4,11 +4,21 @@ unique_id=$(date +"%Y%m%d_%H%M%S")
 job_directory="$JOB_PATH/job_$unique_id"
 mkdir -p "$job_directory"
 
+export JOB_DIRECTORY="$job_directory"
+echo "$JOB_DIRECTORY"
+
 cp -R "$ROOT_PATH"/src "$job_directory/"
 cp -R "$ROOT_PATH"/*.py "$job_directory/"
 ln -s "$ROOT_PATH"/lc_bench "$job_directory/"
 ln -s "$ROOT_PATH"/data "$job_directory/"
 ln -s "$ROOT_PATH"/cached "$job_directory/"
+
+# stores WANDB_API_KEY 
+secrets_file="$ROOT_PATH/bash_scripts/secrets.sh"
+if [ -e "$secrets_file" ]; then
+	chmod +x "$secrets_file"
+    . "$secrets_file"        # execute the secrets.sh file
+fi
 
 export benchmark=$1
 
@@ -41,5 +51,5 @@ for NAME in $NAMES
 do
    export dataset=$(echo $NAME)
    msub -V -t 1-10 "$ROOT_PATH"/bash_scripts/experiment_array.moab
-#   "$ROOT_PATH"/bash_scripts/experiment_array.moab
+  # "$ROOT_PATH"/bash_scripts/experiment_array.moab
 done
