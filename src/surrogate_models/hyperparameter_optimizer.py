@@ -22,10 +22,10 @@ from src.data_loader.surrogate_data_loader import SurrogateDataLoader
 from src.models.deep_kernel_learning.dyhpo_model import DyHPOModel
 import global_variables as gv
 from src.history.history_manager import HistoryManager
-from src.models.base.meta import Meta
+from src.surrogate_models.base_hyperparameter_optimizer import BaseHyperparameterOptimizer
 
 
-class HyperparameterOptimizer(Meta):
+class HyperparameterOptimizer(BaseHyperparameterOptimizer):
     model_types = {
         'power_law': EnsembleModel,
         'dyhpo': DyHPOModel,
@@ -393,19 +393,14 @@ class HyperparameterOptimizer(Meta):
 
         return suggested_hp_index, budget
 
-    def observe(
-        self,
-        hp_index: int,
-        b: int,
-        hp_curve: List[float],
-    ):
+    def observe(self, hp_index: int, budget: int, hp_curve: List[float]):
         """Receive information regarding the performance of a hyperparameter
         configuration that was suggested.
 
         Args:
             hp_index: int
                 The index of the evaluated hyperparameter configuration.
-            b: int
+            budget: int
                 The budget for which the hyperparameter configuration was evaluated.
             hp_curve: List
                 The performance of the hyperparameter configuration.
@@ -416,7 +411,7 @@ class HyperparameterOptimizer(Meta):
                 # only use the non-nan part of the curve and the corresponding
                 # budget to still have the information in the network
                 hp_curve = hp_curve[0:index + 1]
-                b = index
+                budget = index
                 break
 
         if not self.minimization:
@@ -425,7 +420,7 @@ class HyperparameterOptimizer(Meta):
 
         best_curve_value = min(hp_curve)
 
-        self.history_manager.add(hp_index, b, hp_curve)
+        self.history_manager.add(hp_index, budget, hp_curve)
 
         if self.best_value_observed > best_curve_value:
             self.best_value_observed = best_curve_value

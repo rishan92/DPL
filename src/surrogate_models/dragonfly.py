@@ -8,8 +8,10 @@ from dragonfly import load_config, maximize_multifidelity_function, minimize_mul
 
 import numpy as np
 
+from src.surrogate_models.base_hyperparameter_optimizer import BaseHyperparameterOptimizer
 
-class DragonFlyOptimizer:
+
+class DragonFlyOptimizer(BaseHyperparameterOptimizer):
     def __init__(
         self,
         hyperparameter_candidates: np.ndarray,
@@ -229,7 +231,7 @@ class DragonFlyOptimizer:
         self,
         hp_index: int,
         budget: int,
-        learning_curve: List[float],
+        hp_curve: List[float],
     ):
         """
         Respond regarding the performance of a
@@ -242,15 +244,15 @@ class DragonFlyOptimizer:
             The index of the evaluated hyperparameter configuration.
         budget: int
             The budget for which the hyperparameter configuration was evaluated.
-        learning curve: np.ndarray, list
+        hp_curve: np.ndarray, list
             validation accuracy curve. The last value is the same as the score.
         """
         assert self.next_conf is not None, 'Call get_next first.'
         self.next_conf = None
 
         self.conf_info = {
-            'score': learning_curve[-1],
-            'val_curve': learning_curve,
+            'score': hp_curve[-1],
+            'val_curve': hp_curve,
         }
 
     def create_configuration_to_indices(

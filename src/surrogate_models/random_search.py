@@ -1,9 +1,10 @@
 from typing import List, Tuple
-
 import numpy as np
 
+from src.surrogate_models.base_hyperparameter_optimizer import BaseHyperparameterOptimizer
 
-class RandomOptimizer:
+
+class RandomOptimizer(BaseHyperparameterOptimizer):
     def __init__(
         self,
         hyperparameter_candidates: np.ndarray,
@@ -56,12 +57,7 @@ class RandomOptimizer:
 
         return config_index, max_budget
 
-    def observe(
-        self,
-        hp_index: int,
-        budget: int,
-        learning_curve: List[float],
-    ):
+    def observe(self, hp_index: int, budget: int, hp_curve: List[float]):
         """
         Respond regarding the performance of a
         hyperparameter configuration. get_next should
@@ -73,7 +69,7 @@ class RandomOptimizer:
             The index of the evaluated hyperparameter configuration.
         budget: int
             The budget for which the hyperparameter configuration was evaluated.
-        learning curve: np.ndarray, list
+        hp_curve: np.ndarray, list
             validation accuracy curve. The last value is the same as the score.
         """
         pass

@@ -198,23 +198,25 @@ class Framework:
         wandb.log_artifact(str(self.result_file), name='result_json', type='result')
 
         if gv.IS_WANDB and gv.PLOT_PRED_CURVES:
-            table = wandb.Table(columns=["id", "plot"])
             file_list = os.listdir(self.pred_curves_path)
-            for i, file_name in enumerate(file_list):
-                file_path = os.path.join(self.pred_curves_path, file_name)
-                print(file_path)
-                table.add_data(i, wandb.Image(file_path))
+            if len(file_list) > 0:
+                table = wandb.Table(columns=["id", "plot"])
+                for i, file_name in enumerate(file_list):
+                    file_path = os.path.join(self.pred_curves_path, file_name)
+                    print(file_path)
+                    table.add_data(i, wandb.Image(file_path))
 
-            wandb.log({"table_of_prediction_curves": table})
+                wandb.log({"table_of_prediction_curves": table})
 
         if gv.IS_WANDB and gv.PLOT_PRED_DIST:
-            table = wandb.Table(columns=["id", "plot"])
             file_list = os.listdir(self.pred_dist_path)
-            for i, file_name in enumerate(file_list):
-                file_path = os.path.join(self.pred_dist_path, file_name)
-                table.add_data(i, wandb.Image(file_path))
+            if len(file_list) > 0:
+                table = wandb.Table(columns=["id", "plot"])
+                for i, file_name in enumerate(file_list):
+                    file_path = os.path.join(self.pred_dist_path, file_name)
+                    table.add_data(i, wandb.Image(file_path))
 
-            wandb.log({"table_of_prediction_distributions": table})
+                wandb.log({"table_of_prediction_distributions": table})
 
         wandb.finish()
 

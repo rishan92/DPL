@@ -5,10 +5,11 @@ from typing import Dict, List, OrderedDict, Tuple, Union
 import ConfigSpace
 import numpy as np
 
+from src.surrogate_models.base_hyperparameter_optimizer import BaseHyperparameterOptimizer
 from src.surrogate_models.dehb.dehb import DEHB
 
 
-class DEHBOptimizer:
+class DEHBOptimizer(BaseHyperparameterOptimizer):
     def __init__(
         self,
         hyperparameter_candidates: np.ndarray,

@@ -4,8 +4,10 @@ import numpy as np
 
 import optuna
 
+from src.surrogate_models.base_hyperparameter_optimizer import BaseHyperparameterOptimizer
 
-class AHBOptimizer:
+
+class AHBOptimizer(BaseHyperparameterOptimizer):
 
     def __init__(
         self,
@@ -75,6 +77,7 @@ class AHBOptimizer:
         # define study with hyperband pruner.
         sampler = optuna.samplers.RandomSampler(seed=seed)
         self.study = optuna.create_study(
+            study_name="hyperband",
             sampler=sampler,
             direction='maximize' if self.maximization else 'minimize',
             pruner=optuna.pruners.HyperbandPruner(
@@ -149,7 +152,7 @@ class AHBOptimizer:
         self,
         hp_index: int,
         budget: int,
-        learning_curve: List[float],
+        hp_curve: List[float],
     ):
         """
         Respond regarding the performance of a
@@ -162,13 +165,13 @@ class AHBOptimizer:
             The index of the evaluated hyperparameter configuration.
         budget: int
             The budget for which the hyperparameter configuration was evaluated.
-        learning curve: np.ndarray, list
+        hp_curve: np.ndarray, list
             validation accuracy curve. The last value is the same as the score.
         """
         assert self.next_conf is not None, 'Call get_next first.'
         pruned_trial = False
 
-        score = learning_curve[-1]
+        score = hp_curve[-1]
         self.trial.report(score, self.conf_budget)
 
         if self.trial.should_prune():
@@ -176,7 +179,7 @@ class AHBOptimizer:
 
         if pruned_trial:
             self.study.tell(self.trial, state=optuna.trial.TrialState.PRUNED)  # tell the pruned state
-            self.evaluated_hp_curves[self.next_conf] = learning_curve
+            self.evaluated_hp_curves[self.next_conf] = hp_curve
             if self.conf_budget in self.evaluated_configurations:
                 self.evaluated_configurations[self.conf_budget].add(self.next_conf)
             else:
@@ -185,7 +188,7 @@ class AHBOptimizer:
 
         if self.conf_budget == self.max_budget:
             self.study.tell(self.trial, score, state=optuna.trial.TrialState.COMPLETE)
-            self.evaluated_hp_curves[self.next_conf] = learning_curve
+            self.evaluated_hp_curves[self.next_conf] = hp_curve
             if self.conf_budget in self.evaluated_configurations:
                 self.evaluated_configurations[self.conf_budget].add(self.next_conf)
             else:
