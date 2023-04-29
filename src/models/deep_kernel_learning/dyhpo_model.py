@@ -56,17 +56,35 @@ class DyHPOModel(BasePytorchModule):
                                                self.meta.gp_class_name)
         self.likelihood_class = get_class_from_packages([gpytorch.likelihoods, src.models.deep_kernel_learning],
                                                         self.meta.likelihood_class_name)
-        self.mll_class = get_class_from_packages([gpytorch.mlls, src.models.deep_kernel_learning],
-                                                 self.meta.mll_class_name)
+        self.mll_criterion_class = get_class_from_packages([gpytorch.mlls, src.models.deep_kernel_learning],
+                                                           self.meta.mll_loss_function)
+        self.power_law_criterion_class = get_class_from_packages([torch.nn, src.models.deep_kernel_learning],
+                                                                 self.meta.power_law_loss_function)
+
         self.feature_extractor: FeatureExtractor = self.feature_extractor_class(nr_features=nr_features)
         self.feature_output_size = self.get_feature_extractor_output_size(nr_features=nr_features)
 
         self.early_stopping_patience = self.meta.nr_patience_epochs
         self.seed = seed
-        self.model, self.likelihood, self.mll = \
-            self.get_model_likelihood_mll(
-                self.feature_output_size
-            )
+
+        if self.meta.noise_lower_bound is not None and self.meta.noise_upper_bound is not None:
+            self.noise_constraint = Interval(lower_bound=self.meta.noise_lower_bound,
+                                             upper_bound=self.meta.noise_upper_bound)
+        elif self.meta.noise_lower_bound is not None:
+            self.noise_constraint = GreaterThan(lower_bound=self.meta.noise_lower_bound)
+        elif self.meta.noise_upper_bound is not None:
+            self.noise_constraint = LessThan(upper_bound=self.meta.noise_upper_bound)
+        else:
+            self.noise_constraint = None
+
+        train_size = self.feature_output_size
+        train_x = torch.ones(train_size, train_size)
+        train_y = torch.ones(train_size)
+
+        self.likelihood: gpytorch.likelihoods.Likelihood = self.likelihood_class(noise_constraint=self.noise_constraint)
+        self.model: gpytorch.models.GP = self.gp_class(train_x=train_x, train_y=train_y, likelihood=self.likelihood)
+        self.mll_criterion: gpytorch.mlls.MarginalLogLikelihood = self.mll_criterion_class(self.likelihood, self.model)
+        self.power_law_criterion = self.power_law_criterion_class()
 
         self.set_optimizer()
 
@@ -92,7 +110,9 @@ class DyHPOModel(BasePytorchModule):
             'feature_class_name': 'FeatureExtractorDYHPO',  # 'FeatureExtractor',  #  'FeatureExtractorPowerLaw',
             'gp_class_name': 'GPRegressionModel',  # 'GPRegressionPowerLawMeanModel',  #
             'likelihood_class_name': 'GaussianLikelihood',
-            'mll_class_name': 'ExactMarginalLogLikelihood',
+            'mll_loss_function': 'ExactMarginalLogLikelihood',
+            'power_law_loss_function': 'MSELoss',
+            'power_law_loss_factor': 0,
             'noise_lower_bound': None,  # 1e-4,  #
             'noise_upper_bound': None,  # 1e-3,  #
             'optimizer': 'Adam',
@@ -208,28 +228,47 @@ class DyHPOModel(BasePytorchModule):
 
             projected_x, _ = self.feature_extractor(X_train, train_budgets, train_curves)
             self.model.set_train_data(projected_x, y_train, strict=False)
-            output = self.model(projected_x)
+            output: gpytorch.ExactMarginalLogLikelihood = self.model(projected_x)
 
             try:
                 # Calc loss and backprop derivatives
-                loss = -self.mll(output, self.model.train_targets)
+                mll_loss = -self.mll_criterion(output, self.model.train_targets)
+
+                prediction: gpytorch.distributions.Distribution = self.likelihood(output)
+                power_law_output = projected_x[:, -1]
+                mean_prediction = prediction.mean
+                power_law_loss = self.power_law_criterion(mean_prediction, power_law_output)
+
+                loss = mll_loss + self.meta.power_law_loss_factor * power_law_loss
+
+                mae = gpytorch.metrics.mean_absolute_error(prediction, self.model.train_targets)
+                power_law_mae = gpytorch.metrics.mean_absolute_error(prediction, power_law_output.detach())
+
+                mll_loss_value = mll_loss.detach().to('cpu').item()
+                power_law_loss_value = power_law_loss.detach().to('cpu').item()
                 loss_value = loss.detach().to('cpu').item()
-                mse = gpytorch.metrics.mean_squared_error(output, self.model.train_targets)
+                mae_value = mae.detach().to('cpu').item()
+                power_law_mae_value = power_law_mae.detach().to('cpu').item()
+
                 self.logger.debug(
-                    f'Epoch {epoch_nr} - MSE {mse}, '
+                    f'Epoch {epoch_nr} - MAE {mae_value}, '
                     f'Loss: {loss_value}, '
                     f'lengthscale: {self.model.covar_module.base_kernel.lengthscale.item()}, '
                     f'noise: {self.model.likelihood.noise.item()}, '
                 )
 
                 wandb.log({
-                    f"surrogate/dyhpo/training_loss": loss_value,
-                    f"surrogate/dyhpo/training_mse": mse,
-                    f"surrogate/dyhpo/training_lengthscale": self.model.covar_module.base_kernel.lengthscale.item(),
-                    f"surrogate/dyhpo/training_noise": self.model.likelihood.noise.item(),
-                    f"surrogate/dyhpo/epoch": DyHPOModel._global_epoch,
-                    f"surrogate/dyhpo/training_errors": DyHPOModel._training_errors,
+                    "surrogate/dyhpo/training_loss": loss_value,
+                    "surrogate/dyhpo/training_mll_loss": mll_loss_value,
+                    "surrogate/dyhpo/training_power_law_loss": power_law_loss_value,
+                    "surrogate/dyhpo/training_MAE": mae_value,
+                    "surrogate/dyhpo/training_power_law_MAE": power_law_mae_value,
+                    "surrogate/dyhpo/training_lengthscale": self.model.covar_module.base_kernel.lengthscale.item(),
+                    "surrogate/dyhpo/training_noise": self.model.likelihood.noise.item(),
+                    "surrogate/dyhpo/epoch": DyHPOModel._global_epoch,
+                    "surrogate/dyhpo/training_errors": DyHPOModel._training_errors,
                 })
+
                 loss.backward()
                 self.optimizer.step()
             except Exception as training_error:
@@ -296,7 +335,14 @@ class DyHPOModel(BasePytorchModule):
                 test_data.budgets,
                 test_data.curves,
             )
-            preds = self.likelihood(self.model(projected_test_x))
+            preds: gpytorch.distributions.Distribution = self.likelihood(self.model(projected_test_x))
+
+            power_law_output = projected_test_x[:, -1]
+            power_law_loss = gpytorch.metrics.mean_absolute_error(preds, power_law_output)
+            power_law_loss_value = power_law_loss.detach().to('cpu').item()
+            wandb.log({
+                "surrogate/dyhpo/testing_power_law_MAE": power_law_loss_value
+            })
 
         means = preds.mean.detach().to('cpu').numpy().reshape(-1, )
         stds = preds.stddev.detach().to('cpu').numpy().reshape(-1, )
