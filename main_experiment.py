@@ -116,7 +116,7 @@ def main():
     torch.use_deterministic_algorithms(True)
 
     config = None
-    if args.config is not None:
+    if args.config is not None and args.config != "":
         if os.path.isfile(args.config):
             # Read and parse the JSON file
             with open(args.config, 'r') as file:
