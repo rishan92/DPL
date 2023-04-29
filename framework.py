@@ -108,8 +108,6 @@ class Framework:
         # set up wandb
         commit_hash = subprocess.check_output(["git", "rev-parse", "HEAD"]).decode("ascii").strip()
         framework_meta = self.set_meta(args.surrogate_name, config=config)
-        # with open('power_law_configurations.json', 'w') as f:
-        #     json.dump(framework_meta, f, indent=4)
         serialized_dict = json.dumps(framework_meta, sort_keys=True, ensure_ascii=True).encode('utf-8')
         config_hash = hashlib.md5(serialized_dict).hexdigest()
         local_name = "nemo" if gv.IS_NEMO else "local"
@@ -140,6 +138,18 @@ class Framework:
             self.result_dir,
             f'{self.dataset_name}_{self.seed}.json',
         )
+
+        config_folder_path = os.path.join(
+            self.result_dir,
+            'configuration'
+        )
+        os.makedirs(config_folder_path, exist_ok=True)
+        config_file_path = os.path.join(
+            config_folder_path,
+            f'{args.surrogate_name}_configurations.json',
+        )
+        with open(config_file_path, 'w') as f:
+            json.dump(framework_meta, f, indent=4)
 
         logger.remove()
         self.log_path = Path(self.result_dir, 'logs', f'{args.surrogate_name}_surrogate_{args.dataset_name}_{seed}.log')
