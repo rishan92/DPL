@@ -1,5 +1,5 @@
 #!/bin/bash
-#MSUB -l walltime=04:00:00
+#MSUB -l walltime=02:00:00
 #MSUB -l nodes=1:ppn=2
 #MSUB -l pmem=6gb
 #MSUB -N power_law_taskset
