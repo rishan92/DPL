@@ -47,10 +47,10 @@ if [ "$use_config" == true ]
 then
   if [ "$surrogate" == "power_law" ]
   then
-    config_file="$ROOT_PATH/configurations/power_law_configuration.json"
+    config_file="$job_directory/configurations/power_law_configuration.json"
   elif [ "$surrogate" == "dyhpo" ]
   then
-    config_file="$ROOT_PATH/configurations/dyhpo_configuration.json"
+    config_file="$job_directory/configurations/dyhpo_configuration.json"
   fi
 fi
 
