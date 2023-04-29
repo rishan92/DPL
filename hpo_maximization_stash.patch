@@ -1,0 +1,131 @@
+diff --git a/src/history/history_manager.py b/src/history/history_manager.py
+index 796d865..92202cf 100644
+--- a/src/history/history_manager.py
++++ b/src/history/history_manager.py
+@@ -312,13 +312,13 @@ class HistoryManager:
+                 learning_curve = self.performances[example_index]
+                 # The hyperparameter was not evaluated until fidelity, or more.
+                 # Take the maximum value from the curve.
+-                lower_fidelity_config_values.append(min(learning_curve))
++                lower_fidelity_config_values.append(max(learning_curve))
+ 
+         if len(exact_fidelity_config_values) > 0:
+             # lowest error corresponds to best value
+-            best_value = min(exact_fidelity_config_values)
++            best_value = max(exact_fidelity_config_values)
+         else:
+-            best_value = min(lower_fidelity_config_values)
++            best_value = max(lower_fidelity_config_values)
+ 
+         return best_value
+ 
+diff --git a/src/surrogate_models/hyperparameter_optimizer.py b/src/surrogate_models/hyperparameter_optimizer.py
+index 7cdc1ff..82b311a 100644
+--- a/src/surrogate_models/hyperparameter_optimizer.py
++++ b/src/surrogate_models/hyperparameter_optimizer.py
+@@ -157,7 +157,8 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
+ 
+         self.nr_features = self.hp_candidates.shape[1]
+ 
+-        self.best_value_observed = np.inf
++        # self.best_value_observed = np.inf
++        self.best_value_observed = np.NINF
+ 
+         self.diverged_configs = set()
+ 
+@@ -414,15 +415,19 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
+                 budget = index
+                 break
+ 
+-        if not self.minimization:
++        # if not self.minimization:
++        #     hp_curve = self.max_value - np.array(hp_curve)
++        #     hp_curve = hp_curve.tolist()
++
++        if self.minimization:
+             hp_curve = self.max_value - np.array(hp_curve)
+             hp_curve = hp_curve.tolist()
+ 
+-        best_curve_value = min(hp_curve)
++        best_curve_value = max(hp_curve)
+ 
+         self.history_manager.add(hp_index, budget, hp_curve)
+ 
+-        if self.best_value_observed > best_curve_value:
++        if self.best_value_observed < best_curve_value:
+             self.best_value_observed = best_curve_value
+             self.no_improvement_patience = 0
+             self.logger.info(f'New Incumbent value found at iteration'
+@@ -650,6 +655,63 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
+ 
+         return acq_values
+ 
++    @staticmethod
++    def acq_maximize(
++        best_values: np.ndarray,
++        mean_predictions: np.ndarray,
++        std_predictions: np.ndarray,
++        explore_factor: float = 0.25,
++        acq_mode: str = 'ei',
++    ) -> np.ndarray:
++        """
++        Calculate the acquisition function based on the network predictions.
++
++        Args:
++        -----
++        best_values: np.ndarray
++            An array with the best value for every configuration.
++            Depending on the implementation it can be different for every
++            configuration.
++        mean_predictions: np.ndarray
++            The mean values of the model predictions.
++        std_predictions: np.ndarray
++            The standard deviation values of the model predictions.
++        explore_factor: float
++            The explore factor, when ucb is used as an acquisition
++            function.
++        acq_choice: str
++            The choice for the acquisition function to use.
++
++        Returns
++        -------
++        acq_values: np.ndarray
++            The values of the acquisition function for every configuration.
++        """
++        if acq_mode == 'ei':
++            difference = np.subtract(mean_predictions, best_values)
++
++            zero_std_indicator = np.zeros_like(std_predictions, dtype=bool)
++            zero_std_indicator[std_predictions == 0] = True
++            not_zero_std_indicator = np.invert(zero_std_indicator)
++            z = np.divide(difference, std_predictions, where=not_zero_std_indicator)
++            z[zero_std_indicator] = 0
++
++            acq_values = np.add(np.multiply(difference, norm.cdf(z)), np.multiply(std_predictions, norm.pdf(z)))
++        elif acq_mode == 'ucb':
++            # we are working with error rates so we multiply the mean with -1
++            acq_values = np.add(mean_predictions, explore_factor * std_predictions)
++        elif acq_mode == 'thompson':
++            acq_values = np.random.normal(mean_predictions, std_predictions)
++        elif acq_mode == 'exploit':
++            acq_values = mean_predictions
++        else:
++            raise NotImplementedError(
++                f'Acquisition function {acq_mode} has not been'
++                f'implemented',
++            )
++
++        return acq_values
++
+     def find_suggested_config(
+         self,
+         mean_predictions: NDArray[np.float32],
+@@ -687,7 +749,7 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
+         else:
+             best_values = np.full_like(mean_predictions, self.best_value_observed)
+ 
+-        acq_func_values = self.acq(
++        acq_func_values = self.acq_maximize(
+             best_values,
+             mean_predictions,
+             mean_stds,

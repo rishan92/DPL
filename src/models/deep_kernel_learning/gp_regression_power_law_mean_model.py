@@ -48,7 +48,7 @@ class GPRegressionPowerLawMeanModel(gpytorch.models.ExactGP):
 
     def forward(self, x):
         mean_x = self.mean_module(x)
-        x_wo_output = x[:, :-1]
-        covar_x = self.covar_module(x_wo_output)
+        # x_wo_output = x[:, :-1]
+        covar_x = self.covar_module(x)
 
         return gpytorch.distributions.MultivariateNormal(mean_x, covar_x)

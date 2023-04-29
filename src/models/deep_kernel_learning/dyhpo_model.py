@@ -89,7 +89,7 @@ class DyHPOModel(BasePytorchModule):
             'learning_rate': 0.001,
             'nr_epochs': 1000,
             'refine_nr_epochs': 50,
-            'feature_class_name': 'FeatureExtractor',  # 'FeatureExtractorDYHPO',  #  'FeatureExtractorPowerLaw',
+            'feature_class_name': 'FeatureExtractorDYHPO',  # 'FeatureExtractor',  #  'FeatureExtractorPowerLaw',
             'gp_class_name': 'GPRegressionModel',  # 'GPRegressionPowerLawMeanModel',  #
             'likelihood_class_name': 'GaussianLikelihood',
             'mll_class_name': 'ExactMarginalLogLikelihood',

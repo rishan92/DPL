@@ -1,0 +1,34 @@
+{
+    "fraction_random_configs": 0.1,
+    "initial_full_training_trials": 10,
+    "predict_mode": "end_budget",
+    "curve_size_mode": "fixed",
+    "acq_mode": "ei",
+    "acq_best_value_mode": "normal",
+    "use_target_normalization": false,
+    "use_scaled_budgets": true,
+    "model": {
+        "model_class_name": "ConditionedPowerLawModel",
+        "ensemble_size": 5,
+        "nr_epochs": 250,
+        "refine_nr_epochs": 20,
+        "batch_size": 64,
+        "refine_batch_size": 64,
+        "model": {
+            "nr_units": 128,
+            "nr_layers": 2,
+            "kernel_size": 3,
+            "nr_filters": 4,
+            "nr_cnn_layers": 2,
+            "use_learning_curve": false,
+            "use_learning_curve_mask": false,
+            "learning_rate": 0.001,
+            "act_func": "LeakyReLU",
+            "last_act_func": "SelfGLU",
+            "loss_function": "L1Loss",
+            "optimizer": "Adam",
+            "activate_early_stopping": false,
+            "early_stopping_it": 0
+        }
+    }
+}

@@ -460,6 +460,112 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
             if return_state is not None and return_state < 0:
                 self.train = True
 
+    @staticmethod
+    def acq(
+        best_values: np.ndarray,
+        mean_predictions: np.ndarray,
+        std_predictions: np.ndarray,
+        explore_factor: float = 0.25,
+        acq_mode: str = 'ei',
+    ) -> np.ndarray:
+        """
+        Calculate the acquisition function based on the network predictions.
+
+        Args:
+        -----
+        best_values: np.ndarray
+            An array with the best value for every configuration.
+            Depending on the implementation it can be different for every
+            configuration.
+        mean_predictions: np.ndarray
+            The mean values of the model predictions.
+        std_predictions: np.ndarray
+            The standard deviation values of the model predictions.
+        explore_factor: float
+            The explore factor, when ucb is used as an acquisition
+            function.
+        acq_choice: str
+            The choice for the acquisition function to use.
+
+        Returns
+        -------
+        acq_values: np.ndarray
+            The values of the acquisition function for every configuration.
+        """
+        if acq_mode == 'ei':
+            difference = np.subtract(best_values, mean_predictions)
+
+            zero_std_indicator = np.zeros_like(std_predictions, dtype=bool)
+            zero_std_indicator[std_predictions == 0] = True
+            not_zero_std_indicator = np.invert(zero_std_indicator)
+            z = np.divide(difference, std_predictions, where=not_zero_std_indicator)
+            z[zero_std_indicator] = 0
+
+            acq_values = np.add(np.multiply(difference, norm.cdf(z)), np.multiply(std_predictions, norm.pdf(z)))
+        elif acq_mode == 'ucb':
+            # we are working with error rates so we multiply the mean with -1
+            acq_values = np.add(-1 * mean_predictions, explore_factor * std_predictions)
+        elif acq_mode == 'thompson':
+            acq_values = np.random.normal(mean_predictions, std_predictions)
+        elif acq_mode == 'exploit':
+            acq_values = mean_predictions
+        else:
+            raise NotImplementedError(
+                f'Acquisition function {acq_mode} has not been'
+                f'implemented',
+            )
+
+        return acq_values
+
+    def find_suggested_config(
+        self,
+        mean_predictions: NDArray[np.float32],
+        mean_stds: NDArray[np.float32],
+        budgets: NDArray[int] = None,
+        acq_mode: str = 'ei',
+        acq_best_value_mode: str = None,
+    ) -> int:
+        """Return the hyperparameter with the highest acq function value.
+
+        Given the mean predictions and mean standard deviations from the DPL
+        ensemble for every hyperparameter configuraiton, return the hyperparameter
+        configuration that has the highest acquisition function value.
+
+        Args:
+            mean_predictions: np.ndarray
+                The mean predictions of the ensemble for every hyperparameter
+                configuration.
+            mean_stds: np.ndarray
+                The standard deviation predictions of the ensemble for every
+                hyperparameter configuration.
+
+        Returns:
+            max_value_index: int
+                the index of the maximal value.
+
+        """
+
+        if acq_best_value_mode == 'mf':
+            best_values = np.empty(shape=budgets.shape, dtype=np.float32)
+            for i, budget in enumerate(budgets):
+                budget = int(budget)
+                best_value = self.history_manager.calculate_fidelity_ymax_dyhpo(budget)
+                best_values[i] = best_value
+        else:
+            best_values = np.full_like(mean_predictions, self.best_value_observed)
+
+        acq_func_values = self.acq(
+            best_values,
+            mean_predictions,
+            mean_stds,
+            acq_mode=acq_mode,
+        )
+
+        max_value_index = np.argmax(acq_func_values)
+        max_value_index = int(max_value_index)
+
+        return max_value_index
+
     def plot_pred_curve(self, hp_index, benchmark, surrogate_budget, output_dir, prefix=""):
         if self.model is None:
             return
@@ -592,109 +698,3 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
         plt.savefig(file_path, dpi=200)
 
         plt.close()
-
-    @staticmethod
-    def acq(
-        best_values: np.ndarray,
-        mean_predictions: np.ndarray,
-        std_predictions: np.ndarray,
-        explore_factor: float = 0.25,
-        acq_mode: str = 'ei',
-    ) -> np.ndarray:
-        """
-        Calculate the acquisition function based on the network predictions.
-
-        Args:
-        -----
-        best_values: np.ndarray
-            An array with the best value for every configuration.
-            Depending on the implementation it can be different for every
-            configuration.
-        mean_predictions: np.ndarray
-            The mean values of the model predictions.
-        std_predictions: np.ndarray
-            The standard deviation values of the model predictions.
-        explore_factor: float
-            The explore factor, when ucb is used as an acquisition
-            function.
-        acq_choice: str
-            The choice for the acquisition function to use.
-
-        Returns
-        -------
-        acq_values: np.ndarray
-            The values of the acquisition function for every configuration.
-        """
-        if acq_mode == 'ei':
-            difference = np.subtract(best_values, mean_predictions)
-
-            zero_std_indicator = np.zeros_like(std_predictions, dtype=bool)
-            zero_std_indicator[std_predictions == 0] = True
-            not_zero_std_indicator = np.invert(zero_std_indicator)
-            z = np.divide(difference, std_predictions, where=not_zero_std_indicator)
-            z[zero_std_indicator] = 0
-
-            acq_values = np.add(np.multiply(difference, norm.cdf(z)), np.multiply(std_predictions, norm.pdf(z)))
-        elif acq_mode == 'ucb':
-            # we are working with error rates so we multiply the mean with -1
-            acq_values = np.add(-1 * mean_predictions, explore_factor * std_predictions)
-        elif acq_mode == 'thompson':
-            acq_values = np.random.normal(mean_predictions, std_predictions)
-        elif acq_mode == 'exploit':
-            acq_values = mean_predictions
-        else:
-            raise NotImplementedError(
-                f'Acquisition function {acq_mode} has not been'
-                f'implemented',
-            )
-
-        return acq_values
-
-    def find_suggested_config(
-        self,
-        mean_predictions: NDArray[np.float32],
-        mean_stds: NDArray[np.float32],
-        budgets: NDArray[int] = None,
-        acq_mode: str = 'ei',
-        acq_best_value_mode: str = None,
-    ) -> int:
-        """Return the hyperparameter with the highest acq function value.
-
-        Given the mean predictions and mean standard deviations from the DPL
-        ensemble for every hyperparameter configuraiton, return the hyperparameter
-        configuration that has the highest acquisition function value.
-
-        Args:
-            mean_predictions: np.ndarray
-                The mean predictions of the ensemble for every hyperparameter
-                configuration.
-            mean_stds: np.ndarray
-                The standard deviation predictions of the ensemble for every
-                hyperparameter configuration.
-
-        Returns:
-            max_value_index: int
-                the index of the maximal value.
-
-        """
-
-        if acq_best_value_mode == 'mf':
-            best_values = np.empty(shape=budgets.shape, dtype=np.float32)
-            for i, budget in enumerate(budgets):
-                budget = int(budget)
-                best_value = self.history_manager.calculate_fidelity_ymax_dyhpo(budget)
-                best_values[i] = best_value
-        else:
-            best_values = np.full_like(mean_predictions, self.best_value_observed)
-
-        acq_func_values = self.acq(
-            best_values,
-            mean_predictions,
-            mean_stds,
-            acq_mode=acq_mode,
-        )
-
-        max_value_index = np.argmax(acq_func_values)
-        max_value_index = int(max_value_index)
-
-        return max_value_index

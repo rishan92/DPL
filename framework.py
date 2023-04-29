@@ -53,7 +53,7 @@ class Framework:
         self,
         args: argparse.Namespace,
         seed: int,
-        configs: Dict[str, Any] = None
+        config: Dict[str, Any] = None
     ):
         """
         Args:
@@ -107,7 +107,9 @@ class Framework:
 
         # set up wandb
         commit_hash = subprocess.check_output(["git", "rev-parse", "HEAD"]).decode("ascii").strip()
-        framework_meta = self.set_meta(args.surrogate_name, configs)
+        framework_meta = self.set_meta(args.surrogate_name, config=config)
+        # with open('power_law_configurations.json', 'w') as f:
+        #     json.dump(framework_meta, f, indent=4)
         serialized_dict = json.dumps(framework_meta, sort_keys=True, ensure_ascii=True).encode('utf-8')
         config_hash = hashlib.md5(serialized_dict).hexdigest()
         local_name = "nemo" if gv.IS_NEMO else "local"
@@ -193,47 +195,11 @@ class Framework:
                 maximization=not self.benchmark.minimization_metric,
             )
 
-    def finish(self, is_failed=False):
-        wandb.log_artifact(str(self.log_path), name='debug_log', type='log')
-        wandb.log_artifact(str(self.result_file), name='result_json', type='result')
-
-        if gv.IS_WANDB and gv.PLOT_PRED_CURVES:
-            file_list = os.listdir(self.pred_curves_path)
-            if len(file_list) > 0:
-                table = wandb.Table(columns=["id", "plot"])
-                for i, file_name in enumerate(file_list):
-                    file_path = os.path.join(self.pred_curves_path, file_name)
-                    print(file_path)
-                    table.add_data(i, wandb.Image(file_path))
-
-                wandb.log({"table_of_prediction_curves": table})
-
-        if gv.IS_WANDB and gv.PLOT_PRED_DIST:
-            file_list = os.listdir(self.pred_dist_path)
-            if len(file_list) > 0:
-                table = wandb.Table(columns=["id", "plot"])
-                for i, file_name in enumerate(file_list):
-                    file_path = os.path.join(self.pred_dist_path, file_name)
-                    table.add_data(i, wandb.Image(file_path))
-
-                wandb.log({"table_of_prediction_distributions": table})
-
-        wandb.finish()
-
-        end_time = time.perf_counter()
-        run_time = (end_time - self.start_time) / 60
-        if not is_failed:
-            logger.success(f"Successfully finished. Execution time: {run_time} minutes.")
-        else:
-            logger.error(
-                f"Successfully halted at {self.surrogate_budget} surrogate iteration. "
-                f"Execution time: {run_time} minutes."
-            )
-
     @classmethod
-    def set_meta(cls, surrogate_name, configs):
+    def set_meta(cls, surrogate_name, config=None):
+        config = {} if config is None else config
         model_class = cls.surrogate_types[surrogate_name]
-        meta = model_class.set_meta(surrogate_name=surrogate_name, configs=configs)
+        meta = model_class.set_meta(surrogate_name=surrogate_name, config=config)
         return meta
 
     def run(self):
@@ -462,3 +428,40 @@ class Framework:
 
         with open(self.result_file, 'w') as fp:
             json.dump(self.info_dict, fp)
+
+    def finish(self, is_failed=False):
+        wandb.log_artifact(str(self.log_path), name='debug_log', type='log')
+        wandb.log_artifact(str(self.result_file), name='result_json', type='result')
+
+        if gv.IS_WANDB and gv.PLOT_PRED_CURVES:
+            file_list = os.listdir(self.pred_curves_path)
+            if len(file_list) > 0:
+                table = wandb.Table(columns=["id", "plot"])
+                for i, file_name in enumerate(file_list):
+                    file_path = os.path.join(self.pred_curves_path, file_name)
+                    print(file_path)
+                    table.add_data(i, wandb.Image(file_path))
+
+                wandb.log({"table_of_prediction_curves": table})
+
+        if gv.IS_WANDB and gv.PLOT_PRED_DIST:
+            file_list = os.listdir(self.pred_dist_path)
+            if len(file_list) > 0:
+                table = wandb.Table(columns=["id", "plot"])
+                for i, file_name in enumerate(file_list):
+                    file_path = os.path.join(self.pred_dist_path, file_name)
+                    table.add_data(i, wandb.Image(file_path))
+
+                wandb.log({"table_of_prediction_distributions": table})
+
+        wandb.finish()
+
+        end_time = time.perf_counter()
+        run_time = (end_time - self.start_time) / 60
+        if not is_failed:
+            logger.success(f"Successfully finished. Execution time: {run_time} minutes.")
+        else:
+            logger.error(
+                f"Successfully halted at {self.surrogate_budget} surrogate iteration. "
+                f"Execution time: {run_time} minutes."
+            )

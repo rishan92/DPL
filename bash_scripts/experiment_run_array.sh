@@ -9,6 +9,7 @@ echo "$JOB_DIRECTORY"
 
 cp -R "$ROOT_PATH"/src "$job_directory/"
 cp -R "$ROOT_PATH"/*.py "$job_directory/"
+cp -R "$ROOT_PATH"/configurations "$job_directory/"
 ln -s "$ROOT_PATH"/lc_bench "$job_directory/"
 ln -s "$ROOT_PATH"/data "$job_directory/"
 ln -s "$ROOT_PATH"/cached "$job_directory/"
@@ -40,6 +41,20 @@ fi
 
 export surrogate="$2"
 export dir="$3"
+export use_config="$4"
+
+if [ "$use_config" == true ]
+then
+  if [ "$surrogate" == "power_law" ]
+  then
+    config_file="$ROOT_PATH/configurations/power_law_configuration.json"
+  elif [ "$surrogate" == "dyhpo" ]
+  then
+    config_file="$ROOT_PATH/configurations/dyhpo_configuration.json"
+  fi
+fi
+
+export config="$config_file"
 
 if ! [ -e "$file" ] ; then     # spaces inside square brackets
     echo "$0: $file does not exist" >&2  # error message includes $0 and goes to stderr

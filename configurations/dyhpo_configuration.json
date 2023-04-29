@@ -1,0 +1,38 @@
+{
+    "fraction_random_configs": 0.1,
+    "initial_full_training_trials": 10,
+    "predict_mode": "next_budget",
+    "curve_size_mode": "variable",
+    "acq_mode": "ei",
+    "acq_best_value_mode": "mf",
+    "use_target_normalization": false,
+    "use_scaled_budgets": true,
+    "model": {
+        "batch_size": 64,
+        "nr_patience_epochs": 10,
+        "learning_rate": 0.001,
+        "nr_epochs": 1000,
+        "refine_nr_epochs": 50,
+        "feature_class_name": "FeatureExtractorDYHPO",
+        "gp_class_name": "GPRegressionModel",
+        "likelihood_class_name": "GaussianLikelihood",
+        "mll_class_name": "ExactMarginalLogLikelihood",
+        "noise_lower_bound": null,
+        "noise_upper_bound": null,
+        "optimizer": "Adam",
+        "feature_model": {
+            "nr_layers": 2,
+            "nr_units": [
+                64,
+                128
+            ],
+            "cnn_nr_channels": 4,
+            "cnn_kernel_size": 3,
+            "cnn_nr_layers": 1,
+            "use_learning_curve": false,
+            "use_learning_curve_mask": false,
+            "act_func": "LeakyReLU",
+            "last_act_func": "GELU"
+        }
+    }
+}

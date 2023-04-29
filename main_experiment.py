@@ -91,17 +91,12 @@ def main():
         default='./output',
         help='The directory where the project output files will be stored.',
     )
-    parser.add_argument(
-        '--config_file',
-        type=str,
-        default=None,
-        help='The file where the project configuration is stored.',
-    )
+
     parser.add_argument(
         '--config',
         type=str,
         default=None,
-        help='configuration in json syntax',
+        help='The file where the project configuration is stored or configuration in json syntax',
     )
 
     parser.add_argument(
@@ -120,14 +115,20 @@ def main():
     torch.manual_seed(seed)
     torch.use_deterministic_algorithms(True)
 
-    configs = {}
-    if args.config_file:
-        configs = json.loads(args.config_file)
-    if args.config:
-        arg_configs = json.loads(args.config)
-        configs = {**configs, **arg_configs}
+    config = None
+    if args.config is not None:
+        if os.path.isfile(args.config):
+            # Read and parse the JSON file
+            with open(args.config, 'r') as file:
+                config = json.load(file)
+        else:
+            # Attempt to parse the input string as JSON
+            try:
+                config = json.loads(args.config)
+            except json.JSONDecodeError:
+                raise json.JSONDecodeError("The --config input is neither a file path nor a valid JSON string")
 
-    framework = Framework(args=args, seed=seed, configs=configs)
+    framework = Framework(args=args, seed=seed, config=config)
 
     def signal_handler(sig, frame):
         framework.finish(is_failed=True)

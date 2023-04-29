@@ -22,4 +22,4 @@ export MKL_NUM_THREADS=1
 
 export PYTHONHASHSEED=0
 
-"$ENV_PATH"/bin/python3 "$JOB_DIRECTORY"/main_experiment.py --index $MOAB_JOBARRAYINDEX --benchmark_name "$benchmark" --surrogate_name "$surrogate" --dataset_name "$dataset" --nr_epochs 250 --ensemble_size 5 --budget_limit 1000 --project_dir "$JOB_DIRECTORY" --output_dir "$dir"
+"$ENV_PATH"/bin/python3 "$JOB_DIRECTORY"/main_experiment.py --index $MOAB_JOBARRAYINDEX --benchmark_name "$benchmark" --surrogate_name "$surrogate" --dataset_name "$dataset" --nr_epochs 250 --ensemble_size 5 --budget_limit 1000 --project_dir "$JOB_DIRECTORY" --output_dir "$dir" --config "$config"
