@@ -21,6 +21,8 @@ if [ -e "$secrets_file" ]; then
     . "$secrets_file"        # execute the secrets.sh file
 fi
 
+export WANDB_MODE="dryrun"
+
 export benchmark=$1
 
 if [ "$benchmark" == "lcbench" ]
