@@ -46,6 +46,11 @@ class HistoryManager:
         self.cached_test_dataset = None
 
         self.max_curve_value = 0
+        self.target_normalization_value = 1
+
+    def set_target_normalization_value(self):
+        self.target_normalization_value = self.max_curve_value
+        return self.target_normalization_value
 
     def get_initial_empty_value(self):
         initial_empty_value = self.get_mean_initial_value() if self.fill_value == 'last' else 0
@@ -83,6 +88,9 @@ class HistoryManager:
         newp_budget = torch.tensor([newp_budget], dtype=torch.float32)
         if self.use_scaled_budgets:
             newp_budget = newp_budget / self.max_benchmark_epochs
+
+        if self.use_target_normalization:
+            newp_performance = newp_performance / self.target_normalization_value
 
         newp_performance = torch.tensor([newp_performance], dtype=torch.float32)
 
@@ -150,7 +158,7 @@ class HistoryManager:
             train_budgets = train_budgets / self.max_benchmark_epochs
 
         if self.use_target_normalization:
-            train_labels = train_labels / self.max_curve_value
+            train_labels = train_labels / self.target_normalization_value
 
         # This creates a copy
         train_examples = self.hp_candidates[hp_indices]
@@ -445,6 +453,8 @@ class HistoryManager:
                                               real_budgets=hp_budgets)
 
         if predict_mode == "next_budget":
+            # make sure there is a copy happening because hp_budgets get normalized and real_budgets does not.
+            # Creating np.array below copies the data.
             hp_budgets = real_budgets
 
         hp_indices = np.array(hp_indices, dtype=int)

@@ -317,9 +317,10 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
                                                                               train_data=train_data)
 
         if self.meta.use_target_normalization:
-            mean_predictions = mean_predictions * self.history_manager.max_curve_value
-            if predict_infos is not None and hasattr(predict_infos, 'pl_output'):
-                predict_infos['pl_output'] = predict_infos['pl_output'] * self.history_manager.max_curve_value
+            mean_predictions = mean_predictions * self.target_normalization_value
+            std_predictions = std_predictions * self.target_normalization_value
+            if predict_infos is not None and 'pl_output' in predict_infos:
+                predict_infos['pl_output'] = predict_infos['pl_output'] * self.target_normalization_value
 
         return mean_predictions, std_predictions, hp_indices, real_budgets, predict_infos
 
@@ -444,6 +445,7 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
         if self.initial_random_index >= len(self.rand_init_conf_indices):
 
             if self.train:
+                self.target_normalization_value = self.history_manager.set_target_normalization_value()
                 if self.pretrain:
                     # TODO Load the pregiven weights.
                     pass
@@ -587,9 +589,10 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
         mean_data, std_data, predict_infos = self.model.predict(test_data=pred_test_data, train_data=train_data)
 
         if self.meta.use_target_normalization:
-            mean_data = mean_data * self.history_manager.max_curve_value
-            if predict_infos is not None and hasattr(predict_infos, 'pl_output'):
-                predict_infos['pl_output'] = predict_infos['pl_output'] * self.history_manager.max_curve_value
+            mean_data = mean_data * self.target_normalization_value
+            std_data = std_data * self.target_normalization_value
+            if predict_infos is not None and 'pl_output' in predict_infos:
+                predict_infos['pl_output'] = predict_infos['pl_output'] * self.target_normalization_value
 
         plt.clf()
         if predict_infos is not None:
@@ -657,9 +660,10 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
         mean_data, std_data, predict_infos = self.model.predict(test_data=test_data, train_data=train_data)
 
         if self.meta.use_target_normalization:
-            mean_data = mean_data * self.history_manager.max_curve_value
-            if predict_infos is not None and hasattr(predict_infos, 'pl_output'):
-                predict_infos['pl_output'] = predict_infos['pl_output'] * self.history_manager.max_curve_value
+            mean_data = mean_data * self.target_normalization_value
+            std_data = std_data * self.target_normalization_value
+            if predict_infos is not None and 'pl_output' in predict_infos:
+                predict_infos['pl_output'] = predict_infos['pl_output'] * self.target_normalization_value
 
         difference = real_curve_targets - mean_data
 
