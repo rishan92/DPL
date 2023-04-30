@@ -213,6 +213,8 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
         self.real_curve_targets_map_pd: Optional[pd.DataFrame] = None
         self.prediction_params_pd: Optional[pd.DataFrame] = None
 
+        self.target_normalization_value = 1
+
     @staticmethod
     def get_default_meta(model_class):
         if model_class == EnsembleModel:

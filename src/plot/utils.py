@@ -24,15 +24,15 @@ def add_plot_legend(ax: matplotlib.axes.Axes, n: int):
               fancybox=True, shadow=True, ncol=n)
 
 
-def plot_line(data: pd.DataFrame, x_label: str, y_label: str, title: str, path: Union[Path, str],
+def plot_line(ydata: pd.DataFrame, x_label: str, y_label: str, title: str, path: Union[Path, str],
               std_data: pd.DataFrame = None, **kwargs):
     plt.clf()
-    p = sns.lineplot(data=data)
+    p = sns.lineplot(data=ydata)
 
     plot_std = kwargs['plot_std'] if 'plot_std' in kwargs else True
     if std_data is not None and plot_std:
-        for col in data.columns:
-            p.axes.fill_between(data.index, data[col] + std_data[col], data[col] - std_data[col], alpha=0.3)
+        for col in ydata.columns:
+            p.axes.fill_between(ydata.index, ydata[col] + std_data[col], ydata[col] - std_data[col], alpha=0.3)
 
     if 'x_log' in kwargs and kwargs['x_log']:
         plt.xscale('log')
@@ -41,7 +41,23 @@ def plot_line(data: pd.DataFrame, x_label: str, y_label: str, title: str, path: 
     plt.xlabel(x_label)
     plt.ylabel(y_label)
     # plt.title(title)
-    add_plot_legend(p.axes, len(data.columns))
+    add_plot_legend(p.axes, len(ydata.columns))
     # plt.tight_layout()
     plt.savefig(path, dpi=200)
     # plt.show()
+
+
+def plot_scatter(data: pd.DataFrame, x_label: str, y_label: str, title: str, path: Union[Path, str],
+                 std_data: pd.DataFrame = None, **kwargs):
+    plt.clf()
+    p = sns.scatterplot(data, x='first_curve', y='best_regret')
+
+    if 'x_log' in kwargs and kwargs['x_log']:
+        plt.xscale('log')
+    if 'y_log' in kwargs and kwargs['y_log']:
+        plt.yscale('log')
+    plt.xlabel(x_label)
+    plt.ylabel(y_label)
+    # plt.title(title)
+    # plt.tight_layout()
+    plt.savefig(path, dpi=200)

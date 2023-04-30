@@ -264,6 +264,14 @@ class FrameworkMetricsGenerator:
             tag_data = self._all_result_data
         elif metric == 'regret':
             tag_data = self.get_metric(metric)
+        elif metric == 'best_regret':
+            tag_data = self.get_metric('regret')
+            tag_data = tag_data.iloc[-1:, :]
+        elif metric == 'epochs':
+            tag_data = self._all_result_data.index
+        elif metric == 'first_curve':
+            tag_data = self._all_result_data.loc[:, ('curve', slice(None), slice(None), slice(None), slice(None))]
+            tag_data = tag_data.iloc[:1, :]
         else:
             raise NotImplementedError
 
@@ -271,25 +279,35 @@ class FrameworkMetricsGenerator:
             tag_groups = tag_data.groupby(by=['tag', 'benchmark', 'dataset', 'repeat_nr'], axis=1)
             for ((tag, benchmark_name, dataset_name, repeat_nr), data) in tag_groups:
                 data = data.droplevel(["tag", "benchmark", "dataset", "repeat_nr"], axis=1)
+                if self.req_methods is not None:
+                    data = data[self.req_methods]
                 yield (tag, benchmark_name, dataset_name, repeat_nr), data
             return tag_data
         elif aggregate_level == "dataset":
             tag_groups = tag_data.groupby(by=['tag', 'benchmark', 'dataset'], axis=1)
             for (tag, benchmark_name, dataset_name), dataset_data in tag_groups:
                 grouped_data = dataset_data.groupby(by=["method"], axis=1)
-                yield (tag, benchmark_name, dataset_name), grouped_data
+                mean_data, std_data = grouped_data.mean(), grouped_data.std()
+                if self.req_methods is not None:
+                    mean_data, std_data = mean_data[self.req_methods], std_data[self.req_methods]
+                yield (tag, benchmark_name, dataset_name), mean_data, std_data
         elif aggregate_level == "benchmark":
             tag_groups = tag_data.groupby(by=['tag', 'benchmark'], axis=1)
             for (tag, benchmark_name), dataset_data in tag_groups:
                 grouped_data = dataset_data.groupby(by=["method"], axis=1)
-                yield (tag, benchmark_name), grouped_data
+                mean_data, std_data = grouped_data.mean(), grouped_data.std()
+                if self.req_methods is not None:
+                    mean_data, std_data = mean_data[self.req_methods], std_data[self.req_methods]
+                yield (tag, benchmark_name), mean_data, std_data
         else:
             raise NotImplementedError
 
     def _get_all_result_files(self, path: Path):
         subdirectories = []
         for dirpaths, dirnames, filenames in os.walk(str(path)):
-            for filename in filenames:
-                if filename.endswith('.json'):
-                    subdirectories.append(os.path.join(dirpaths, filename))
+            parent_folder = os.path.basename(dirpaths)
+            if parent_folder != 'configuration':
+                for filename in filenames:
+                    if filename.endswith('.json'):
+                        subdirectories.append(os.path.join(dirpaths, filename))
         return subdirectories
