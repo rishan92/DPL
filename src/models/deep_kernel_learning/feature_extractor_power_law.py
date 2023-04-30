@@ -45,14 +45,14 @@ class FeatureExtractorPowerLaw(BaseFeatureExtractor):
         # adding one since we concatenate the features with the budget
         nr_initial_features = self.nr_features
 
-        layers.append(nn.Linear(nr_initial_features, self.meta.nr_units))
+        layers.append(nn.Linear(nr_initial_features, self.meta.nr_units[0]))
         layers.append(self.act_func)
 
-        for i in range(2, self.meta.nr_layers + 1):
-            layers.append(nn.Linear(self.meta.nr_units, self.meta.nr_units))
+        for i in range(1, self.meta.nr_layers - 1):
+            layers.append(nn.Linear(self.meta.nr_units[i - 1], self.meta.nr_units[i]))
             layers.append(self.act_func)
 
-        last_layer = nn.Linear(self.meta.nr_units, 3)
+        last_layer = nn.Linear(self.meta.nr_units[-1], 3)
         layers.append(last_layer)
 
         net = torch.nn.Sequential(*layers)
@@ -84,7 +84,7 @@ class FeatureExtractorPowerLaw(BaseFeatureExtractor):
             'gamma': gammas,
             'pl_output': output,
         }
-        
+
         budgets = torch.unsqueeze(budgets, dim=1)
         alphas = torch.unsqueeze(alphas, dim=1)
         betas = torch.unsqueeze(betas, dim=1)
