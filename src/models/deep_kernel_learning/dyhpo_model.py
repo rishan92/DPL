@@ -126,7 +126,7 @@ class DyHPOModel(BasePytorchModule):
         default_meta = cls.get_default_meta()
         meta = {**default_meta, **config}
         feature_model_class = get_class("src/models/deep_kernel_learning", meta['feature_class_name'])
-        feature_model_config = feature_model_class.set_meta(config.get("model", None))
+        feature_model_config = feature_model_class.set_meta(config.get("feature_model", None))
         meta['feature_model'] = feature_model_config
         cls.meta = SimpleNamespace(**meta)
         return meta
