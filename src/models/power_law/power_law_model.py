@@ -118,6 +118,12 @@ class PowerLawModel(BasePytorchModule, ABC):
         # zero the parameter gradients
         self.optimizer.zero_grad(set_to_none=True)
         outputs, _ = self((batch_examples, batch_budgets, batch_curves))
+        # if outputs.is_complex():
+        #     imag_loss_factor = 1
+        #     imag_loss = torch.abs(outputs.imag).mean()
+        #     loss = self.criterion(outputs.real, batch_labels) + imag_loss_factor * imag_loss
+        # else:
+        #     loss = self.criterion(outputs, batch_labels)
         loss = self.criterion(outputs, batch_labels)
         loss.backward()
         self.optimizer.step()
@@ -177,6 +183,8 @@ class PowerLawModel(BasePytorchModule, ABC):
     def predict(self, test_data):
         self.eval()
         predictions, predict_infos = self((test_data.X, test_data.budgets, test_data.curves))
+        # if predictions.is_complex():
+        #     predictions = predictions.real
         return predictions, predict_infos
 
     def __del__(self):
