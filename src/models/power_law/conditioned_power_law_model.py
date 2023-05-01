@@ -3,8 +3,10 @@ import torch.nn as nn
 from copy import deepcopy
 import numpy as np
 import wandb
+import math
 
 from src.models.power_law.power_law_model import PowerLawModel
+from .scaling_layer import ScalingLayer
 
 
 class ConditionedPowerLawModel(PowerLawModel):
@@ -25,6 +27,8 @@ class ConditionedPowerLawModel(PowerLawModel):
             'optimizer': 'Adam',
             'activate_early_stopping': False,
             'early_stopping_it': 0,
+            'use_scaling_layer': False,
+            'scaling_layer_bias_values': [0, 0, math.log(0.01) / math.log(1 / 51)]
         }
         return hp
 
@@ -44,6 +48,13 @@ class ConditionedPowerLawModel(PowerLawModel):
 
         last_layer = nn.Linear(self.meta.nr_units, 3)
         layers.append(last_layer)
+
+        if hasattr(self.meta, "use_scaling_layer") and self.meta.use_scaling_layer:
+            bias_values = None
+            if hasattr(self.meta, "scaling_layer_bias_values") and self.meta.scaling_layer_bias_values:
+                bias_values = self.meta.scaling_layer_bias_values
+            scaling_layer = ScalingLayer(in_features=3, bias_values=bias_values)
+            layers.append(scaling_layer)
 
         net = torch.nn.Sequential(*layers)
         return net
