@@ -1,4 +1,7 @@
-class BaseBenchmark:
+from abc import ABC, abstractmethod
+
+
+class BaseBenchmark(ABC):
     nr_hyperparameters = None
     max_budget = None
     log_indicator = None
@@ -15,12 +18,14 @@ class BaseBenchmark:
     def load_dataset_names(self):
         raise NotImplementedError('Please implement the load_dataset_names method')
 
+    @abstractmethod
     def get_hyperparameter_candidates(self):
         raise NotImplementedError('Please extend the get_hyperparameter_candidates method')
 
+    @abstractmethod
     def get_performance(self, hp_index: int, budget: int):
         raise NotImplementedError('Please extend the get_performance method')
 
     @property
-    def isMinimize(self):
+    def is_minimize(self):
         return self.minimization_metric

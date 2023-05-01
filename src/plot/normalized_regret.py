@@ -9,7 +9,7 @@ import pandas as pd
 from scipy.stats import rankdata
 import seaborn as sns
 
-from src.benchmarks.benchmark import BaseBenchmark
+from src.benchmarks.base_benchmark import BaseBenchmark
 from src.benchmarks.lcbench import LCBench
 from src.benchmarks.taskset import TaskSet
 from src.benchmarks.hyperbo import PD1

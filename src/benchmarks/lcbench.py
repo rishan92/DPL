@@ -3,7 +3,7 @@ from typing import List
 
 import numpy as np
 
-from src.benchmarks.benchmark import BaseBenchmark
+from src.benchmarks.base_benchmark import BaseBenchmark
 from lc_bench.api import Benchmark
 
 

@@ -9,7 +9,7 @@ from src.models.power_law.power_law_model import PowerLawModel
 from .scaling_layer import ScalingLayer
 
 
-class ConditionedPowerLawModel(PowerLawModel):
+class ComplexPowerLawModel(PowerLawModel):
     @staticmethod
     def get_default_meta():
         hp = {
@@ -46,14 +46,14 @@ class ConditionedPowerLawModel(PowerLawModel):
             layers.append(nn.Linear(self.meta.nr_units, self.meta.nr_units))
             layers.append(self.act_func)
 
-        last_layer = nn.Linear(self.meta.nr_units, 3)
+        last_layer = nn.Linear(self.meta.nr_units, 4)
         layers.append(last_layer)
 
         if hasattr(self.meta, "use_scaling_layer") and self.meta.use_scaling_layer:
             bias_values = None
             if hasattr(self.meta, "scaling_layer_bias_values") and self.meta.scaling_layer_bias_values:
                 bias_values = self.meta.scaling_layer_bias_values
-            scaling_layer = ScalingLayer(in_features=3, bias_values=bias_values)
+            scaling_layer = ScalingLayer(in_features=4, bias_values=bias_values)
             layers.append(scaling_layer)
 
         net = torch.nn.Sequential(*layers)
@@ -109,18 +109,37 @@ class ConditionedPowerLawModel(PowerLawModel):
         x = self.linear_net(x)
         alphas = x[:, 0]
         betas = x[:, 1]
-        gammas = x[:, 2]
+        gammas_r = x[:, 2]
+        gammas_i = x[:, 3]
 
-        output = torch.add(
+        betas = self.last_act_func(betas)
+        gammas_r = self.last_act_func(gammas_r)
+        gammas_i = self.last_act_func(gammas_i)
+
+        gammas = gammas_r + 1j * gammas_i
+
+        output_complex = torch.add(
             alphas,
             torch.mul(
-                self.last_act_func(betas),
+                betas,
                 torch.pow(
                     predict_budgets,
-                    torch.mul(self.last_act_func(gammas), -1)
+                    torch.mul(gammas, -1)
                 )
             ),
         )
+        output = output_complex.real
+
+        # output_r = torch.add(
+        #     alphas,
+        #     torch.mul(
+        #         betas,
+        #         torch.pow(
+        #             predict_budgets,
+        #             torch.mul(gammas_r, -1)
+        #         )
+        #     ),
+        # )
 
         # budget_lower_limit = torch.tensor(1 / 51)
         # budget_upper_limit = torch.tensor(1)

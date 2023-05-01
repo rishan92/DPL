@@ -6,7 +6,7 @@ import pandas as pd
 from syne_tune.blackbox_repository import load_blackbox
 from syne_tune.config_space import is_log_space
 
-from src.benchmarks.benchmark import BaseBenchmark
+from src.benchmarks.base_benchmark import BaseBenchmark
 
 
 class PD1(BaseBenchmark):

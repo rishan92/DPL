@@ -18,6 +18,7 @@ from pathlib import Path
 from src.benchmarks.lcbench import LCBench
 from src.benchmarks.taskset import TaskSet
 # from benchmarks.hyperbo import PD1
+from src.benchmarks.synthetic import SyntheticBench
 from src.surrogate_models.hyperparameter_optimizer import HyperparameterOptimizer
 from src.surrogate_models.asha import AHBOptimizer
 from src.surrogate_models.dehb.interface import DEHBOptimizer
@@ -47,6 +48,7 @@ class Framework:
         'taskset': TaskSet,
         'lcbench_mini': LCBench,
         # 'pd1': PD1,
+        'synthetic': SyntheticBench,
     }
 
     def __init__(
@@ -74,6 +76,8 @@ class Framework:
             benchmark_extension = os.path.join('data', 'taskset')
         elif args.benchmark_name == 'pd1':
             benchmark_extension = 'pd1'
+        elif args.benchmark_name == 'synthetic':
+            benchmark_extension = 'synthetic'
         else:
             raise ValueError(f'Benchmark {args.benchmark_name} not supported')
 
@@ -235,13 +239,13 @@ class Framework:
                     surrogate_budget=self.surrogate_budget,
                     output_dir=self.pred_curves_path
                 )
-                self.surrogate.plot_pred_curve(
-                    hp_index=self.incumbent_hp_index,
-                    benchmark=self.benchmark,
-                    surrogate_budget=self.surrogate_budget,
-                    output_dir=self.pred_curves_path,
-                    prefix="incumbent_"
-                )
+                # self.surrogate.plot_pred_curve(
+                #     hp_index=self.incumbent_hp_index,
+                #     benchmark=self.benchmark,
+                #     surrogate_budget=self.surrogate_budget,
+                #     output_dir=self.pred_curves_path,
+                #     prefix="incumbent_"
+                # )
 
             if gv.PLOT_PRED_DIST and self.surrogate_budget % 100 == 1:
                 self.surrogate.plot_pred_dist(

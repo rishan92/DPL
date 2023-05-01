@@ -9,7 +9,7 @@ from src.models.power_law.power_law_model import PowerLawModel
 from .scaling_layer import ScalingLayer
 
 
-class ConditionedPowerLawModel(PowerLawModel):
+class TargetSpaceComplexPowerLawModel(PowerLawModel):
     @staticmethod
     def get_default_meta():
         hp = {
@@ -22,7 +22,7 @@ class ConditionedPowerLawModel(PowerLawModel):
             'use_learning_curve_mask': False,
             'learning_rate': 0.001,
             'act_func': 'LeakyReLU',
-            'last_act_func': 'SelfGLU',
+            'last_act_func': 'Sigmoid',
             'loss_function': 'L1Loss',
             'optimizer': 'Adam',
             'activate_early_stopping': False,
@@ -108,19 +108,48 @@ class ConditionedPowerLawModel(PowerLawModel):
 
         x = self.linear_net(x)
         alphas = x[:, 0]
-        betas = x[:, 1]
-        gammas = x[:, 2]
+        y1 = x[:, 1]
+        y2 = x[:, 2]
 
-        output = torch.add(
+        y1 = self.last_act_func(y1)
+        y2 = self.last_act_func(y2)
+
+        val = (y2 - alphas) / (y1 - alphas)
+
+        abs_val = torch.abs(val)
+        log_abs_val = torch.log(abs_val)
+
+        # Calculate the angle (imaginary part)
+        angle = torch.atan2(torch.tensor(0.0), val)
+
+        log_val = torch.complex(log_abs_val, angle)
+
+        gammas = log_val / torch.log(torch.tensor(1 / 51))
+
+        betas = y2 - alphas
+
+        output_complex = torch.add(
             alphas,
             torch.mul(
-                self.last_act_func(betas),
+                betas,
                 torch.pow(
                     predict_budgets,
-                    torch.mul(self.last_act_func(gammas), -1)
+                    torch.mul(gammas, -1)
                 )
             ),
         )
+        output = output_complex.real
+
+        # output_r = torch.add(
+        #     alphas,
+        #     torch.mul(
+        #         betas,
+        #         torch.pow(
+        #             predict_budgets,
+        #             torch.mul(gammas_r, -1)
+        #         )
+        #     ),
+        # )
 
         # budget_lower_limit = torch.tensor(1 / 51)
         # budget_upper_limit = torch.tensor(1)

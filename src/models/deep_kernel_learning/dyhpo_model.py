@@ -107,14 +107,16 @@ class DyHPOModel(BasePytorchModule):
             'learning_rate': 0.001,
             'nr_epochs': 1000,
             'refine_nr_epochs': 50,
-            'feature_class_name': 'FeatureExtractorDYHPO',  # 'FeatureExtractor',  #  'FeatureExtractorPowerLaw',
-            'gp_class_name': 'GPRegressionModel',  # 'GPRegressionPowerLawMeanModel',  #
+            'feature_class_name': 'FeatureExtractorDYHPO',
+            # 'FeatureExtractor',  #  'FeatureExtractorPowerLaw',
+            'gp_class_name': 'GPRegressionModel',
+            # 'GPRegressionPowerLawMeanModel',  #  'GPRegressionModel'
             'likelihood_class_name': 'GaussianLikelihood',
             'mll_loss_function': 'ExactMarginalLogLikelihood',
             'power_law_loss_function': 'MSELoss',
             'power_law_loss_factor': 0,
             'noise_lower_bound': None,  # 1e-4,  #
-            'noise_upper_bound': None,  # 1e-3,  #
+            'noise_upper_bound': None,  # 1e-1,  #
             'optimizer': 'Adam',
         }
 
@@ -428,7 +430,7 @@ class DyHPOModel(BasePytorchModule):
         valid_budget_size = 50
         # Create a dummy input with the appropriate input size
         dummy_x_input = torch.zeros(4, nr_features)
-        dummy_budget_input = torch.zeros(4)
+        dummy_budget_input = torch.ones(4)
         dummy_learning_curves_input = torch.zeros(4, valid_budget_size)
         self.feature_extractor.eval()
         output, _ = self.feature_extractor(dummy_x_input, dummy_budget_input, dummy_learning_curves_input)

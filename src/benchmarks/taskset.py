@@ -6,7 +6,7 @@ from collections import OrderedDict
 import numpy as np
 import pandas as pd
 
-from src.benchmarks.benchmark import BaseBenchmark
+from src.benchmarks.base_benchmark import BaseBenchmark
 
 
 class TaskSet(BaseBenchmark):

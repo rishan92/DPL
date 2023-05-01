@@ -74,7 +74,7 @@ class FrameworkMetricsGenerator:
 
             baseline_incumbent_curve = \
                 self._all_result_data.loc[:, ('curve', benchmark_name, dataset_name, slice(None), slice(None))]
-            if not benchmark.isMinimize:
+            if not benchmark.is_minimize:
                 regret = incumbent_best_performance - baseline_incumbent_curve
             else:
                 regret = baseline_incumbent_curve - incumbent_best_performance
