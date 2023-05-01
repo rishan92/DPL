@@ -109,10 +109,12 @@ class TargetSpaceComplexPowerLawModel(PowerLawModel):
         x = self.linear_net(x)
         alphas = x[:, 0]
         y1 = x[:, 1]
-        y2 = x[:, 2]
+        y2_diff = x[:, 2]
 
         y1 = self.last_act_func(y1)
-        y2 = self.last_act_func(y2)
+        y2_diff = self.last_act_func(y2_diff)
+
+        y2 = y1 * y2_diff
 
         val = (y2 - alphas) / (y1 - alphas)
 
