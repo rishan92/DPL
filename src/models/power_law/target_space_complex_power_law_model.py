@@ -139,6 +139,7 @@ class TargetSpaceComplexPowerLawModel(PowerLawModel):
             ),
         )
         output = output_complex.real
+        output_imag = output_complex.imag
 
         # output_r = torch.add(
         #     alphas,

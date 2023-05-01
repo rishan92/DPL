@@ -82,7 +82,8 @@ class DyHPOModel(BasePytorchModule):
         train_y = torch.ones(train_size)
 
         self.likelihood: gpytorch.likelihoods.Likelihood = self.likelihood_class(noise_constraint=self.noise_constraint)
-        self.model: gpytorch.models.GP = self.gp_class(train_x=train_x, train_y=train_y, likelihood=self.likelihood)
+        self.model: gpytorch.models.GP = self.gp_class(train_x=train_x, train_y=train_y, likelihood=self.likelihood,
+                                                       seperate_lengthscales=self.meta.seperate_lengthscales)
         self.mll_criterion: gpytorch.mlls.MarginalLogLikelihood = self.mll_criterion_class(self.likelihood, self.model)
         self.power_law_criterion = self.power_law_criterion_class()
 
@@ -109,14 +110,15 @@ class DyHPOModel(BasePytorchModule):
             'refine_nr_epochs': 50,
             'feature_class_name': 'FeatureExtractorDYHPO',
             # 'FeatureExtractor',  #  'FeatureExtractorPowerLaw',
-            'gp_class_name': 'GPRegressionModel',
+            'gp_class_name': 'GPRegressionPowerLawMeanModel',
             # 'GPRegressionPowerLawMeanModel',  #  'GPRegressionModel'
             'likelihood_class_name': 'GaussianLikelihood',
             'mll_loss_function': 'ExactMarginalLogLikelihood',
             'power_law_loss_function': 'MSELoss',
             'power_law_loss_factor': 0,
-            'noise_lower_bound': None,  # 1e-4,  #
-            'noise_upper_bound': None,  # 1e-1,  #
+            'noise_lower_bound': 1e-4,  # None,  #
+            'noise_upper_bound': 1e-2,  # None,  #
+            'seperate_lengthscales': True,
             'optimizer': 'Adam',
         }
 
@@ -255,7 +257,7 @@ class DyHPOModel(BasePytorchModule):
                 self.logger.debug(
                     f'Epoch {epoch_nr} - MAE {mae_value}, '
                     f'Loss: {loss_value}, '
-                    f'lengthscale: {self.model.covar_module.base_kernel.lengthscale.item()}, '
+                    f'lengthscale: {self.model.covar_module.base_kernel.lengthscale[0, 0].item()}, '
                     f'noise: {self.model.likelihood.noise.item()}, '
                 )
 
@@ -265,7 +267,8 @@ class DyHPOModel(BasePytorchModule):
                     "surrogate/dyhpo/training_power_law_loss": power_law_loss_value,
                     "surrogate/dyhpo/training_MAE": mae_value,
                     "surrogate/dyhpo/training_power_law_MAE": power_law_mae_value,
-                    "surrogate/dyhpo/training_lengthscale": self.model.covar_module.base_kernel.lengthscale.item(),
+                    "surrogate/dyhpo/training_lengthscale": self.model.covar_module.base_kernel.lengthscale[
+                        0, 0].item(),
                     "surrogate/dyhpo/training_noise": self.model.likelihood.noise.item(),
                     "surrogate/dyhpo/epoch": DyHPOModel._global_epoch,
                     "surrogate/dyhpo/training_errors": DyHPOModel._training_errors,

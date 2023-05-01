@@ -24,6 +24,7 @@ class GPRegressionPowerLawMeanModel(gpytorch.models.ExactGP):
         train_x: torch.Tensor,
         train_y: torch.Tensor,
         likelihood: gpytorch.likelihoods.GaussianLikelihood,
+        seperate_lengthscales: bool = False
     ):
         """
         Constructor of the GPRegressionModel.
@@ -35,8 +36,13 @@ class GPRegressionPowerLawMeanModel(gpytorch.models.ExactGP):
         """
         super().__init__(train_x, train_y, likelihood)
 
+        self.seperate_lengthscales = seperate_lengthscales
+
         self.mean_module = PowerLawMean()
-        self.covar_module = gpytorch.kernels.ScaleKernel(gpytorch.kernels.RBFKernel())
+        if seperate_lengthscales:
+            self.covar_module = gpytorch.kernels.ScaleKernel(gpytorch.kernels.RBFKernel(ard_num_dims=4))
+        else:
+            self.covar_module = gpytorch.kernels.ScaleKernel(gpytorch.kernels.RBFKernel())
 
         # grid_size = gpytorch.utils.grid.choose_grid_size(train_x, 1.0)
         #
