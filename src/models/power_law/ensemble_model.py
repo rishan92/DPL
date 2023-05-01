@@ -44,6 +44,7 @@ class EnsembleModel(BasePytorchModule):
     def get_default_meta():
         hp = {
             'model_class_name': 'ConditionedPowerLawModel',
+            # 'ConditionedPowerLawModel', # 'ComplexPowerLawModel',  # 'TargetSpaceComplexPowerLawModel',
             'ensemble_size': 5,
             'nr_epochs': 250,
             'refine_nr_epochs': 20,
