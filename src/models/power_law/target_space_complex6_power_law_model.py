@@ -22,7 +22,7 @@ class TargetSpaceComplex6PowerLawModel(PowerLawModel):
             'use_learning_curve_mask': False,
             'learning_rate': 0.001,
             'act_func': 'LeakyReLU',
-            'last_act_func': 'Sigmoid',
+            'last_act_func': 'OffsetTanh',
             'loss_function': 'L1Loss',
             'optimizer': 'Adam',
             'activate_early_stopping': False,
