@@ -110,14 +110,14 @@ class TargetSpaceComplex6PowerLawModel(PowerLawModel):
         alphas_r = x[:, 0]
         alphas_i = x[:, 1]
         y1 = x[:, 2]
-        y2_diff = x[:, 3]
+        y2 = x[:, 3]
 
         alphas = alphas_r + 1j * alphas_i
 
         y1 = self.last_act_func(y1)
-        y2_diff = self.last_act_func(y2_diff)
+        y2 = self.last_act_func(y2)
 
-        y2 = y1 * y2_diff
+        # y2 = y1 * y2_diff
 
         val = (y2 - alphas) / (y1 - alphas)
 
@@ -144,7 +144,7 @@ class TargetSpaceComplex6PowerLawModel(PowerLawModel):
             ),
         )
         output = output_complex.real
-        output_imag = output_complex.imag
+        # output_imag = output_complex.imag
 
         # output_r = torch.add(
         #     alphas,
