@@ -23,7 +23,7 @@ class TargetSpaceComplex6PowerLawModel(PowerLawModel):
             'nr_cnn_layers': 2,
             'use_learning_curve': False,
             'use_learning_curve_mask': False,
-            'learning_rate': 0.01,
+            'learning_rate': 0.001,
             'act_func': 'LeakyReLU',
             'last_act_func': 'SelfGLU',
             'alpha_act_func': 'SelfGLU',

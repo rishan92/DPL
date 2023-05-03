@@ -11,3 +11,4 @@ if IS_WANDB and "WANDB_API_KEY" not in os.environ:
 
 PLOT_PRED_CURVES = 0
 PLOT_PRED_DIST = 0
+PLOT_GRADIENTS = 1
