@@ -23,6 +23,7 @@ class GPRegressionModel(gpytorch.models.ExactGP):
         train_x: torch.Tensor,
         train_y: torch.Tensor,
         likelihood: gpytorch.likelihoods.GaussianLikelihood,
+        seperate_lengthscales: bool = False
     ):
         """
         Constructor of the GPRegressionModel.
