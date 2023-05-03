@@ -129,8 +129,13 @@ class PowerLawModel(BasePytorchModule, ABC):
         raise NotImplementedError
 
     def set_optimizer(self, **kwargs):
+        is_refine = self.optimizer is not None
+        if is_refine and hasattr(self.meta, 'refine_learning_rate') and self.meta.refine_learning_rate:
+            learning_rate = self.meta.refine_learning_rate
+        else:
+            learning_rate = self.meta.learning_rate
         optimizer_class = get_class_from_package(torch.optim, self.meta.optimizer)
-        self.optimizer = optimizer_class(self.parameters(), lr=self.meta.learning_rate)
+        self.optimizer = optimizer_class(self.parameters(), lr=learning_rate)
 
         if hasattr(self.meta, 'learning_rate_scheduler') and self.meta.learning_rate_scheduler:
             lr_scheduler_class = get_class_from_package(torch.optim.lr_scheduler, self.meta.learning_rate_scheduler)
@@ -143,10 +148,12 @@ class PowerLawModel(BasePytorchModule, ABC):
                 args["total_iters"] = epochs * args["total_iters_factor"]
                 args["T_max"] = epochs * args["total_iters_factor"]
 
-            args["verbose"] = True
+            args["verbose"] = False
             args["epochs"] = epochs
             args["total_steps"] = epochs
             args["lr_lambda"] = lambda step: 1 - step / args["total_iters"]
+            if is_refine and 'refine_max_lr' in args and args["refine_max_lr"]:
+                args["max_lr"] = args["refine_max_lr"]
 
             arg_names = inspect.getfullargspec(lr_scheduler_class.__init__).args
             relevant_args = {k: v for k, v in args.items() if k in arg_names}
