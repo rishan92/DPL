@@ -93,7 +93,7 @@ class TargetSpaceComplex6PowerLawModel(PowerLawModel):
 
         alphas = alphas_r + 1j * alphas_i
 
-        if 'y2_is_difference' in self.meta and self.meta.y2_is_difference:
+        if hasattr(self.meta, 'y2_is_difference') and self.meta.y2_is_difference:
             y2 = y1 * y2
 
         val = (y2 - alphas) / (y1 - alphas)
