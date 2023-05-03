@@ -49,11 +49,24 @@ class BasePytorchModule(nn.Module, Meta, ABC):
 
     @classproperty
     def use_learning_curve(cls):
-        return cls.meta.use_learning_curve
+        if hasattr(cls.meta, 'use_learning_curve'):
+            return cls.meta.use_learning_curve
+        else:
+            return False
 
     @classproperty
     def use_learning_curve_mask(cls):
-        return cls.meta.use_learning_curve_mask
+        if hasattr(cls.meta, 'use_learning_curve_mask'):
+            return cls.meta.use_learning_curve_mask
+        else:
+            return False
+
+    @classproperty
+    def clip_gradients(cls):
+        if hasattr(cls.meta, 'clip_gradients'):
+            return cls.meta.clip_gradients
+        else:
+            return 0
 
     def print_parameters(self):
         for name, param in self.named_parameters():

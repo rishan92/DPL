@@ -25,6 +25,7 @@ class Complex4PowerLawModel(PowerLawModel):
             'use_learning_curve_mask': False,
             'learning_rate': 0.001,
             'act_func': 'LeakyReLU',
+            'clip_gradients': 0,
             'last_act_func': 'SelfGLU',
             'loss_function': 'L1Loss',
             'optimizer': 'Adam',

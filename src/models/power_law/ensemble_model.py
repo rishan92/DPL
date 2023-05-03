@@ -33,9 +33,6 @@ class EnsembleModel(BasePytorchModule):
                 )
             )
 
-    def set_register_full_backward_hook(self, **kwargs):
-        self.models[0].set_register_full_backward_hook(**kwargs)
-
     def set_dataloader(self, train_dataloader):
         if train_dataloader is not None:
             self.train_dataloader = train_dataloader
@@ -129,3 +126,8 @@ class EnsembleModel(BasePytorchModule):
     def use_learning_curve_mask(cls):
         model_class = get_class("src/models/power_law", cls.meta.model_class_name)
         return model_class.use_learning_curve_mask
+
+    @classproperty
+    def clip_gradients(cls):
+        model_class = get_class("src/models/power_law", cls.meta.model_class_name)
+        return model_class.clip_gradients

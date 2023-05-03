@@ -30,6 +30,15 @@ class TargetSpaceComplex6PowerLawModel(PowerLawModel):
             'y2_is_difference': False,
             'loss_function': 'L1Loss',
             'optimizer': 'Adam',
+            'learning_rate_scheduler': 'CosineAnnealingLR',
+            # 'CosineAnnealingLR' 'LambdaLR' 'OneCycleLR' 'ExponentialLR'
+            'learning_rate_scheduler_args': {
+                'start_factor': 0.1,
+                'total_iters_factor': 1,
+                'eta_min': 1e-4,
+                'max_lr': 1e-2,
+                'gamma': 0.9,
+            },
             'activate_early_stopping': False,
             'early_stopping_it': 0,
             'use_scaling_layer': False,
