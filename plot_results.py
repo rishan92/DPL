@@ -86,13 +86,14 @@ def main():
     dataset_files_path = Path("./bash_scripts")
 
     method_names = ['power_law', 'dyhpo', 'dehb', 'random']
-    method_names = ['power_law', 'power_law_benchmark', 'dyhpo', 'dyhpo_benchmark', 'dehb', 'random']
+    method_names = ['power_law_benchmark', 'power_law_complex6', 'power_law_complex5', 'dyhpo_benchmark', 'dehb',
+                    'random']
     benchmark_names = ['taskset', 'lcbench']
     benchmark_names = ['lcbench']
     dataset_names = None
     # dataset_names = ['FixedTextRNNClassification_imdb_patch32_GRU64_avg_bs128',
     #                  'FixedTextRNNClassification_imdb_patch32_GRU128_bs128']
-    dataset_names = ['airlines']
+    # dataset_names = ['airlines']
 
     # plot_all_baselines_time_performance(project_folder, result_path)
     # plot_all_baselines_epoch_performance(project_folder, result_path)
@@ -107,7 +108,7 @@ def main():
     # plot_results_f(y_metric='curve', x_metric='epochs', aggregate_level='benchmark')
     # plot_results_f(y_metric='regret', x_metric='epochs', aggregate_level=None)
     plot_results_f(y_metric='regret', x_metric='epochs', aggregate_level='dataset', y_log=True, plot_std=False)
-    # plot_results_f(y_metric='regret', x_metric='epochs', aggregate_level='benchmark', y_log=True, plot_std=False)
+    plot_results_f(y_metric='regret', x_metric='epochs', aggregate_level='benchmark', y_log=True, plot_std=False)
     # plot_results_f(y_metric='best_regret', x_metric='first_curve', aggregate_level='dataset', plot_std=False)
 
 

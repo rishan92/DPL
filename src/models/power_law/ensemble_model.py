@@ -33,6 +33,9 @@ class EnsembleModel(BasePytorchModule):
                 )
             )
 
+    def set_register_full_backward_hook(self, **kwargs):
+        self.models[0].set_register_full_backward_hook(**kwargs)
+
     def set_dataloader(self, train_dataloader):
         if train_dataloader is not None:
             self.train_dataloader = train_dataloader

@@ -7,9 +7,12 @@ import math
 
 from src.models.power_law.power_law_model import PowerLawModel
 from .scaling_layer import ScalingLayer
+from torch.autograd import grad
 
 
 class Complex6PowerLawModel(PowerLawModel):
+    param_names = ('alphas_r', 'betas_r', 'gammas_r', 'alphas_i', 'betas_i', 'gammas_i')
+
     @staticmethod
     def get_default_meta():
         hp = {
@@ -22,7 +25,7 @@ class Complex6PowerLawModel(PowerLawModel):
             'use_learning_curve_mask': False,
             'learning_rate': 0.001,
             'act_func': 'LeakyReLU',
-            'last_act_func': 'Identity',
+            'last_act_func': 'SelfGLU',
             'loss_function': 'L1Loss',
             'optimizer': 'Adam',
             'activate_early_stopping': False,
@@ -59,30 +62,6 @@ class Complex6PowerLawModel(PowerLawModel):
         net = torch.nn.Sequential(*layers)
         return net
 
-    def get_cnn_net(self):
-        cnn_part = []
-
-        cnn_part.append(
-            nn.Conv1d(
-                in_channels=2,
-                kernel_size=(self.meta.kernel_size,),
-                out_channels=self.meta.nr_filters,
-            ),
-        )
-        for i in range(1, self.meta.nr_cnn_layers):
-            cnn_part.append(self.act_func)
-            cnn_part.append(
-                nn.Conv1d(
-                    in_channels=self.meta.nr_filters,
-                    kernel_size=(self.meta.kernel_size,),
-                    out_channels=self.meta.nr_filters,
-                ),
-            ),
-        cnn_part.append(nn.AdaptiveAvgPool1d(1))
-
-        net = torch.nn.Sequential(*cnn_part)
-        return net
-
     def forward(self, batch):
         """
         Args:
@@ -107,17 +86,19 @@ class Complex6PowerLawModel(PowerLawModel):
             x = torch.cat((x, lc_features), dim=1)
 
         x = self.linear_net(x)
-        alphas_r = x[:, 0]
-        alphas_i = x[:, 1]
-        betas_r = x[:, 2]
-        betas_i = x[:, 3]
-        gammas_r = x[:, 4]
-        gammas_i = x[:, 5]
+        alphas_r_b = x[:, 0]
+        betas_r_b = x[:, 1]
+        gammas_r_b = x[:, 2]
+        alphas_i_b = x[:, 3]
+        betas_i_b = x[:, 4]
+        gammas_i_b = x[:, 5]
 
-        betas_r = self.last_act_func(betas_r)
-        betas_i = self.last_act_func(betas_i)
-        gammas_r = self.last_act_func(gammas_r)
-        gammas_i = self.last_act_func(gammas_i)
+        alphas_r = alphas_r_b
+        alphas_i = alphas_i_b
+        betas_r = self.last_act_func(betas_r_b)
+        betas_i = self.last_act_func(betas_i_b)
+        gammas_r = self.last_act_func(gammas_r_b)
+        gammas_i = self.last_act_func(gammas_i_b)
 
         alphas = alphas_r + 1j * alphas_i
         betas = betas_r + 1j * betas_i
@@ -135,20 +116,18 @@ class Complex6PowerLawModel(PowerLawModel):
         )
         output = output_complex.real
 
-        # alphas_m = torch.abs(alphas)
-        # betas_m = torch.abs(betas)
-        # gammas_m = torch.abs(gammas)
-        #
-        # output_m = torch.add(
-        #     alphas_m,
-        #     torch.mul(
-        #         betas_m,
-        #         torch.pow(
-        #             predict_budgets,
-        #             torch.mul(gammas_m, -1)
-        #         )
-        #     ),
-        # )
+        # do_dar, = grad(output, alphas_r_b, create_graph=True)
+        # do_dbr, = grad(output, betas_r_b, create_graph=True)
+        # do_dgr, = grad(output, gammas_r_b, create_graph=True)
+        # do_dai, = grad(output, alphas_i_b, create_graph=True)
+        # do_dbi, = grad(output, betas_i_b, create_graph=True)
+        # do_dgi, = grad(output, gammas_i_b, create_graph=True)
+        # print(f"{do_dar=}")
+        # print(f"{do_dbr=}")
+        # print(f"{do_dgr=}")
+        # print(f"{do_dai=}")
+        # print(f"{do_dbi=}")
+        # print(f"{do_dgi=}")
 
         info = {
             'alpha': alphas,

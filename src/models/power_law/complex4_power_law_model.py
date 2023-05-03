@@ -7,10 +7,11 @@ import math
 
 from src.models.power_law.power_law_model import PowerLawModel
 from .scaling_layer import ScalingLayer
+from torch.autograd import grad
 
 
-class Complex5PowerLawModel(PowerLawModel):
-    param_names = ('alphas_r', 'betas_r', 'gammas_r', 'alphas_i', 'gammas_i')
+class Complex4PowerLawModel(PowerLawModel):
+    param_names = ('alphas_r', 'betas_r', 'gammas_r', 'gammas_i')
 
     @staticmethod
     def get_default_meta():
@@ -48,14 +49,14 @@ class Complex5PowerLawModel(PowerLawModel):
             layers.append(nn.Linear(self.meta.nr_units, self.meta.nr_units))
             layers.append(self.act_func)
 
-        last_layer = nn.Linear(self.meta.nr_units, 5)
+        last_layer = nn.Linear(self.meta.nr_units, 4)
         layers.append(last_layer)
 
         if hasattr(self.meta, "use_scaling_layer") and self.meta.use_scaling_layer:
             bias_values = None
             if hasattr(self.meta, "scaling_layer_bias_values") and self.meta.scaling_layer_bias_values:
                 bias_values = self.meta.scaling_layer_bias_values
-            scaling_layer = ScalingLayer(in_features=5, bias_values=bias_values)
+            scaling_layer = ScalingLayer(in_features=4, bias_values=bias_values)
             layers.append(scaling_layer)
 
         net = torch.nn.Sequential(*layers)
@@ -78,17 +79,19 @@ class Complex5PowerLawModel(PowerLawModel):
         x, predict_budgets, learning_curves = batch
 
         x = self.linear_net(x)
-        alphas_r = x[:, 0]
-        betas_r = x[:, 1]
-        gammas_r = x[:, 2]
-        alphas_i = x[:, 3]
-        gammas_i = x[:, 4]
+        alphas_r_b = x[:, 0]
+        betas_r_b = x[:, 1]
+        gammas_r_b = x[:, 2]
+        gammas_i_b = x[:, 3]
 
-        betas_r = self.last_act_func(betas_r)
-        gammas_r = self.last_act_func(gammas_r)
-        gammas_i = self.last_act_func(gammas_i)
+        alphas_r = alphas_r_b
+        betas_r = self.last_act_func(betas_r_b)
+        gammas_r = self.last_act_func(gammas_r_b)
+        gammas_i = self.last_act_func(gammas_i_b)
 
-        betas_i = -alphas_i
+        b = torch.tensor(1 / 51)
+        alphas_i = betas_r * torch.sin(-1 * b * gammas_i) / (torch.cos(-1 * b * gammas_i) - torch.exp(b * gammas_r))
+        betas_i = -1 * alphas_i
 
         alphas = alphas_r + 1j * alphas_i
         betas = betas_r + 1j * betas_i

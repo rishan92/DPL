@@ -23,6 +23,7 @@ from src.models.deep_kernel_learning.dyhpo_model import DyHPOModel
 import global_variables as gv
 from src.history.history_manager import HistoryManager
 from src.surrogate_models.base_hyperparameter_optimizer import BaseHyperparameterOptimizer
+from src.plot.utils import plot_line
 
 
 class HyperparameterOptimizer(BaseHyperparameterOptimizer):
@@ -30,6 +31,9 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
         'power_law': EnsembleModel,
         'dyhpo': DyHPOModel,
     }
+
+    gradients_tracking_pd: Optional[pd.DataFrame] = None
+    _view_gradient_step = 0
 
     def __init__(
         self,
@@ -215,6 +219,39 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
 
         self.target_normalization_value = 1
 
+        os.makedirs('gradients', exist_ok=True)
+
+    @staticmethod
+    def gradient_logging_hook(module, grad_input, grad_output, names):
+        HyperparameterOptimizer._view_gradient_step += 1
+        grads = grad_output[0]
+        grads = torch.abs(grads).mean(dim=0)
+        if HyperparameterOptimizer.gradients_tracking_pd is None:
+            HyperparameterOptimizer.gradients_tracking_pd = pd.DataFrame(columns=names)
+
+        length = len(HyperparameterOptimizer.gradients_tracking_pd)
+        data = grads.numpy()
+        HyperparameterOptimizer.gradients_tracking_pd.loc[length] = data
+
+        if gv.IS_WANDB:
+            wandb_data = {
+                'gradients/gradient_step': HyperparameterOptimizer._view_gradient_step
+            }
+            for i, name in enumerate(names):
+                wandb_data[f'gradients/{name}'] = data[i]
+            wandb.log(wandb_data)
+
+        # if HyperparameterOptimizer._view_gradient_step % 1000 == 0 and \
+        #     HyperparameterOptimizer._view_gradient_step > 1:
+        #     plot_path = os.path.join(
+        #         'gradients',
+        #         f'gradient_plots_{HyperparameterOptimizer._view_gradient_step}',
+        #     )
+        #
+        #     plot_line(ydata=HyperparameterOptimizer.gradients_tracking_pd, x_label='training step', y_label='gradient',
+        #               title=f"Gradients at training step {HyperparameterOptimizer._view_gradient_step}",
+        #               path=plot_path)
+
     @staticmethod
     def get_default_meta(model_class):
         if model_class == EnsembleModel:
@@ -288,6 +325,8 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
                 checkpoint_path=self.checkpoint_path,
                 seed=self.seed
             )
+            if gv.PLOT_GRADIENTS:
+                self.model.set_register_full_backward_hook(hook=HyperparameterOptimizer.gradient_logging_hook)
             self.model.to(self.dev)
             return_state = self.model.train_loop(train_dataset=train_dataset)
 

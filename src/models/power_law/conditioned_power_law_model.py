@@ -10,6 +10,8 @@ from .scaling_layer import ScalingLayer
 
 
 class ConditionedPowerLawModel(PowerLawModel):
+    param_names = ('alphas_r', 'betas_r', 'gammas_r')
+
     @staticmethod
     def get_default_meta():
         hp = {

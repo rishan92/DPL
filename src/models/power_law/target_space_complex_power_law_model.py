@@ -10,6 +10,8 @@ from .scaling_layer import ScalingLayer
 
 
 class TargetSpaceComplexPowerLawModel(PowerLawModel):
+    param_names = ('alphas_r', 'y1', 'y2')
+
     @staticmethod
     def get_default_meta():
         hp = {
@@ -59,30 +61,6 @@ class TargetSpaceComplexPowerLawModel(PowerLawModel):
         net = torch.nn.Sequential(*layers)
         return net
 
-    def get_cnn_net(self):
-        cnn_part = []
-
-        cnn_part.append(
-            nn.Conv1d(
-                in_channels=2,
-                kernel_size=(self.meta.kernel_size,),
-                out_channels=self.meta.nr_filters,
-            ),
-        )
-        for i in range(1, self.meta.nr_cnn_layers):
-            cnn_part.append(self.act_func)
-            cnn_part.append(
-                nn.Conv1d(
-                    in_channels=self.meta.nr_filters,
-                    kernel_size=(self.meta.kernel_size,),
-                    out_channels=self.meta.nr_filters,
-                ),
-            ),
-        cnn_part.append(nn.AdaptiveAvgPool1d(1))
-
-        net = torch.nn.Sequential(*cnn_part)
-        return net
-
     def forward(self, batch):
         """
         Args:
@@ -99,22 +77,15 @@ class TargetSpaceComplexPowerLawModel(PowerLawModel):
         """
         x, predict_budgets, learning_curves = batch
 
-        # x = torch.cat((x, torch.unsqueeze(evaluated_budgets, 1)), dim=1)
-        if self.meta.use_learning_curve:
-            lc_features = self.cnn_net(learning_curves)
-            # revert the output from the cnn into nr_rows x nr_kernels.
-            lc_features = torch.squeeze(lc_features, 2)
-            x = torch.cat((x, lc_features), dim=1)
-
         x = self.linear_net(x)
         alphas = x[:, 0]
         y1 = x[:, 1]
-        y2_diff = x[:, 2]
+        y2 = x[:, 2]
 
         y1 = self.last_act_func(y1)
-        y2_diff = self.last_act_func(y2_diff)
+        y2 = self.last_act_func(y2)
 
-        y2 = y1 * y2_diff
+        # y2 = y1 * y2_diff
 
         val = (y2 - alphas) / (y1 - alphas)
 
@@ -141,46 +112,6 @@ class TargetSpaceComplexPowerLawModel(PowerLawModel):
             ),
         )
         output = output_complex.real
-        output_imag = output_complex.imag
-
-        # output_r = torch.add(
-        #     alphas,
-        #     torch.mul(
-        #         betas,
-        #         torch.pow(
-        #             predict_budgets,
-        #             torch.mul(gammas_r, -1)
-        #         )
-        #     ),
-        # )
-
-        # budget_lower_limit = torch.tensor(1 / 51)
-        # budget_upper_limit = torch.tensor(1)
-        # constrained_alpha = alphas
-        # constrained_beta = betas
-        # constrained_gamma = gammas
-        # start_output = torch.add(
-        #     constrained_alpha,
-        #     torch.mul(
-        #         constrained_beta,
-        #         torch.pow(
-        #             budget_lower_limit,
-        #             torch.mul(constrained_gamma, -1)
-        #         )
-        #     ),
-        # )
-        # end_output = torch.add(
-        #     constrained_alpha,
-        #     torch.mul(
-        #         constrained_beta,
-        #         torch.pow(
-        #             budget_upper_limit,
-        #             torch.mul(constrained_gamma, -1)
-        #         )
-        #     ),
-        # )
-        # print(f"start {start_output}")
-        # print(f"end {end_output}")
 
         info = {
             'alpha': alphas,

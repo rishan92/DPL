@@ -25,7 +25,7 @@ def add_plot_legend(ax: matplotlib.axes.Axes, n: int):
 
 
 def plot_line(ydata: pd.DataFrame, x_label: str, y_label: str, title: str, path: Union[Path, str],
-              std_data: pd.DataFrame = None, **kwargs):
+              std_data: pd.DataFrame = None, dpi=200, **kwargs):
     plt.clf()
     p = sns.lineplot(data=ydata)
 
@@ -43,7 +43,7 @@ def plot_line(ydata: pd.DataFrame, x_label: str, y_label: str, title: str, path:
     # plt.title(title)
     add_plot_legend(p.axes, len(ydata.columns))
     # plt.tight_layout()
-    plt.savefig(path, dpi=200)
+    plt.savefig(path, dpi=dpi)
     # plt.show()
 
 

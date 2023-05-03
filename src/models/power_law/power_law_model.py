@@ -4,6 +4,7 @@ from copy import deepcopy
 import numpy as np
 import wandb
 from abc import ABC, abstractmethod
+from functools import partial
 
 from src.models.base.base_pytorch_module import BasePytorchModule
 import src.models.activation_functions
@@ -189,3 +190,9 @@ class PowerLawModel(BasePytorchModule, ABC):
 
     def __del__(self):
         PowerLawModel._instance_counter = 0
+
+    def set_register_full_backward_hook(self, **kwargs):
+        if hasattr(self, 'param_names'):
+            kwargs['hook'] = partial(kwargs['hook'], names=self.param_names)
+            self.linear_net.register_full_backward_hook(**kwargs)
+

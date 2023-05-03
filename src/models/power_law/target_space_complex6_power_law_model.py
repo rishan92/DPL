@@ -7,9 +7,12 @@ import math
 
 from src.models.power_law.power_law_model import PowerLawModel
 from .scaling_layer import ScalingLayer
+from torch.autograd import grad
 
 
 class TargetSpaceComplex6PowerLawModel(PowerLawModel):
+    param_names = ('alphas_r', 'alphas_i', 'y1', 'y2')
+
     @staticmethod
     def get_default_meta():
         hp = {
@@ -20,9 +23,11 @@ class TargetSpaceComplex6PowerLawModel(PowerLawModel):
             'nr_cnn_layers': 2,
             'use_learning_curve': False,
             'use_learning_curve_mask': False,
-            'learning_rate': 0.001,
+            'learning_rate': 0.01,
             'act_func': 'LeakyReLU',
-            'last_act_func': 'OffsetTanh',
+            'last_act_func': 'SelfGLU',
+            'alpha_act_func': 'SelfGLU',
+            'y2_is_difference': False,
             'loss_function': 'L1Loss',
             'optimizer': 'Adam',
             'activate_early_stopping': False,
@@ -59,30 +64,6 @@ class TargetSpaceComplex6PowerLawModel(PowerLawModel):
         net = torch.nn.Sequential(*layers)
         return net
 
-    def get_cnn_net(self):
-        cnn_part = []
-
-        cnn_part.append(
-            nn.Conv1d(
-                in_channels=2,
-                kernel_size=(self.meta.kernel_size,),
-                out_channels=self.meta.nr_filters,
-            ),
-        )
-        for i in range(1, self.meta.nr_cnn_layers):
-            cnn_part.append(self.act_func)
-            cnn_part.append(
-                nn.Conv1d(
-                    in_channels=self.meta.nr_filters,
-                    kernel_size=(self.meta.kernel_size,),
-                    out_channels=self.meta.nr_filters,
-                ),
-            ),
-        cnn_part.append(nn.AdaptiveAvgPool1d(1))
-
-        net = torch.nn.Sequential(*cnn_part)
-        return net
-
     def forward(self, batch):
         """
         Args:
@@ -99,25 +80,21 @@ class TargetSpaceComplex6PowerLawModel(PowerLawModel):
         """
         x, predict_budgets, learning_curves = batch
 
-        # x = torch.cat((x, torch.unsqueeze(evaluated_budgets, 1)), dim=1)
-        if self.meta.use_learning_curve:
-            lc_features = self.cnn_net(learning_curves)
-            # revert the output from the cnn into nr_rows x nr_kernels.
-            lc_features = torch.squeeze(lc_features, 2)
-            x = torch.cat((x, lc_features), dim=1)
-
         x = self.linear_net(x)
-        alphas_r = x[:, 0]
-        alphas_i = x[:, 1]
-        y1 = x[:, 2]
-        y2 = x[:, 3]
+        alphas_r_b = x[:, 0]
+        alphas_i_b = x[:, 1]
+        y1_b = x[:, 2]
+        y2_b = x[:, 3]
+
+        alphas_r = alphas_r_b
+        alphas_i = self.alpha_act_func(alphas_i_b)
+        y1 = self.last_act_func(y1_b)
+        y2 = self.last_act_func(y2_b)
 
         alphas = alphas_r + 1j * alphas_i
 
-        y1 = self.last_act_func(y1)
-        y2 = self.last_act_func(y2)
-
-        # y2 = y1 * y2_diff
+        if 'y2_is_difference' in self.meta and self.meta.y2_is_difference:
+            y2 = y1 * y2
 
         val = (y2 - alphas) / (y1 - alphas)
 
@@ -144,46 +121,15 @@ class TargetSpaceComplex6PowerLawModel(PowerLawModel):
             ),
         )
         output = output_complex.real
-        # output_imag = output_complex.imag
 
-        # output_r = torch.add(
-        #     alphas,
-        #     torch.mul(
-        #         betas,
-        #         torch.pow(
-        #             predict_budgets,
-        #             torch.mul(gammas_r, -1)
-        #         )
-        #     ),
-        # )
-
-        # budget_lower_limit = torch.tensor(1 / 51)
-        # budget_upper_limit = torch.tensor(1)
-        # constrained_alpha = alphas
-        # constrained_beta = betas
-        # constrained_gamma = gammas
-        # start_output = torch.add(
-        #     constrained_alpha,
-        #     torch.mul(
-        #         constrained_beta,
-        #         torch.pow(
-        #             budget_lower_limit,
-        #             torch.mul(constrained_gamma, -1)
-        #         )
-        #     ),
-        # )
-        # end_output = torch.add(
-        #     constrained_alpha,
-        #     torch.mul(
-        #         constrained_beta,
-        #         torch.pow(
-        #             budget_upper_limit,
-        #             torch.mul(constrained_gamma, -1)
-        #         )
-        #     ),
-        # )
-        # print(f"start {start_output}")
-        # print(f"end {end_output}")
+        # do_dar, = grad(output, alphas_r_b, create_graph=True)
+        # do_dy1, = grad(output, y1_b, create_graph=True)
+        # do_dy2, = grad(output, y2_b, create_graph=True)
+        # do_dai, = grad(output, alphas_i_b, create_graph=True)
+        # print(f"{do_dar=}")
+        # print(f"{do_dy1=}")
+        # print(f"{do_dy2=}")
+        # print(f"{do_dai=}")
 
         info = {
             'alpha': alphas,
