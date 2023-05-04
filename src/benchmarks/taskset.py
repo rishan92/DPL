@@ -2,8 +2,10 @@ import json
 import os
 from typing import List
 from collections import OrderedDict
+from pathlib import Path
 
 import numpy as np
+from numpy.typing import NDArray
 import pandas as pd
 
 from src.benchmarks.base_benchmark import BaseBenchmark
@@ -40,8 +42,7 @@ class TaskSet(BaseBenchmark):
     ])
     minimization_metric = True
 
-    def __init__(self, path_to_json_files: str, dataset_name: str):
-
+    def __init__(self, path_to_json_files: Path, dataset_name: str):
         super().__init__(path_to_json_files)
         self.dataset_name = dataset_name
         self.hp_candidates = []
@@ -86,7 +87,7 @@ class TaskSet(BaseBenchmark):
 
     def _load_benchmark(self):
 
-        dataset_file = os.path.join(self.path_to_json_file, f'{self.dataset_name}.json')
+        dataset_file = self.path_to_json_file / f'{self.dataset_name}.json'
 
         with open(dataset_file, 'r') as fp:
             dataset_info = json.load(fp)
@@ -111,13 +112,13 @@ class TaskSet(BaseBenchmark):
     def load_dataset_names(self) -> List[str]:
 
         dataset_file_names = [
-            dataset_file_name[:-5] for dataset_file_name in os.listdir(self.path_to_json_file)
+            str(dataset_file_name)[:-5] for dataset_file_name in os.listdir(self.path_to_json_file)
             if os.path.isfile(os.path.join(self.path_to_json_file, dataset_file_name))
         ]
 
         return dataset_file_names
 
-    def get_hyperparameter_candidates(self) -> np.ndarray:
+    def get_hyperparameter_candidates(self) -> NDArray:
 
         return np.array(self.hp_candidates)
 

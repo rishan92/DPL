@@ -15,7 +15,9 @@ import wandb
 import functools
 import matplotlib.pyplot as plt
 import seaborn as sns
+from pathlib import Path
 
+from src.benchmarks.base_benchmark import BaseBenchmark
 from src.dataset.tabular_dataset import TabularDataset
 from src.models.power_law.ensemble_model import EnsembleModel
 from src.data_loader.surrogate_data_loader import SurrogateDataLoader
@@ -42,7 +44,7 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
         minimization: bool = True,
         total_budget: int = 1000,
         device: str = None,
-        output_path: str = '.',
+        output_path: Path = '.',
         dataset_name: str = 'unknown',
         pretrain: bool = False,
         backbone: str = 'power_law',
@@ -111,11 +113,7 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
         self.min_value = min_value
         self.backbone = backbone
 
-        self.pretrained_path = os.path.join(
-            output_path,
-            'power_law',
-            f'checkpoint_{seed}.pth',
-        )
+        self.pretrained_path = output_path / 'power_law' / f'checkpoint_{seed}.pth'
 
         if device is None:
             self.dev = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
@@ -191,14 +189,8 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
         self.no_improvement_threshold = int(self.max_benchmark_epochs + 0.2 * self.max_benchmark_epochs)
         self.no_improvement_patience = 0
 
-        self.checkpoint_path = os.path.join(
-            output_path,
-            'checkpoints',
-            f'{dataset_name}',
-            f'{self.seed}',
-        )
-
-        os.makedirs(self.checkpoint_path, exist_ok=True)
+        self.checkpoint_path = output_path / 'checkpoints' / f'{dataset_name}' / f'{self.seed}'
+        self.checkpoint_path.mkdir(parents=True, exist_ok=True)
 
         self.history_manager = HistoryManager(
             hp_candidates=self.hp_candidates,
@@ -571,7 +563,8 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
 
         return max_value_index
 
-    def plot_pred_curve(self, hp_index, benchmark, surrogate_budget, output_dir, prefix=""):
+    def plot_pred_curve(self, hp_index: int, benchmark: BaseBenchmark, surrogate_budget: int, output_dir: Path,
+                        prefix: str = ""):
         if self.model is None:
             return
 
@@ -626,15 +619,13 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
             param_axes.set_xlabel('Surrogate Budget')
 
         plt.tight_layout()
-        file_path = os.path.join(
-            output_dir,
-            f"{prefix}surrogateBudget_{surrogate_budget}_trainBudget_{max_train_budget}_hpIndex_{hp_index}"
-        )
+        file_path = \
+            output_dir / f"{prefix}surrogateBudget_{surrogate_budget}_trainBudget_{max_train_budget}_hpIndex_{hp_index}"
         plt.savefig(file_path, dpi=200)
 
         plt.close()
 
-    def plot_pred_dist(self, benchmark, surrogate_budget, output_dir, prefix=""):
+    def plot_pred_dist(self, benchmark: BaseBenchmark, surrogate_budget: int, output_dir: Path, prefix: str = ""):
         if self.model is None:
             return
 
@@ -701,7 +692,7 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
             axes[2, 0].set_title('gamma')
 
         plt.tight_layout()
-        file_path = os.path.join(output_dir, f"{prefix}distributions_surrogateBudget_{surrogate_budget}")
+        file_path = output_dir / f"{prefix}distributions_surrogateBudget_{surrogate_budget}"
         plt.savefig(file_path, dpi=200)
 
         plt.close()

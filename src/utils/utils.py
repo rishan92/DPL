@@ -2,6 +2,7 @@ import os
 from importlib import import_module
 from typing import List, Tuple, Dict, Optional, Any, Union, Type
 import shutil
+from pathlib import Path
 
 
 def get_class(folder_path, class_name):
@@ -21,11 +22,11 @@ def get_class(folder_path, class_name):
     return None
 
 
-def get_class_from_package(package, name):
+def get_class_from_package(package, name: str):
     return getattr(package, name)
 
 
-def get_class_from_packages(packages: List, name):
+def get_class_from_packages(packages: List, name: str):
     attribute = None
     for package in packages:
         try:
@@ -39,7 +40,7 @@ def get_class_from_packages(packages: List, name):
     return attribute
 
 
-def merge_dicts(dict1, dict2):
+def merge_dicts(dict1: Dict, dict2: Dict):
     merged = dict1.copy()
     for key, value in dict2.items():
         if key in merged and isinstance(merged[key], dict) and isinstance(value, dict):
@@ -49,16 +50,20 @@ def merge_dicts(dict1, dict2):
     return merged
 
 
+# Custom decorator to define a property as a class property
+
 class classproperty(property):
-    def __get__(self, cls, owner):
+    def __get__(self, *args, **kwargs):
+        # If no owner is provided, use None
+        owner = args[1] if len(args) > 1 else None
         return classmethod(self.fget).__get__(None, owner)()
 
 
-def delete_folder_content(folder_path: str):
+def delete_folder_content(folder_path: Path):
     for item in os.listdir(folder_path):
-        item_path = os.path.join(folder_path, item)
+        item_path = folder_path / str(item)
 
-        if os.path.isfile(item_path):
-            os.remove(item_path)  # Remove file
-        elif os.path.isdir(item_path):
+        if item_path.is_file():
+            item_path.unlink()  # Delete file
+        elif item_path.is_dir():
             shutil.rmtree(item_path)

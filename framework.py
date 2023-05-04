@@ -3,6 +3,7 @@ import json
 import os
 import time
 import numpy as np
+from numpy.typing import NDArray
 import pandas as pd
 import sklearn
 from sklearn.preprocessing import MinMaxScaler
@@ -15,6 +16,7 @@ from typing import List, Tuple, Dict, Optional, Any, Type
 from loguru import logger
 from pathlib import Path
 
+from src.benchmarks.base_benchmark import BaseBenchmark
 from src.benchmarks.lcbench import LCBench
 from src.benchmarks.taskset import TaskSet
 # from benchmarks.hyperbo import PD1
@@ -68,96 +70,85 @@ class Framework:
 
         self.start_time = time.perf_counter()
 
-        if args.benchmark_name == 'lcbench':
-            benchmark_extension = os.path.join('lc_bench', 'results', 'data_2k.json')
-        elif args.benchmark_name == 'lcbench_mini':
-            benchmark_extension = os.path.join('lc_bench', 'results', 'lcbench_airlines.json')
-        elif args.benchmark_name == 'taskset':
-            benchmark_extension = os.path.join('data', 'taskset')
-        elif args.benchmark_name == 'pd1':
-            benchmark_extension = 'pd1'
-        elif args.benchmark_name == 'synthetic':
-            benchmark_extension = 'synthetic'
+        self.benchmark_name: str = args.benchmark_name
+        self.dataset_name: str = args.dataset_name
+        self.surrogate_name: str = args.surrogate_name
+        self.total_budget: int = args.budget_limit
+        self.fantasize_step: int = args.fantasize_step
+        self.output_dir: Path = Path(args.output_dir)
+        self.verbose: bool = args.verbose
+        self.project_dir: Path = Path(args.project_dir)
+
+        benchmark_extension: Path
+        if self.benchmark_name == 'lcbench':
+            benchmark_extension = Path('lc_bench', 'results', 'data_2k.json')
+        elif self.benchmark_name == 'lcbench_mini':
+            benchmark_extension = Path('lc_bench', 'results', 'lcbench_airlines.json')
+        elif self.benchmark_name == 'taskset':
+            benchmark_extension = Path('data', 'taskset')
+        elif self.benchmark_name == 'pd1':
+            benchmark_extension = Path('pd1')
+        elif self.benchmark_name == 'synthetic':
+            benchmark_extension = Path('synthetic')
         else:
-            raise ValueError(f'Benchmark {args.benchmark_name} not supported')
+            raise ValueError(f'Benchmark {self.benchmark_name} not supported')
 
-        benchmark_data_path = os.path.join(
-            args.project_dir,
-            benchmark_extension,
-        )
-
-        benchmark_types = Framework.benchmark_types
-        surrogate_types = Framework.surrogate_types
+        benchmark_data_path: Path = self.project_dir / benchmark_extension
 
         disable_preprocessing = {
             'dehb',
-            # 'asha'
         }
 
-        self.benchmark = benchmark_types[args.benchmark_name](benchmark_data_path, args.dataset_name)
-        self.dataset_name = args.dataset_name
+        self.benchmark: BaseBenchmark = Framework.benchmark_types[self.benchmark_name](
+            benchmark_data_path,
+            self.dataset_name
+        )
         self.seed = seed
         self.max_value = self.benchmark.max_value
         self.min_value = self.benchmark.min_value
-        self.total_budget = args.budget_limit
-        self.fantasize_step = args.fantasize_step
         self.surrogate_budget = 0
 
-        self.categorical_indicator = self.benchmark.categorical_indicator
-        self.log_indicator = self.benchmark.log_indicator
-        self.hp_names = self.benchmark.hp_names
-        self.minimization_metric = self.benchmark.minimization_metric
-        self.info_dict = dict()
+        self.categorical_indicator: List[bool] = self.benchmark.categorical_indicator
+        self.log_indicator: List[bool] = self.benchmark.log_indicator
+        self.hp_names: List[str] = self.benchmark.hp_names
+        self.info_dict: Dict[str, Any] = dict()
 
         # set up wandb
-        commit_hash = subprocess.check_output(["git", "rev-parse", "HEAD"]).decode("ascii").strip()
-        framework_meta = self.set_meta(args.surrogate_name, config=config)
+        commit_hash: str = subprocess.check_output(["git", "rev-parse", "HEAD"]).decode("ascii").strip()
+        framework_meta: Dict[str, Any] = self.set_meta(self.surrogate_name, config=config)
         serialized_dict = json.dumps(framework_meta, sort_keys=True, ensure_ascii=True).encode('utf-8')
-        config_hash = hashlib.md5(serialized_dict).hexdigest()
+        config_hash: str = hashlib.md5(serialized_dict).hexdigest()
         local_name = "nemo" if gv.IS_NEMO else "local"
-        group_name = f"{args.benchmark_name}_{args.surrogate_name}_{commit_hash}_{config_hash}_{local_name}"
+        group_name = f"{self.benchmark_name}_{self.surrogate_name}_{commit_hash}_{config_hash}_{local_name}"
         if gv.IS_WANDB:
             wandb.init(
                 project="power_law_hpo",
                 config=framework_meta,
                 group=group_name,
-                tags=[args.benchmark_name, args.dataset_name, args.surrogate_name, config_hash, commit_hash,
+                tags=[self.benchmark_name, self.dataset_name, self.surrogate_name, config_hash, commit_hash,
                       str(self.seed), local_name],
-                job_type=args.dataset_name,
-                name=f"{args.dataset_name}_{self.seed}",
+                job_type=self.dataset_name,
+                name=f"{self.dataset_name}_{self.seed}",
             )
         else:
             wandb.init(mode="disabled")
 
-        print(f"group_name {group_name}")
+        self.result_dir = \
+            self.output_dir / self.benchmark_name / f"{self.surrogate_name}_{commit_hash}_{config_hash}_{local_name}"
+        self.result_dir.mkdir(parents=True, exist_ok=True)
 
-        self.result_dir = os.path.join(
-            args.output_dir,
-            args.benchmark_name,
-            f"{args.surrogate_name}_{commit_hash}_{config_hash}_{local_name}",
-        )
-        os.makedirs(self.result_dir, exist_ok=True)
+        self.result_file = self.result_dir / f'{self.dataset_name}_{self.seed}.json'
 
-        self.result_file = os.path.join(
-            self.result_dir,
-            f'{self.dataset_name}_{self.seed}.json',
-        )
-
-        config_folder_path = os.path.join(
-            self.result_dir,
-            'configuration'
-        )
-        os.makedirs(config_folder_path, exist_ok=True)
-        config_file_path = os.path.join(
-            config_folder_path,
-            f'{args.surrogate_name}_configurations.json',
-        )
+        self.config_folder_path = self.result_dir / 'configuration'
+        self.config_folder_path.mkdir(parents=True, exist_ok=True)
+        config_file_path = self.config_folder_path / f'{self.surrogate_name}_configurations.json'
         with open(config_file_path, 'w') as f:
             json.dump(framework_meta, f, indent=4)
 
         logger.remove()
-        self.log_path = Path(self.result_dir, 'logs', f'{args.surrogate_name}_surrogate_{args.dataset_name}_{seed}.log')
-        if args.verbose:
+        self.log_path = \
+            self.result_dir / 'logs' / f'{self.surrogate_name}_surrogate_{self.dataset_name}_{self.seed}.log'
+        if self.verbose:
             log_level = "TRACE"
             format_str = "{level} | {message}"
             logger.add(self.log_path, mode='w', format=format_str, level=log_level)
@@ -165,47 +156,51 @@ class Framework:
             log_level = "SUCCESS"
             logger.add(self.log_path, mode='w', level=log_level)
 
+        print(f"group_name {group_name}")
+        logger.success(f"group_name {group_name}")
+
         self.incumbent_hp_index = self.benchmark.get_incumbent_config_id()
         self.pred_curves_path = None
         if gv.PLOT_PRED_CURVES:
-            self.pred_curves_path = os.path.join(self.result_dir, "pred_curves", self.dataset_name, str(self.seed))
-            os.makedirs(self.pred_curves_path, exist_ok=True)
+            self.pred_curves_path = self.result_dir / "pred_curves" / self.dataset_name / str(self.seed)
+            self.pred_curves_path.mkdir(parents=True, exist_ok=True)
             delete_folder_content(self.pred_curves_path)
 
         if gv.PLOT_PRED_DIST:
-            self.pred_dist_path = os.path.join(self.result_dir, "pred_dist", self.dataset_name, str(self.seed))
-            os.makedirs(self.pred_dist_path, exist_ok=True)
+            self.pred_dist_path = self.result_dir / "pred_dist" / self.dataset_name / str(self.seed)
+            self.pred_dist_path.mkdir(parents=True, exist_ok=True)
             delete_folder_content(self.pred_dist_path)
 
-        if args.surrogate_name not in disable_preprocessing:
+        self.hp_candidates: NDArray
+        if self.surrogate_name not in disable_preprocessing:
             self.hp_candidates = self.preprocess(self.benchmark.get_hyperparameter_candidates())
         else:
             self.hp_candidates = self.benchmark.get_hyperparameter_candidates()
 
-        if args.surrogate_name == 'power_law' or args.surrogate_name == 'dyhpo':
-            self.surrogate = surrogate_types[args.surrogate_name](
+        if self.surrogate_name == 'power_law' or self.surrogate_name == 'dyhpo':
+            self.surrogate = Framework.surrogate_types[self.surrogate_name](
                 self.hp_candidates,
-                surrogate_name=args.surrogate_name,
+                surrogate_name=self.surrogate_name,
                 seed=seed,
                 max_benchmark_epochs=self.benchmark.max_budget,
                 fantasize_step=self.fantasize_step,
-                minimization=self.minimization_metric,
-                total_budget=args.budget_limit,
+                minimization=self.benchmark.minimization_metric,
+                total_budget=self.total_budget,
                 device='cpu',
-                dataset_name=args.dataset_name,
+                dataset_name=self.dataset_name,
                 output_path=self.result_dir,
                 max_value=self.max_value,
                 min_value=self.min_value,
             )
         else:
-            self.surrogate = surrogate_types[args.surrogate_name](
+            self.surrogate = Framework.surrogate_types[self.surrogate_name](
                 hyperparameter_candidates=self.hp_candidates,
                 param_space=self.benchmark.param_space,
                 min_budget=self.benchmark.min_budget,
                 max_budget=self.benchmark.max_budget,
                 eta=3,
                 seed=seed,
-                max_nr_trials=args.budget_limit,
+                max_nr_trials=self.total_budget,
                 maximization=not self.benchmark.minimization_metric,
             )
 
@@ -221,9 +216,9 @@ class Framework:
         evaluated_configs = dict()
 
         if self.benchmark.minimization_metric:
-            best_value = np.inf
+            best_value = np.PINF
         else:
-            best_value = 0
+            best_value = np.NINF
 
         incumbent_value = self.benchmark.get_best_performance()
 
@@ -279,11 +274,7 @@ class Framework:
 
                 self.surrogate_budget += 1
 
-                if self.surrogate_budget > self.total_budget:
-                    self.finish()
-                    return
-
-                if self.minimization_metric:
+                if self.benchmark.minimization_metric:
                     regret = best_value - incumbent_value
                 else:
                     regret = incumbent_value - best_value
@@ -306,9 +297,13 @@ class Framework:
                 }
                 wandb.log(metrics)
 
+                if self.surrogate_budget >= self.total_budget or self.surrogate_budget >= self.benchmark.size():
+                    self.finish()
+                    return
+
         self.finish()
 
-    def preprocess(self, hp_candidates: np.ndarray) -> np.ndarray:
+    def preprocess(self, hp_candidates: NDArray) -> NDArray:
         """Preprocess the hyperparameter candidates.
 
         Performs min-max standardization for the numerical attributes and
@@ -452,8 +447,7 @@ class Framework:
             if len(file_list) > 0:
                 table = wandb.Table(columns=["id", "plot"])
                 for i, file_name in enumerate(file_list):
-                    file_path = os.path.join(self.pred_curves_path, file_name)
-                    print(file_path)
+                    file_path = self.pred_curves_path / str(file_name)
                     table.add_data(i, wandb.Image(file_path))
 
                 wandb.log({"table_of_prediction_curves": table})
@@ -463,7 +457,7 @@ class Framework:
             if len(file_list) > 0:
                 table = wandb.Table(columns=["id", "plot"])
                 for i, file_name in enumerate(file_list):
-                    file_path = os.path.join(self.pred_dist_path, file_name)
+                    file_path = self.pred_dist_path / str(file_name)
                     table.add_data(i, wandb.Image(file_path))
 
                 wandb.log({"table_of_prediction_distributions": table})

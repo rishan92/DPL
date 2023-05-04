@@ -2,7 +2,9 @@ import math
 from collections import OrderedDict
 from typing import List
 import numpy as np
+from numpy.typing import NDArray
 import pandas as pd
+from pathlib import Path
 
 from src.benchmarks.base_benchmark import BaseBenchmark
 
@@ -24,7 +26,7 @@ class SyntheticBench(BaseBenchmark):
     # if the best value corresponds to a lower value
     minimization_metric = True
 
-    def __init__(self, path_to_json_files: str = "", dataset_name: str = ""):
+    def __init__(self, path_to_json_files: Path = "", dataset_name: str = ""):
         super().__init__(path_to_json_files)
         self.dataset_name = dataset_name
         self.dataset_names = None
@@ -44,6 +46,9 @@ class SyntheticBench(BaseBenchmark):
         y1 = 0.8
         y2 = 0.3
         alphas = 0.15
+        # y1 = 0.42
+        # y2 = 0.37
+        # alphas = 0.36
 
         betas = y2 - alphas
         gammas = math.log((y2 - alphas) / (y1 - alphas)) / math.log(1 / self.max_budget)
@@ -52,7 +57,7 @@ class SyntheticBench(BaseBenchmark):
         curve = alphas + betas * np.power(scaled_budgets, -1 * gammas)
         self.benchmark_data.loc[:, 0] = curve
 
-    def get_hyperparameter_candidates(self) -> np.ndarray:
+    def get_hyperparameter_candidates(self) -> NDArray:
 
         hp_names = list(self.param_space.keys())
         hp_configs = []

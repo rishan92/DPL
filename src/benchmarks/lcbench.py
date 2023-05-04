@@ -1,7 +1,9 @@
 from collections import OrderedDict
 from typing import List
+from pathlib import Path
 
 import numpy as np
+from numpy.typing import NDArray
 
 from src.benchmarks.base_benchmark import BaseBenchmark
 from lc_bench.api import Benchmark
@@ -30,8 +32,7 @@ class LCBench(BaseBenchmark):
     # if the best value corresponds to a lower value
     minimization_metric = False
 
-    def __init__(self, path_to_json_files: str, dataset_name: str):
-
+    def __init__(self, path_to_json_files: Path, dataset_name: str):
         super().__init__(path_to_json_files)
         self.benchmark = self._load_benchmark()
         self.dataset_name = dataset_name
@@ -65,7 +66,7 @@ class LCBench(BaseBenchmark):
 
     def _load_benchmark(self) -> Benchmark:
         bench = Benchmark(
-            data_dir=self.path_to_json_file,
+            data_dir=str(self.path_to_json_file),
             cache=True
         )
 
@@ -75,7 +76,7 @@ class LCBench(BaseBenchmark):
 
         return self.benchmark.get_dataset_names()
 
-    def get_hyperparameter_candidates(self) -> np.ndarray:
+    def get_hyperparameter_candidates(self) -> NDArray:
 
         hp_names = list(LCBench.param_space.keys())
         hp_configs = []
@@ -118,7 +119,7 @@ class LCBench(BaseBenchmark):
 
         return val_curve[0:budget]
 
-    def get_incumbent_curve(self):
+    def get_incumbent_curve(self) -> List[float]:
 
         inc_curve = self.benchmark.query_best(
             self.dataset_name,
@@ -130,11 +131,11 @@ class LCBench(BaseBenchmark):
 
         return inc_curve
 
-    def get_max_value(self):
+    def get_max_value(self) -> float:
 
         return max(self.get_incumbent_curve())
 
-    def get_incumbent_config_id(self):
+    def get_incumbent_config_id(self) -> int:
 
         best_value = 0
         best_index = -1
@@ -153,7 +154,7 @@ class LCBench(BaseBenchmark):
 
         return best_index
 
-    def get_gap_performance(self):
+    def get_gap_performance(self) -> float:
 
         incumbent_curve = self.get_incumbent_curve()
         best_value = max(incumbent_curve)

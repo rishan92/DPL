@@ -147,6 +147,9 @@ class PowerLawModel(BasePytorchModule, ABC):
             if "total_iters_factor" in args:
                 args["total_iters"] = epochs * args["total_iters_factor"]
                 args["T_max"] = epochs * args["total_iters_factor"]
+            else:
+                args["total_iters"] = epochs
+                args["T_max"] = epochs
 
             args["verbose"] = False
             args["epochs"] = epochs

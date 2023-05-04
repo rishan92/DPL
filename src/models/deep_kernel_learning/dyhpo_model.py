@@ -11,6 +11,7 @@ import gpytorch
 import wandb
 from gpytorch.constraints import Interval, GreaterThan, LessThan
 from types import SimpleNamespace
+from pathlib import Path
 
 from src.models.deep_kernel_learning.feature_extractor import FeatureExtractor
 from src.models.deep_kernel_learning.gp_regression_model import GPRegressionModel
@@ -32,8 +33,7 @@ class DyHPOModel(BasePytorchModule):
     def __init__(
         self,
         nr_features,
-        dataset_name: str = 'unknown',
-        checkpoint_path: str = '.',
+        checkpoint_path: Path = '.',
         seed=None
     ):
         """
@@ -43,7 +43,6 @@ class DyHPOModel(BasePytorchModule):
             configuration: The configuration to be used
                 for the different parts of the surrogate.
             device: The device where the experiments will be run on.
-            dataset_name: The name of the dataset for the current run.
             output_path: The path where the intermediate/final results
                 will be stored.
             seed: The seed that will be used to store the checkpoint
@@ -77,28 +76,23 @@ class DyHPOModel(BasePytorchModule):
         else:
             self.noise_constraint = None
 
-        train_size = self.feature_output_size
-        train_x = torch.ones(train_size, train_size)
-        train_y = torch.ones(train_size)
+        gp_input_size = self.feature_output_size
 
         self.likelihood: gpytorch.likelihoods.Likelihood = self.likelihood_class(noise_constraint=self.noise_constraint)
-        self.model: gpytorch.models.GP = self.gp_class(train_x=train_x, train_y=train_y, likelihood=self.likelihood,
-                                                       seperate_lengthscales=self.meta.seperate_lengthscales)
+        self.model: gpytorch.models.GP = self.gp_class(input_size=gp_input_size, likelihood=self.likelihood,
+                                                       use_seperate_lengthscales=self.meta.use_seperate_lengthscales)
         self.mll_criterion: gpytorch.mlls.MarginalLogLikelihood = self.mll_criterion_class(self.likelihood, self.model)
         self.power_law_criterion = self.power_law_criterion_class()
 
+        self.optimizer = None
         self.set_optimizer()
 
         self.logger = logger
 
         self.checkpoint_path = checkpoint_path
+        self.checkpoint_path.mkdir(parents=True, exist_ok=True)
 
-        os.makedirs(self.checkpoint_path, exist_ok=True)
-
-        self.checkpoint_file = os.path.join(
-            self.checkpoint_path,
-            'checkpoint.pth'
-        )
+        self.checkpoint_file = self.checkpoint_path / 'checkpoint.pth'
 
     @staticmethod
     def get_default_meta(**kwargs) -> Dict[str, Any]:
@@ -110,16 +104,27 @@ class DyHPOModel(BasePytorchModule):
             'refine_nr_epochs': 50,
             'feature_class_name': 'FeatureExtractorDYHPO',
             # 'FeatureExtractor',  #  'FeatureExtractorPowerLaw',
-            'gp_class_name': 'GPRegressionPowerLawMeanModel',
+            'gp_class_name': 'GPRegressionModel',
             # 'GPRegressionPowerLawMeanModel',  #  'GPRegressionModel'
             'likelihood_class_name': 'GaussianLikelihood',
             'mll_loss_function': 'ExactMarginalLogLikelihood',
             'power_law_loss_function': 'MSELoss',
-            'power_law_loss_factor': 0,
+            'power_law_loss_factor': 0.5,
             'noise_lower_bound': 1e-4,  # None,  #
-            'noise_upper_bound': 1e-2,  # None,  #
-            'seperate_lengthscales': True,
+            'noise_upper_bound': 1e-3,  # None,  #
+            'use_seperate_lengthscales': False,
             'optimizer': 'Adam',
+            'reset_on_divergence': False,
+            # 'learning_rate_scheduler': 'CosineAnnealingLR',
+            # # 'CosineAnnealingLR' 'LambdaLR' 'OneCycleLR' 'ExponentialLR'
+            # 'learning_rate_scheduler_args': {
+            #     'start_factor': 0.1,
+            #     'total_iters_factor': 1,
+            #     'eta_min': 1e-6,
+            #     'max_lr': 1e-2,
+            #     'refine_max_lr': 1e-3,
+            #     'gamma': 0.9,
+            # },
         }
 
         return hp
@@ -141,39 +146,6 @@ class DyHPOModel(BasePytorchModule):
             {'params': self.model.parameters(), 'lr': self.meta.learning_rate},
             {'params': self.feature_extractor.parameters(), 'lr': self.meta.learning_rate}],
         )
-
-    def get_model_likelihood_mll(
-        self,
-        train_size: int,
-    ) -> Tuple[gpytorch.models.GP, gpytorch.likelihoods.Likelihood, gpytorch.mlls.MarginalLogLikelihood]:
-        """
-        Called when the surrogate is first initialized or restarted.
-
-        Args:
-            train_size: The size of the current training set.
-
-        Returns:
-            model, likelihood, mll - The GP model, the likelihood and
-                the marginal likelihood.
-        """
-        train_x = torch.ones(train_size, train_size)
-        train_y = torch.ones(train_size)
-
-        if self.meta.noise_lower_bound is not None and self.meta.noise_upper_bound is not None:
-            noise_constraint = Interval(lower_bound=self.meta.noise_lower_bound,
-                                        upper_bound=self.meta.noise_upper_bound)
-        elif self.meta.noise_lower_bound is not None:
-            noise_constraint = GreaterThan(lower_bound=self.meta.noise_lower_bound)
-        elif self.meta.noise_upper_bound is not None:
-            noise_constraint = LessThan(upper_bound=self.meta.noise_upper_bound)
-        else:
-            noise_constraint = None
-
-        likelihood = self.likelihood_class(noise_constraint=noise_constraint)
-        model = self.gp_class(train_x=train_x, train_y=train_y, likelihood=likelihood)
-        mll = self.mll_class(likelihood, model)
-
-        return model, likelihood, mll
 
     def train_loop(self, train_dataset: TabularDataset, should_refine: bool = False, load_checkpoint: bool = False,
                    reset_optimizer=False, **kwargs):
@@ -216,7 +188,7 @@ class DyHPOModel(BasePytorchModule):
 
         # where the mean squared error will be stored
         # when predicting on the train set
-        mse = 0.0
+        mae_value = 0.0
 
         nr_examples_batch = X_train.size(dim=0)
         # if only one example in the batch, skip the batch.
@@ -292,17 +264,18 @@ class DyHPOModel(BasePytorchModule):
         check_seed_torch = torch.random.get_rng_state().sum()
         self.logger.debug(f"end rng_state {check_seed_torch}")
 
-        """
-        # metric too high, time to restart, or we risk divergence
-        if mse > 0.15:
-            if not self.restart:
-                self.restart = True
-        """
         if training_errored:
             self.save_checkpoint(initial_state)
             self.load_checkpoint()
 
-        return_state = -1 if training_errored else 0
+        is_diverging = False
+        # metric too high, time to restart, or we risk divergence
+        if self.meta.reset_on_divergence and mae_value > 0.4:
+            is_diverging = True
+
+        # return state -1 signals that training has failed. Hyperparameter optimizer decides what to do when training
+        # fails. Currently, hyperparameter optimizer stop refining and start training from scratch.
+        return_state = -1 if (training_errored or is_diverging) else 0
         return return_state
 
     def predict(

@@ -20,10 +20,9 @@ class GPRegressionModel(gpytorch.models.ExactGP):
 
     def __init__(
         self,
-        train_x: torch.Tensor,
-        train_y: torch.Tensor,
+        input_size: int,
         likelihood: gpytorch.likelihoods.GaussianLikelihood,
-        seperate_lengthscales: bool = False
+        use_seperate_lengthscales: bool = False
     ):
         """
         Constructor of the GPRegressionModel.
@@ -33,11 +32,16 @@ class GPRegressionModel(gpytorch.models.ExactGP):
             train_y: The initial train labels for the GP.
             likelihood: The likelihood to be used.
         """
-        super(GPRegressionModel, self).__init__(train_x, train_y, likelihood)
+        train_x = torch.ones(input_size, input_size)
+        train_y = torch.ones(input_size)
+
+        super().__init__(train_x, train_y, likelihood)
+
+        self.use_separate_lengthscales = use_seperate_lengthscales
 
         self.mean_module = gpytorch.means.ConstantMean()
-        if seperate_lengthscales:
-            self.covar_module = gpytorch.kernels.ScaleKernel(gpytorch.kernels.RBFKernel(ard_num_dims=4))
+        if use_seperate_lengthscales:
+            self.covar_module = gpytorch.kernels.ScaleKernel(gpytorch.kernels.RBFKernel(ard_num_dims=input_size))
         else:
             self.covar_module = gpytorch.kernels.ScaleKernel(gpytorch.kernels.RBFKernel())
 

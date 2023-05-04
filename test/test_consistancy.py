@@ -30,8 +30,8 @@ def test_result_consistancy():
 
     benchmark_list = {
         # "taskset": "taskset_dataset_names.txt",
-        # "lcbench": "lcbench_dataset_names.txt",
-        "lcbench_mini": "lcbench_mini_dataset_names.txt",
+        "lcbench": "lcbench_dataset_names.txt",
+        # "lcbench_mini": "lcbench_mini_dataset_names.txt",
     }
 
     # benchmark_name = "lcbench"
@@ -83,3 +83,4 @@ def test_result_consistancy():
                         f"{repeat_nr=} {tag=} epoch={i}"
 
     assert checked_file_count > 0, f"Consistancy Failed: No Files To Test"
+    print(f"Checked {checked_file_count} files")
