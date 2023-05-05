@@ -15,6 +15,7 @@ from pathlib import Path
 import inspect
 from torch.nn.utils import clip_grad_norm_
 import itertools
+from functools import partial
 
 from src.models.deep_kernel_learning.feature_extractor import FeatureExtractor
 from src.models.deep_kernel_learning.gp_regression_model import GPRegressionModel
@@ -24,6 +25,7 @@ from src.utils.utils import get_class_from_package, get_class_from_packages
 import src.models.deep_kernel_learning
 from src.models.base.meta import Meta
 from src.utils.utils import get_class, classproperty
+import global_variables as gv
 
 
 class DyHPOModel(BasePytorchModule):
@@ -104,6 +106,12 @@ class DyHPOModel(BasePytorchModule):
         self.clip_gradients_value = None
         if hasattr(self.meta, 'clip_gradients') and self.meta.clip_gradients != 0:
             self.clip_gradients_value = self.meta.clip_gradients
+
+        if gv.PLOT_GRADIENTS:
+            self.feature_extractor.set_register_full_backward_hook()
+
+        if gv.IS_WANDB and gv.PLOT_GRADIENTS:
+            wandb.watch([self.feature_extractor, self.model, self.likelihood], log='all', idx=0, log_freq=10)
 
     @staticmethod
     def get_default_meta(**kwargs) -> Dict[str, Any]:
@@ -478,3 +486,7 @@ class DyHPOModel(BasePytorchModule):
         output, _ = self.feature_extractor(dummy_x_input, dummy_budget_input, dummy_learning_curves_input)
         output_size = output.shape[-1]
         return output_size
+
+    def reset(self):
+        if gv.IS_WANDB and gv.PLOT_GRADIENTS:
+            wandb.unwatch()

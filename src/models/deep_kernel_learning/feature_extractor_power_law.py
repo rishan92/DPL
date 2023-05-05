@@ -19,6 +19,7 @@ class FeatureExtractorPowerLaw(BaseFeatureExtractor):
     """
     The feature extractor that is part of the deep kernel.
     """
+    param_names = ('alphas_r', 'betas_r', 'gammas_r')
 
     def __init__(self, nr_features, seed=None):
         super().__init__(nr_features, seed=seed)

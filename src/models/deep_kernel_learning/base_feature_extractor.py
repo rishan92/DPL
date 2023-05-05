@@ -9,6 +9,8 @@ import torch
 import torch.nn as nn
 from torch import cat
 from loguru import logger
+import warnings
+from functools import partial
 
 import gpytorch
 from src.models.base.base_pytorch_module import BasePytorchModule
@@ -65,3 +67,13 @@ class BaseFeatureExtractor(BasePytorchModule, ABC):
             raise NotImplementedError
 
         return nr_units
+
+    def set_register_full_backward_hook(self):
+        if hasattr(self, 'param_names'):
+            hook = partial(self.gradient_logging_hook, names=self.param_names)
+            if hasattr(self, 'after_cnn_linear_net') and self.after_cnn_linear_net is not None:
+                self.after_cnn_linear_net.register_full_backward_hook(hook=hook)
+            elif hasattr(self, 'linear_net') and self.linear_net is not None:
+                self.linear_net.register_full_backward_hook(hook=hook)
+            else:
+                warnings.warn("Gradient flow tracking with wandb is not supported for this module.")

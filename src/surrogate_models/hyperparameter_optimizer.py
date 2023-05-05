@@ -276,6 +276,8 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
                 train_dataset=train_dataset, should_refine=should_refine, reset_optimizer=True, last_sample=last_sample
             )
         else:
+            if self.model is not None:
+                self.model.reset()
             self.model = self.model_class(
                 nr_features=train_dataset.X.shape[1],
                 checkpoint_path=self.checkpoint_path,

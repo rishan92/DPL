@@ -5,6 +5,8 @@ from src.data_loader.surrogate_data_loader import SurrogateDataLoader
 from types import SimpleNamespace
 import torch.nn as nn
 from src.utils.utils import get_class, classproperty
+import global_variables as gv
+import wandb
 
 
 class EnsembleModel(BasePytorchModule):
@@ -126,3 +128,9 @@ class EnsembleModel(BasePytorchModule):
     def use_learning_curve_mask(cls):
         model_class = get_class("src/models/power_law", cls.meta.model_class_name)
         return model_class.use_learning_curve_mask
+
+    def reset(self):
+        if gv.IS_WANDB and gv.PLOT_GRADIENTS:
+            wandb.unwatch()
+        for model in self.models:
+            model.reset()

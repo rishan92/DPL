@@ -8,6 +8,7 @@ from functools import partial
 from typing import List, Tuple, Dict, Optional, Any, Union, Type
 import inspect
 from torch.nn.utils import clip_grad_norm_
+import warnings
 
 from src.models.base.base_pytorch_module import BasePytorchModule
 import src.models.activation_functions
@@ -48,6 +49,7 @@ class PowerLawModel(BasePytorchModule, ABC):
         self.instance_id = PowerLawModel._instance_counter
         PowerLawModel._instance_counter += 1
         PowerLawModel._instance_counter %= self.max_instances
+
         if self.instance_id not in PowerLawModel._global_epoch:
             PowerLawModel._global_epoch[self.instance_id] = 0
 
@@ -85,11 +87,6 @@ class PowerLawModel(BasePytorchModule, ABC):
         self.optimizer = None
         self.lr_scheduler = None
 
-        if gv.PLOT_GRADIENTS:
-            if hasattr(self, 'param_names'):
-                hook = partial(PowerLawModel.gradient_logging_hook, names=self.param_names)
-                self.linear_net.register_full_backward_hook(hook=hook)
-
         self.clip_gradients_value = None
         if hasattr(self.meta, 'clip_gradients') and self.meta.clip_gradients != 0:
             self.clip_gradients_value = self.meta.clip_gradients
@@ -99,6 +96,17 @@ class PowerLawModel(BasePytorchModule, ABC):
     def post_init(self):
         self.has_batchnorm_layers = self.get_has_batchnorm_layers()
         self.has_batchnorm_layers = True
+
+        if gv.PLOT_GRADIENTS and self.instance_id == 0:
+            if hasattr(self, 'param_names'):
+                hook = partial(self.gradient_logging_hook, names=self.param_names)
+                if hasattr(self, 'linear_net') and self.linear_net is not None:
+                    self.linear_net.register_full_backward_hook(hook=hook)
+                else:
+                    warnings.warn("Gradient flow tracking with wandb is not supported for this module.")
+
+        if gv.IS_WANDB and gv.PLOT_GRADIENTS and self.instance_id == 0:
+            wandb.watch(self, log='all', idx=0, log_freq=10)
 
     def get_has_batchnorm_layers(self):
         for module in self.modules():
@@ -209,13 +217,14 @@ class PowerLawModel(BasePytorchModule, ABC):
             if self.lr_scheduler and self.optimizer._step_count > 0:
                 self.lr_scheduler.step()
 
-            current_lr = self.optimizer.param_groups[0]['lr']
-            wandb_data = {
-                f"surrogate/model_{self.instance_id}/training_loss": normalized_loss,
-                f"surrogate/model_{self.instance_id}/epoch": PowerLawModel._global_epoch[self.instance_id],
-                f"surrogate/model_{self.instance_id}/learning_rate": current_lr
-            }
-            wandb.log(wandb_data)
+            if self.instance_id == 0:
+                current_lr = self.optimizer.param_groups[0]['lr']
+                wandb_data = {
+                    f"surrogate/model_{self.instance_id}/training_loss": normalized_loss,
+                    f"surrogate/model_{self.instance_id}/epoch": PowerLawModel._global_epoch[self.instance_id],
+                    f"surrogate/model_{self.instance_id}/learning_rate": current_lr
+                }
+                wandb.log(wandb_data)
 
             if self.meta.activate_early_stopping:
                 if normalized_loss < best_loss:
@@ -252,5 +261,5 @@ class PowerLawModel(BasePytorchModule, ABC):
                     return optimizer.state[p]['step']
         return 0
 
-    def __del__(self):
+    def reset(self):
         PowerLawModel._instance_counter = 0

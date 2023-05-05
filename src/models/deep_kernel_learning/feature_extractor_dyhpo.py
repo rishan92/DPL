@@ -18,6 +18,7 @@ class FeatureExtractorDYHPO(BaseFeatureExtractor):
     """
     The feature extractor that is part of the deep kernel.
     """
+    param_names = ('alphas_r', 'betas_r', 'gammas_r')
 
     def __init__(self, nr_features, seed=None):
         super().__init__(nr_features, seed=seed)
@@ -55,11 +56,6 @@ class FeatureExtractorDYHPO(BaseFeatureExtractor):
             f'fc{self.meta.nr_layers + 1}',
             nn.Linear(self.meta.nr_units[-1], 3),
         )
-
-        # self.cnn = nn.Sequential(
-        #     nn.Conv1d(in_channels=1, kernel_size=(self.meta.cnn_kernel_size,), out_channels=self.meta.cnn_nr_channels),
-        #     nn.AdaptiveMaxPool1d(1),
-        # )
 
     @staticmethod
     def get_default_meta():

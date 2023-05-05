@@ -87,8 +87,8 @@ class BasePytorchModule(nn.Module, Meta, ABC):
 
         if gv.IS_WANDB and len(names) > 0:
             wandb_data = {
-                'gradients/gradient_step': BasePytorchModule._view_gradient_step
+                'gradients_flow/gradient_step': BasePytorchModule._view_gradient_step
             }
             for i, name in enumerate(names):
-                wandb_data[f'gradients/{name}'] = grads[i]
+                wandb_data[f'gradients_flow/{name}'] = grads[i]
             wandb.log(wandb_data)

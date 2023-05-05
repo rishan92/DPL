@@ -125,7 +125,7 @@ class FeatureExtractor(BaseFeatureExtractor):
                 ),
             ),
 
-        cnn_part.append(nn.AdaptiveAvgPool1d(1))
+        cnn_part.append(nn.AdaptiveMaxPool1d(1))
 
         net = torch.nn.Sequential(*cnn_part)
         return net
