@@ -23,7 +23,8 @@ class GPRegressionPowerLawMeanModel(gpytorch.models.ExactGP):
         self,
         input_size: int,
         likelihood: gpytorch.likelihoods.GaussianLikelihood,
-        use_seperate_lengthscales: bool = False
+        use_seperate_lengthscales: bool = False,
+        use_scale_to_bounds: bool = False
     ):
         """
         Constructor of the GPRegressionModel.
@@ -39,6 +40,7 @@ class GPRegressionPowerLawMeanModel(gpytorch.models.ExactGP):
         super().__init__(train_x, train_y, likelihood)
 
         self.use_seperate_lengthscales = use_seperate_lengthscales
+        self.use_scale_to_bounds = use_scale_to_bounds
 
         self.mean_module = PowerLawMean()
         if use_seperate_lengthscales:
@@ -54,7 +56,13 @@ class GPRegressionPowerLawMeanModel(gpytorch.models.ExactGP):
         #     )
         # )
 
+        if self.use_scale_to_bounds:
+            self.scale_to_bounds = gpytorch.utils.grid.ScaleToBounds(-1., 1.)
+
     def forward(self, x):
+        if self.use_scale_to_bounds:
+            x = self.scale_to_bounds(x)
+
         mean_x = self.mean_module(x)
         covar_x = self.covar_module(x)
 

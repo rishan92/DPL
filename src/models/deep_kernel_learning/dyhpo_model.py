@@ -12,6 +12,9 @@ import wandb
 from gpytorch.constraints import Interval, GreaterThan, LessThan
 from types import SimpleNamespace
 from pathlib import Path
+import inspect
+from torch.nn.utils import clip_grad_norm_
+import itertools
 
 from src.models.deep_kernel_learning.feature_extractor import FeatureExtractor
 from src.models.deep_kernel_learning.gp_regression_model import GPRegressionModel
@@ -79,13 +82,17 @@ class DyHPOModel(BasePytorchModule):
         gp_input_size = self.feature_output_size
 
         self.likelihood: gpytorch.likelihoods.Likelihood = self.likelihood_class(noise_constraint=self.noise_constraint)
-        self.model: gpytorch.models.GP = self.gp_class(input_size=gp_input_size, likelihood=self.likelihood,
-                                                       use_seperate_lengthscales=self.meta.use_seperate_lengthscales)
+        self.model: gpytorch.models.GP = self.gp_class(
+            input_size=gp_input_size,
+            likelihood=self.likelihood,
+            use_seperate_lengthscales=self.meta.use_seperate_lengthscales,
+            use_scale_to_bounds=self.meta.use_scale_to_bounds
+        )
         self.mll_criterion: gpytorch.mlls.MarginalLogLikelihood = self.mll_criterion_class(self.likelihood, self.model)
         self.power_law_criterion = self.power_law_criterion_class()
 
         self.optimizer = None
-        self.set_optimizer()
+        self.lr_scheduler = None
 
         self.logger = logger
 
@@ -94,12 +101,15 @@ class DyHPOModel(BasePytorchModule):
 
         self.checkpoint_file = self.checkpoint_path / 'checkpoint.pth'
 
+        self.clip_gradients_value = None
+        if hasattr(self.meta, 'clip_gradients') and self.meta.clip_gradients != 0:
+            self.clip_gradients_value = self.meta.clip_gradients
+
     @staticmethod
     def get_default_meta(**kwargs) -> Dict[str, Any]:
         hp = {
             'batch_size': 64,
             'nr_patience_epochs': 10,
-            'learning_rate': 0.001,
             'nr_epochs': 1000,
             'refine_nr_epochs': 50,
             'feature_class_name': 'FeatureExtractorDYHPO',
@@ -108,23 +118,26 @@ class DyHPOModel(BasePytorchModule):
             # 'GPRegressionPowerLawMeanModel',  #  'GPRegressionModel'
             'likelihood_class_name': 'GaussianLikelihood',
             'mll_loss_function': 'ExactMarginalLogLikelihood',
+            'learning_rate': 1e-3,
+            'refine_learning_rate': 1e-3,
             'power_law_loss_function': 'MSELoss',
-            'power_law_loss_factor': 0.5,
+            'power_law_loss_factor': 0.1,
             'noise_lower_bound': 1e-4,  # None,  #
             'noise_upper_bound': 1e-3,  # None,  #
             'use_seperate_lengthscales': False,
+            'optimize_likelihood': False,
+            'use_scale_to_bounds': False,
             'optimizer': 'Adam',
             'reset_on_divergence': False,
-            # 'learning_rate_scheduler': 'CosineAnnealingLR',
-            # # 'CosineAnnealingLR' 'LambdaLR' 'OneCycleLR' 'ExponentialLR'
-            # 'learning_rate_scheduler_args': {
-            #     'start_factor': 0.1,
-            #     'total_iters_factor': 1,
-            #     'eta_min': 1e-6,
-            #     'max_lr': 1e-2,
-            #     'refine_max_lr': 1e-3,
-            #     'gamma': 0.9,
-            # },
+            'learning_rate_scheduler': None,
+            # 'CosineAnnealingLR' 'LambdaLR' 'OneCycleLR' 'ExponentialLR'
+            'learning_rate_scheduler_args': {
+                'total_iters_factor': 1,
+                'eta_min': 1e-4,
+                'max_lr': 1e-3,
+                'refine_max_lr': 1e-4,
+                'gamma': 0.9,
+            },
         }
 
         return hp
@@ -140,12 +153,48 @@ class DyHPOModel(BasePytorchModule):
         cls.meta = SimpleNamespace(**meta)
         return meta
 
-    def set_optimizer(self):
+    def set_optimizer(self, **kwargs):
+        is_refine = self.optimizer is not None
+        if is_refine and hasattr(self.meta, 'refine_learning_rate') and self.meta.refine_learning_rate:
+            learning_rate = self.meta.refine_learning_rate
+        else:
+            learning_rate = self.meta.learning_rate
         optimizer_class = get_class_from_package(torch.optim, self.meta.optimizer)
-        self.optimizer = optimizer_class([
-            {'params': self.model.parameters(), 'lr': self.meta.learning_rate},
-            {'params': self.feature_extractor.parameters(), 'lr': self.meta.learning_rate}],
-        )
+        if not self.meta.optimize_likelihood:
+            self.optimizer = optimizer_class([
+                {'params': self.model.parameters(), 'lr': learning_rate},
+                {'params': self.feature_extractor.parameters(), 'lr': learning_rate}],
+            )
+        else:
+            self.optimizer = optimizer_class(self.parameters(), lr=learning_rate)
+
+        self.set_lr_scheduler(is_refine=is_refine, **kwargs)
+
+    def set_lr_scheduler(self, is_refine: bool, **kwargs):
+        if hasattr(self.meta, 'learning_rate_scheduler') and self.meta.learning_rate_scheduler:
+            lr_scheduler_class = get_class_from_package(torch.optim.lr_scheduler, self.meta.learning_rate_scheduler)
+            args = {}
+            if hasattr(self.meta, 'learning_rate_scheduler_args') and self.meta.learning_rate_scheduler_args:
+                args = self.meta.learning_rate_scheduler_args
+
+            epochs = kwargs['epochs']
+            if "total_iters_factor" in args:
+                args["total_iters"] = epochs * args["total_iters_factor"]
+                args["T_max"] = epochs * args["total_iters_factor"]
+            else:
+                args["total_iters"] = epochs
+                args["T_max"] = epochs
+
+            args["verbose"] = False
+            args["epochs"] = epochs
+            args["total_steps"] = epochs
+            args["lr_lambda"] = lambda step: 1 - step / args["total_iters"]
+            if is_refine and 'refine_max_lr' in args and args["refine_max_lr"]:
+                args["max_lr"] = args["refine_max_lr"]
+
+            arg_names = inspect.getfullargspec(lr_scheduler_class.__init__).args
+            relevant_args = {k: v for k, v in args.items() if k in arg_names}
+            self.lr_scheduler = lr_scheduler_class(self.optimizer, **relevant_args)
 
     def train_loop(self, train_dataset: TabularDataset, should_refine: bool = False, load_checkpoint: bool = False,
                    reset_optimizer=False, **kwargs):
@@ -158,13 +207,12 @@ class DyHPOModel(BasePytorchModule):
             load_checkpoint: A flag whether to load the state from a previous checkpoint,
                 or whether to start from scratch.
         """
-        if should_refine:
-            nr_epochs = self.meta.refine_nr_epochs
-        else:
-            nr_epochs = self.meta.nr_epochs
+        model_device = next(self.parameters()).device
+        train_dataset.to(model_device)
 
         self.set_seed(self.seed)
         self.train()
+
         if load_checkpoint:
             try:
                 self.load_checkpoint()
@@ -172,13 +220,15 @@ class DyHPOModel(BasePytorchModule):
                 self.logger.error(f'No checkpoint file found at: {self.checkpoint_file}'
                                   f'Training the GP from the beginning')
 
-        if reset_optimizer:
-            self.set_optimizer()
+        if should_refine:
+            nr_epochs = self.meta.refine_nr_epochs
+        else:
+            nr_epochs = self.meta.nr_epochs
 
-        model_device = next(self.parameters()).device
-        train_dataset.to(model_device)
+        if reset_optimizer or self.optimizer is None:
+            self.set_optimizer(epochs=nr_epochs)
 
-        X_train = train_dataset.X
+        x_train = train_dataset.X
         train_budgets = train_dataset.budgets
         train_curves = train_dataset.curves
         y_train = train_dataset.Y
@@ -190,7 +240,7 @@ class DyHPOModel(BasePytorchModule):
         # when predicting on the train set
         mae_value = 0.0
 
-        nr_examples_batch = X_train.size(dim=0)
+        nr_examples_batch = x_train.size(dim=0)
         # if only one example in the batch, skip the batch.
         # Otherwise, the code will fail because of batchnorm
         if nr_examples_batch == 1:
@@ -202,7 +252,7 @@ class DyHPOModel(BasePytorchModule):
             # Zero backprop gradients
             self.optimizer.zero_grad()
 
-            projected_x, _ = self.feature_extractor(X_train, train_budgets, train_curves)
+            projected_x, _ = self.feature_extractor(x_train, train_budgets, train_curves)
             self.model.set_train_data(projected_x, y_train, strict=False)
             output: gpytorch.ExactMarginalLogLikelihood = self.model(projected_x)
 
@@ -225,29 +275,45 @@ class DyHPOModel(BasePytorchModule):
                 loss_value = loss.detach().to('cpu').item()
                 mae_value = mae.detach().to('cpu').item()
                 power_law_mae_value = power_law_mae.detach().to('cpu').item()
+                lengthscale_value = self.model.covar_module.base_kernel.lengthscale[0, 0].detach().to('cpu').item()
+                noise_value = self.model.likelihood.noise.detach().to('cpu').item()
+
+                loss.backward()
+
+                if self.clip_gradients_value:
+                    if not self.meta.optimize_likelihood:
+                        parameters = itertools.chain(self.model.parameters(), self.feature_extractor.parameters())
+                    else:
+                        parameters = self.parameters()
+                    clip_grad_norm_(parameters, self.clip_gradients_value)
+
+                self.optimizer.step()
+
+                if self.lr_scheduler and self.optimizer._step_count > 0:
+                    self.lr_scheduler.step()
 
                 self.logger.debug(
                     f'Epoch {epoch_nr} - MAE {mae_value}, '
                     f'Loss: {loss_value}, '
-                    f'lengthscale: {self.model.covar_module.base_kernel.lengthscale[0, 0].item()}, '
-                    f'noise: {self.model.likelihood.noise.item()}, '
+                    f'lengthscale: {lengthscale_value}, '
+                    f'noise: {noise_value}, '
                 )
 
-                wandb.log({
+                current_lr = self.optimizer.param_groups[0]['lr']
+                wandb_data = {
                     "surrogate/dyhpo/training_loss": loss_value,
                     "surrogate/dyhpo/training_mll_loss": mll_loss_value,
                     "surrogate/dyhpo/training_power_law_loss": power_law_loss_value,
                     "surrogate/dyhpo/training_MAE": mae_value,
                     "surrogate/dyhpo/training_power_law_MAE": power_law_mae_value,
-                    "surrogate/dyhpo/training_lengthscale": self.model.covar_module.base_kernel.lengthscale[
-                        0, 0].item(),
-                    "surrogate/dyhpo/training_noise": self.model.likelihood.noise.item(),
+                    "surrogate/dyhpo/training_lengthscale": lengthscale_value,
+                    "surrogate/dyhpo/training_noise": noise_value,
                     "surrogate/dyhpo/epoch": DyHPOModel._global_epoch,
                     "surrogate/dyhpo/training_errors": DyHPOModel._training_errors,
-                })
+                    "surrogate/dyhpo/learning_rate": current_lr,
+                }
+                wandb.log(wandb_data)
 
-                loss.backward()
-                self.optimizer.step()
             except Exception as training_error:
                 self.logger.error(f'The following error happened at epoch {nr_epochs} while training: {training_error}')
                 # raise training_error

@@ -227,7 +227,8 @@ class Framework:
             start_time = time.time()
             hp_index, budget = self.surrogate.suggest()
 
-            if gv.PLOT_PRED_CURVES and (budget == 10 or budget == 10 or budget == 20 or budget == 40):
+            if gv.PLOT_PRED_CURVES and (
+                budget == 10 or budget == 10 or budget == 20 or budget == 40 or self.benchmark_name == 'synthetic'):
                 self.surrogate.plot_pred_curve(
                     hp_index=hp_index,
                     benchmark=self.benchmark,
@@ -442,22 +443,22 @@ class Framework:
         wandb.log_artifact(str(self.log_path), name='debug_log', type='log')
         wandb.log_artifact(str(self.result_file), name='result_json', type='result')
 
-        if gv.IS_WANDB and gv.PLOT_PRED_CURVES:
+        if gv.IS_WANDB and gv.PLOT_PRED_CURVES and self.benchmark_name != "synthetic":
             file_list = os.listdir(self.pred_curves_path)
             if len(file_list) > 0:
                 table = wandb.Table(columns=["id", "plot"])
                 for i, file_name in enumerate(file_list):
-                    file_path = self.pred_curves_path / str(file_name)
+                    file_path = str(self.pred_curves_path / str(file_name))
                     table.add_data(i, wandb.Image(file_path))
 
                 wandb.log({"table_of_prediction_curves": table})
 
-        if gv.IS_WANDB and gv.PLOT_PRED_DIST:
+        if gv.IS_WANDB and gv.PLOT_PRED_DIST and self.benchmark_name != "synthetic":
             file_list = os.listdir(self.pred_dist_path)
             if len(file_list) > 0:
                 table = wandb.Table(columns=["id", "plot"])
                 for i, file_name in enumerate(file_list):
-                    file_path = self.pred_dist_path / str(file_name)
+                    file_path = str(self.pred_dist_path / str(file_name))
                     table.add_data(i, wandb.Image(file_path))
 
                 wandb.log({"table_of_prediction_distributions": table})

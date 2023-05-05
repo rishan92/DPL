@@ -126,8 +126,3 @@ class EnsembleModel(BasePytorchModule):
     def use_learning_curve_mask(cls):
         model_class = get_class("src/models/power_law", cls.meta.model_class_name)
         return model_class.use_learning_curve_mask
-
-    @classproperty
-    def clip_gradients(cls):
-        model_class = get_class("src/models/power_law", cls.meta.model_class_name)
-        return model_class.clip_gradients

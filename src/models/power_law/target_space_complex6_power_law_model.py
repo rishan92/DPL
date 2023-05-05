@@ -34,7 +34,6 @@ class TargetSpaceComplex6PowerLawModel(PowerLawModel):
             'learning_rate_scheduler': 'OneCycleLR',
             # 'CosineAnnealingLR' 'LambdaLR' 'OneCycleLR' 'ExponentialLR'
             'learning_rate_scheduler_args': {
-                'start_factor': 0.1,
                 'total_iters_factor': 1,
                 'eta_min': 1e-6,
                 'max_lr': 1e-2,
