@@ -283,7 +283,7 @@ class PowerLawModel(BasePytorchModule, ABC):
         model.set_optimizer(use_scheduler=False)
         lr_finder = LRFinder(model=model, optimizer=model.optimizer, criterion=model.criterion, device=model_device)
         lr_finder.range_test(train_dataloader, start_lr=1e-8, end_lr=1, num_iter=100, diverge_th=2)
-        lr_finder.plot()
+        # lr_finder.plot()
         suggested_lr = lr_finder.get_suggested_lr()
         return suggested_lr
 
