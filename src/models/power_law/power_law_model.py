@@ -203,14 +203,15 @@ class PowerLawModel(BasePytorchModule, ABC):
     def train_loop(self, nr_epochs, train_dataloader=None, reset_optimizer=False):
         if (gv.PLOT_SUGGEST_LR or self.meta.use_suggested_learning_rate) and self.instance_id == 0:
             PowerLawModel._suggested_lr = self.suggest_learning_rate(train_dataloader=train_dataloader)
-            print(f"Suggested LR: {PowerLawModel._suggested_lr:.2E}")
+            # if PowerLawModel._suggested_lr is not None:
+            # print(f"Suggested LR: {PowerLawModel._suggested_lr:.2E}")
 
         self.set_dataloader(train_dataloader)
 
         if reset_optimizer or self.optimizer is None:
             self.set_optimizer(epochs=nr_epochs, use_scheduler=True)
 
-        if self.meta.use_suggested_learning_rate:
+        if self.meta.use_suggested_learning_rate and PowerLawModel._suggested_lr is not None:
             for param_group in self.optimizer.param_groups:
                 param_group["lr"] = PowerLawModel._suggested_lr
 
