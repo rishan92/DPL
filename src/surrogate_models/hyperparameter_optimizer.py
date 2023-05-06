@@ -234,6 +234,7 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
             }
         else:
             raise NotImplementedError(f"{model_class=}")
+
         return hp
 
     @classmethod
@@ -273,7 +274,10 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
 
         if should_refine:
             return_state = self.model.train_loop(
-                train_dataset=train_dataset, should_refine=should_refine, reset_optimizer=True, last_sample=last_sample
+                train_dataset=train_dataset,
+                should_refine=should_refine,
+                reset_optimizer=True,
+                last_sample=last_sample
             )
         else:
             if self.model is not None:

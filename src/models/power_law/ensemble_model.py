@@ -109,7 +109,12 @@ class EnsembleModel(BasePytorchModule):
 
         for model, model_dataloader, seed in zip(self.models, self.model_train_dataloaders, self.model_seeds):
             self.logger.info(f'Started training model with index: {model.instance_id}')
-            model.train_loop(nr_epochs=nr_epochs, train_dataloader=model_dataloader, reset_optimizer=reset_optimizer)
+            model.train_loop(
+                nr_epochs=nr_epochs,
+                train_dataloader=model_dataloader,
+                reset_optimizer=reset_optimizer,
+                **kwargs
+            )
 
     def training_step(self):
         model_loss = []

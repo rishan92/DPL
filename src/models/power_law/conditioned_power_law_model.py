@@ -22,7 +22,9 @@ class ConditionedPowerLawModel(PowerLawModel):
             'nr_cnn_layers': 2,
             'use_learning_curve': False,
             'use_learning_curve_mask': False,
-            'learning_rate': 0.001,
+            'use_suggested_learning_rate': False,
+            'learning_rate': 1e-3,
+            'refine_learning_rate': 1e-3,
             'act_func': 'LeakyReLU',
             'last_act_func': 'SelfGLU',
             'loss_function': 'L1Loss',
@@ -30,7 +32,7 @@ class ConditionedPowerLawModel(PowerLawModel):
             'activate_early_stopping': False,
             'early_stopping_it': 0,
             'use_scaling_layer': False,
-            'scaling_layer_bias_values': [0, 0, math.log(0.01) / math.log(1 / 51)]  # [0, 0, 1.17125493757]
+            'scaling_layer_bias_values': [0, 0, math.log(0.01) / math.log(1 / 51)]  # [0, 0, 1.17125493757],
         }
         return hp
 
@@ -123,34 +125,6 @@ class ConditionedPowerLawModel(PowerLawModel):
                 )
             ),
         )
-
-        # budget_lower_limit = torch.tensor(1 / 51)
-        # budget_upper_limit = torch.tensor(1)
-        # constrained_alpha = alphas
-        # constrained_beta = betas
-        # constrained_gamma = gammas
-        # start_output = torch.add(
-        #     constrained_alpha,
-        #     torch.mul(
-        #         constrained_beta,
-        #         torch.pow(
-        #             budget_lower_limit,
-        #             torch.mul(constrained_gamma, -1)
-        #         )
-        #     ),
-        # )
-        # end_output = torch.add(
-        #     constrained_alpha,
-        #     torch.mul(
-        #         constrained_beta,
-        #         torch.pow(
-        #             budget_upper_limit,
-        #             torch.mul(constrained_gamma, -1)
-        #         )
-        #     ),
-        # )
-        # print(f"start {start_output}")
-        # print(f"end {end_output}")
 
         info = {
             'alpha': alphas,

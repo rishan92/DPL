@@ -9,16 +9,19 @@ from typing import List, Tuple, Dict, Optional, Any, Union, Type
 import inspect
 from torch.nn.utils import clip_grad_norm_
 import warnings
+from loguru import logger
 
 from src.models.base.base_pytorch_module import BasePytorchModule
 import src.models.activation_functions
 from src.utils.utils import get_class_from_package, get_class_from_packages
 import global_variables as gv
+from src.utils.torch_lr_finder import LRFinder
 
 
 class PowerLawModel(BasePytorchModule, ABC):
     _instance_counter = 0
     _global_epoch = {}
+    _suggested_lr = None
 
     def __init__(
         self,
@@ -123,7 +126,7 @@ class PowerLawModel(BasePytorchModule, ABC):
     def forward(self, batch):
         raise NotImplementedError
 
-    def set_optimizer(self, **kwargs):
+    def set_optimizer(self, use_scheduler=False, **kwargs):
         is_refine = self.optimizer is not None
         if is_refine and hasattr(self.meta, 'refine_learning_rate') and self.meta.refine_learning_rate:
             learning_rate = self.meta.refine_learning_rate
@@ -132,7 +135,8 @@ class PowerLawModel(BasePytorchModule, ABC):
         optimizer_class = get_class_from_package(torch.optim, self.meta.optimizer)
         self.optimizer = optimizer_class(self.parameters(), lr=learning_rate)
 
-        self.set_lr_scheduler(is_refine=is_refine, **kwargs)
+        if use_scheduler:
+            self.set_lr_scheduler(is_refine=is_refine, **kwargs)
 
     def set_lr_scheduler(self, is_refine: bool, **kwargs):
         if hasattr(self.meta, 'learning_rate_scheduler') and self.meta.learning_rate_scheduler:
@@ -197,10 +201,18 @@ class PowerLawModel(BasePytorchModule, ABC):
         return normalized_loss
 
     def train_loop(self, nr_epochs, train_dataloader=None, reset_optimizer=False):
+        if (gv.PLOT_SUGGEST_LR or self.meta.use_suggested_learning_rate) and self.instance_id == 0:
+            PowerLawModel._suggested_lr = self.suggest_learning_rate(train_dataloader=train_dataloader)
+            print(f"Suggested LR: {PowerLawModel._suggested_lr:.2E}")
+
         self.set_dataloader(train_dataloader)
 
         if reset_optimizer or self.optimizer is None:
-            self.set_optimizer(epochs=nr_epochs)
+            self.set_optimizer(epochs=nr_epochs, use_scheduler=True)
+
+        if self.meta.use_suggested_learning_rate:
+            for param_group in self.optimizer.param_groups:
+                param_group["lr"] = PowerLawModel._suggested_lr
 
         self.set_seed(self.seed)
         self.train()
@@ -224,6 +236,8 @@ class PowerLawModel(BasePytorchModule, ABC):
                     f"surrogate/model_{self.instance_id}/epoch": PowerLawModel._global_epoch[self.instance_id],
                     f"surrogate/model_{self.instance_id}/learning_rate": current_lr
                 }
+                if gv.PLOT_SUGGEST_LR or self.meta.use_suggested_learning_rate:
+                    wandb_data[f"surrogate/model_{self.instance_id}/suggested_lr"] = PowerLawModel._suggested_lr
                 wandb.log(wandb_data)
 
             if self.meta.activate_early_stopping:
@@ -260,6 +274,31 @@ class PowerLawModel(BasePytorchModule, ABC):
                 if 'step' in optimizer.state[p]:
                     return optimizer.state[p]['step']
         return 0
+
+    def suggest_learning_rate(self, train_dataloader=None):
+        model_device = next(self.parameters()).device
+        model = deepcopy(self)
+        # Change instance id from zero to stop recursive calls.
+        model.instance_id = 1000
+        model.set_optimizer(use_scheduler=False)
+        lr_finder = LRFinder(model=model, optimizer=model.optimizer, criterion=model.criterion, device=model_device)
+        lr_finder.range_test(train_dataloader, start_lr=1e-8, end_lr=1, num_iter=100, diverge_th=2)
+        lr_finder.plot()
+        suggested_lr = lr_finder.get_suggested_lr()
+        return suggested_lr
+
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        # Remove unpickable objects from the state dictionary
+        state['logger'] = None
+        state['train_dataloader'] = None
+        state['train_dataloader_it'] = None
+        return state
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        # Restore unpickable objects from the state dictionary
+        self.logger = logger
 
     def reset(self):
         PowerLawModel._instance_counter = 0
