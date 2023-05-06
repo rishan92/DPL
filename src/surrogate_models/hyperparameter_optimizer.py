@@ -216,13 +216,10 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
 
         # Inverse function is only used for plotting
         self.model_output_normalization_inverse_fn = None
-        inverse_torch_fn = get_inverse_function_class(self.model_class.meta_output_act_func)()
-        if inverse_torch_fn:
+        inverse_torch_class = get_inverse_function_class(self.model_class.meta_output_act_func)
+        if inverse_torch_class:
+            inverse_torch_fn = inverse_torch_class()
             self.model_output_normalization_inverse_fn = partial(numpy_to_torch_apply, torch_function=inverse_torch_fn)
-
-            # val = [-1000, -10, -2, -1, 0, 0.25, 0.5, 0.75, 1, 2, 10, 1000]
-            # a = self.output_act_func(np.array(val))
-            # b = self.output_act_inverse_func(a)
 
     @staticmethod
     def get_default_meta(model_class):

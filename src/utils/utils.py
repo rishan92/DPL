@@ -79,7 +79,7 @@ def numpy_to_torch_apply(numpy_array, torch_function):
 
 
 def get_inverse_function_class(act_func_name: str):
-    inverse_fn = None
+    inverse_class = None
     if act_func_name:
         if act_func_name == "Sigmoid":
             inverse_function = "InverseSigmoid"
@@ -100,5 +100,5 @@ def get_inverse_function_class(act_func_name: str):
                 f"Using output_act_func {act_func_name} is not supported."
             )
 
-        inverse_fn = get_class_from_packages([torch.nn, src.models.activation_functions], inverse_function)()
-    return inverse_fn
+        inverse_class = get_class_from_packages([torch.nn, src.models.activation_functions], inverse_function)
+    return inverse_class

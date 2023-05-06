@@ -85,7 +85,12 @@ class PowerLawModel(BasePytorchModule, ABC):
             self.output_act_func = get_class_from_packages([torch.nn, src.models.activation_functions],
                                                            self.meta.output_act_func)()
 
-            self.output_act_inverse_func = get_inverse_function_class(self.meta.output_act_func)()
+            output_act_inverse_class = get_inverse_function_class(self.meta.output_act_func)
+            self.output_act_inverse_func = output_act_inverse_class() if output_act_inverse_class else None
+
+            # val = [-1000, -10, -2, -1, 0, 0.25, 0.5, 0.75, 1, 2, 10, 1000]
+            # a = self.output_act_func(torch.tensor(val))
+            # b = self.output_act_inverse_func(a)
 
         self.linear_net = self.get_linear_net()
 

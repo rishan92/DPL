@@ -10,6 +10,7 @@ import torch
 from types import SimpleNamespace
 import global_variables as gv
 from src.dataset.tabular_dataset import TabularDataset
+import functools
 from functools import partial
 from numpy.typing import NDArray
 from src.utils.utils import get_class_from_package, get_class_from_packages, numpy_to_torch_apply
