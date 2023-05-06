@@ -22,6 +22,7 @@ class PowerLawModel(BasePytorchModule, ABC):
     _instance_counter = 0
     _global_epoch = {}
     _suggested_lr = None
+    _nan_gradients = 0
 
     def __init__(
         self,
@@ -166,6 +167,7 @@ class PowerLawModel(BasePytorchModule, ABC):
 
     def train_epoch(self):
         running_loss = 0
+        is_nan_gradient = False
         while True:
             try:
                 batch = next(self.train_dataloader_it)
@@ -174,7 +176,7 @@ class PowerLawModel(BasePytorchModule, ABC):
                 # if only one example in the batch, skip the batch.
                 # Otherwise, the code will fail because of batchnormalization.
                 if self.has_batchnorm_layers and nr_examples_batch == 1:
-                    return 0
+                    return 0, is_nan_gradient
 
                 # zero the parameter gradients
                 self.optimizer.zero_grad(set_to_none=True)
@@ -191,6 +193,13 @@ class PowerLawModel(BasePytorchModule, ABC):
                 if self.clip_gradients_value:
                     clip_grad_norm_(self.parameters(), self.clip_gradients_value)
 
+                if not is_nan_gradient:
+                    for name, param in self.named_parameters():
+                        if param.grad is not None:
+                            if torch.isnan(param.grad).any():
+                                is_nan_gradient = True
+                                break
+
                 self.optimizer.step()
 
                 running_loss += loss.item()
@@ -198,13 +207,13 @@ class PowerLawModel(BasePytorchModule, ABC):
                 self.train_dataloader_it = iter(self.train_dataloader)
                 break
         normalized_loss = running_loss / len(self.train_dataloader)
-        return normalized_loss
+        return normalized_loss, is_nan_gradient
 
     def train_loop(self, nr_epochs, train_dataloader=None, reset_optimizer=False):
         if (gv.PLOT_SUGGEST_LR or self.meta.use_suggested_learning_rate) and self.instance_id == 0:
             PowerLawModel._suggested_lr = self.suggest_learning_rate(train_dataloader=train_dataloader)
             # if PowerLawModel._suggested_lr is not None:
-            # print(f"Suggested LR: {PowerLawModel._suggested_lr:.2E}")
+            #     print(f"Suggested LR: {PowerLawModel._suggested_lr:.2E}")
 
         self.set_dataloader(train_dataloader)
 
@@ -223,7 +232,7 @@ class PowerLawModel(BasePytorchModule, ABC):
         best_state = deepcopy(self.state_dict())
 
         for epoch in range(0, nr_epochs):
-            normalized_loss = self.train_epoch()
+            normalized_loss, is_nan_gradient = self.train_epoch()
             self.logger.debug(f'Epoch {epoch + 1}, Loss:{normalized_loss}')
             PowerLawModel._global_epoch[self.instance_id] += 1
 
@@ -232,10 +241,13 @@ class PowerLawModel(BasePytorchModule, ABC):
 
             if self.instance_id == 0:
                 current_lr = self.optimizer.param_groups[0]['lr']
+                if is_nan_gradient:
+                    PowerLawModel._nan_gradients += 1
                 wandb_data = {
                     f"surrogate/model_{self.instance_id}/training_loss": normalized_loss,
                     f"surrogate/model_{self.instance_id}/epoch": PowerLawModel._global_epoch[self.instance_id],
-                    f"surrogate/model_{self.instance_id}/learning_rate": current_lr
+                    f"surrogate/model_{self.instance_id}/learning_rate": current_lr,
+                    f"surrogate/model_{self.instance_id}/nan_gradients": PowerLawModel._nan_gradients
                 }
                 if gv.PLOT_SUGGEST_LR or self.meta.use_suggested_learning_rate:
                     wandb_data[f"surrogate/model_{self.instance_id}/suggested_lr"] = PowerLawModel._suggested_lr
