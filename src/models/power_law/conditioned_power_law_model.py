@@ -27,6 +27,7 @@ class ConditionedPowerLawModel(PowerLawModel):
             'refine_learning_rate': 1e-3,
             'act_func': 'LeakyReLU',
             'last_act_func': 'SelfGLU',
+            'output_act_func': None,
             'loss_function': 'L1Loss',
             'optimizer': 'Adam',
             'activate_early_stopping': False,
@@ -125,6 +126,8 @@ class ConditionedPowerLawModel(PowerLawModel):
                 )
             ),
         )
+        if self.output_act_func and self.training:
+            output = self.output_act_func(output)
 
         info = {
             'alpha': alphas,

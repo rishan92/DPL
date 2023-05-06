@@ -10,13 +10,16 @@ import torch
 from types import SimpleNamespace
 import global_variables as gv
 from src.dataset.tabular_dataset import TabularDataset
-import functools
+from functools import partial
 from numpy.typing import NDArray
+from src.utils.utils import get_class_from_package, get_class_from_packages, numpy_to_torch_apply
+import src.models.activation_functions
 
 
 class HistoryManager:
     def __init__(self, hp_candidates, max_benchmark_epochs, fantasize_step, use_learning_curve, use_learning_curve_mask,
-                 fill_value='zero', use_target_normalization=False, use_scaled_budgets=True):
+                 fill_value='zero', use_target_normalization=False, use_scaled_budgets=True,
+                 model_output_normalization=None, cnn_kernel_size=0):
         assert fill_value in ["zero", "last"], "Invalid fill value mode"
         # assert predict_mode in ["end_budget", "next_budget"], "Invalid predict mode"
         # assert curve_size_mode in ["fixed", "variable"], "Invalid curve size mode"
@@ -27,6 +30,14 @@ class HistoryManager:
         self.use_learning_curve_mask = use_learning_curve_mask
         self.use_target_normalization = use_target_normalization
         self.use_scaled_budgets = use_scaled_budgets
+        self.cnn_kernel_size = cnn_kernel_size
+        self.model_output_normalization = model_output_normalization
+
+        self.model_output_normalization_fn = None
+        if self.model_output_normalization and self.model_output_normalization != "Identity":
+            torch_function = get_class_from_packages([torch.nn, src.models.activation_functions],
+                                                     self.model_output_normalization)()
+            self.model_output_normalization_fn = partial(numpy_to_torch_apply, torch_function=torch_function)
 
         # the keys will be hyperparameter indices while the value
         # will be a list with all the budgets evaluated for examples
@@ -37,8 +48,6 @@ class HistoryManager:
         self.last_point = None
 
         self.fantasize_step = fantasize_step
-
-        self.cnn_kernel_size = 3  # TODO: get this from dyhpo model hyperparameters
 
         self.is_train_data_modified = True
         self.cached_train_dataset = None
@@ -91,6 +100,9 @@ class HistoryManager:
 
         if self.use_target_normalization:
             newp_performance = newp_performance / self.target_normalization_value
+
+        if self.model_output_normalization_fn:
+            newp_performance = self.model_output_normalization_fn(np.array(newp_performance)).item()
 
         newp_performance = torch.tensor([newp_performance], dtype=torch.float32)
 
@@ -159,6 +171,9 @@ class HistoryManager:
 
         if self.use_target_normalization:
             train_labels = train_labels / self.target_normalization_value
+
+        if self.model_output_normalization_fn:
+            train_labels = self.model_output_normalization_fn(train_labels)
 
         # This creates a copy
         train_examples = self.hp_candidates[hp_indices]

@@ -26,6 +26,7 @@ class Complex6PowerLawModel(PowerLawModel):
             'learning_rate': 0.001,
             'act_func': 'LeakyReLU',
             'last_act_func': 'SelfGLU',
+            'output_act_func': None,
             'loss_function': 'L1Loss',
             'optimizer': 'Adam',
             'activate_early_stopping': False,
@@ -115,6 +116,8 @@ class Complex6PowerLawModel(PowerLawModel):
             ),
         )
         output = output_complex.real
+        if self.output_act_func and self.training:
+            output = self.output_act_func(output)
 
         # do_dar, = grad(output, alphas_r_b, create_graph=True)
         # do_dbr, = grad(output, betas_r_b, create_graph=True)

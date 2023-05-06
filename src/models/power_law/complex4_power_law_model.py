@@ -23,10 +23,12 @@ class Complex4PowerLawModel(PowerLawModel):
             'nr_cnn_layers': 2,
             'use_learning_curve': False,
             'use_learning_curve_mask': False,
-            'learning_rate': 0.001,
+            'use_suggested_learning_rate': False,
+            'learning_rate': 1e-3,
             'act_func': 'LeakyReLU',
             'clip_gradients': 0,
             'last_act_func': 'SelfGLU',
+            'output_act_func': None,
             'loss_function': 'L1Loss',
             'optimizer': 'Adam',
             'activate_early_stopping': False,
@@ -109,6 +111,8 @@ class Complex4PowerLawModel(PowerLawModel):
             ),
         )
         output = output_complex.real
+        if self.output_act_func and self.training:
+            output = self.output_act_func(output)
 
         info = {
             'alpha': alphas,

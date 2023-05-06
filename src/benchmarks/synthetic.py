@@ -55,6 +55,7 @@ class SyntheticBench(BaseBenchmark):
 
         scaled_budgets = np.arange(1, self.max_budget + 1) / self.max_budget
         curve = alphas + betas * np.power(scaled_budgets, -1 * gammas)
+
         self.benchmark_data.loc[:, 0] = curve
 
     def get_hyperparameter_candidates(self) -> NDArray:

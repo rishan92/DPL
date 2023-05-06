@@ -28,10 +28,11 @@ class TargetSpaceComplex6PowerLawModel(PowerLawModel):
             'act_func': 'LeakyReLU',
             'last_act_func': 'SelfGLU',
             'alpha_act_func': 'SelfGLU',
+            'output_act_func': None,
             'y2_is_difference': False,
             'loss_function': 'L1Loss',
             'optimizer': 'Adam',
-            'learning_rate_scheduler': 'OneCycleLR',
+            'learning_rate_scheduler': 'CosineAnnealingLR',
             # 'CosineAnnealingLR' 'LambdaLR' 'OneCycleLR' 'ExponentialLR'
             'learning_rate_scheduler_args': {
                 'total_iters_factor': 1,
@@ -131,6 +132,8 @@ class TargetSpaceComplex6PowerLawModel(PowerLawModel):
             ),
         )
         output = output_complex.real
+        if self.output_act_func and self.training:
+            output = self.output_act_func(output)
 
         # do_dar, = grad(output, alphas_r_b, create_graph=True)
         # do_dy1, = grad(output, y1_b, create_graph=True)

@@ -53,23 +53,37 @@ class BasePytorchModule(nn.Module, Meta, ABC):
         self.train_dataloader_it = iter(self.train_dataloader)
 
     @classproperty
-    def use_learning_curve(cls):
+    def meta_use_learning_curve(cls):
         if hasattr(cls.meta, 'use_learning_curve'):
             return cls.meta.use_learning_curve
         else:
             return False
 
     @classproperty
-    def use_learning_curve_mask(cls):
+    def meta_use_learning_curve_mask(cls):
         if hasattr(cls.meta, 'use_learning_curve_mask'):
             return cls.meta.use_learning_curve_mask
         else:
             return False
 
     @classproperty
-    def clip_gradients(cls):
+    def meta_output_act_func(cls):
+        if hasattr(cls.meta, 'output_act_func'):
+            return cls.meta.output_act_func
+        else:
+            return None
+
+    @classproperty
+    def meta_clip_gradients(cls):
         if hasattr(cls.meta, 'clip_gradients'):
             return cls.meta.clip_gradients
+        else:
+            return 0
+
+    @classproperty
+    def meta_cnn_kernel_size(cls):
+        if hasattr(cls.meta, 'cnn_kernel_size'):
+            return cls.meta.cnn_kernel_size
         else:
             return 0
 

@@ -4,3 +4,8 @@ from .abs import Abs
 from .identity import Identity
 from .clamp import Clamp
 from .offset_tanh import OffsetTanh
+from .clip_relu import ClipReLU
+from .clip_leaky_relu import ClipLeakyReLU
+from .inverse_sigmoid import InverseSigmoid
+from .inverse_clip_leaky_relu import InverseClipLeakyReLU
+from .inverse_offset_tanh import InverseOffsetTanh

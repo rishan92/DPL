@@ -13,7 +13,7 @@ from loguru import logger
 
 from src.models.base.base_pytorch_module import BasePytorchModule
 import src.models.activation_functions
-from src.utils.utils import get_class_from_package, get_class_from_packages
+from src.utils.utils import get_class_from_package, get_class_from_packages, get_inverse_function_class
 import global_variables as gv
 from src.utils.torch_lr_finder import LRFinder
 
@@ -62,6 +62,8 @@ class PowerLawModel(BasePytorchModule, ABC):
         self.alpha_act_func = None
         self.beta_act_func = None
         self.gamma_act_func = None
+        self.output_act_func = None
+        self.output_act_inverse_func = None
         self.linear_net = None
         self.cnn_net = None
 
@@ -79,6 +81,11 @@ class PowerLawModel(BasePytorchModule, ABC):
         if hasattr(self.meta, "gamma_act_func"):
             self.gamma_act_func = get_class_from_packages([torch.nn, src.models.activation_functions],
                                                           self.meta.gamma_act_func)()
+        if hasattr(self.meta, "output_act_func") and self.meta.output_act_func:
+            self.output_act_func = get_class_from_packages([torch.nn, src.models.activation_functions],
+                                                           self.meta.output_act_func)()
+
+            self.output_act_inverse_func = get_inverse_function_class(self.meta.output_act_func)()
 
         self.linear_net = self.get_linear_net()
 

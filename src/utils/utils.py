@@ -3,6 +3,9 @@ from importlib import import_module
 from typing import List, Tuple, Dict, Optional, Any, Union, Type
 import shutil
 from pathlib import Path
+import torch
+import warnings
+import src.models.activation_functions
 
 
 def get_class(folder_path, class_name):
@@ -67,3 +70,35 @@ def delete_folder_content(folder_path: Path):
             item_path.unlink()  # Delete file
         elif item_path.is_dir():
             shutil.rmtree(item_path)
+
+
+def numpy_to_torch_apply(numpy_array, torch_function):
+    tensor = torch.from_numpy(numpy_array)
+    result_tensor = torch_function(tensor)
+    return result_tensor.numpy()
+
+
+def get_inverse_function_class(act_func_name: str):
+    inverse_fn = None
+    if act_func_name:
+        if act_func_name == "Sigmoid":
+            inverse_function = "InverseSigmoid"
+        elif act_func_name == "ClipLeakyReLU":
+            inverse_function = "InverseClipLeakyReLU"
+        elif act_func_name == "OffsetTanh":
+            inverse_function = "InverseOffsetTanh"
+        elif act_func_name == "Identity":
+            inverse_function = "Identity"
+        elif act_func_name in ["ClipReLU"]:
+            inverse_function = "Identity"
+            warnings.warn(
+                f"Using output_act_func {act_func_name} would produce "
+                f"non power law curves as outputs."
+            )
+        else:
+            raise NotImplementedError(
+                f"Using output_act_func {act_func_name} is not supported."
+            )
+
+        inverse_fn = get_class_from_packages([torch.nn, src.models.activation_functions], inverse_function)()
+    return inverse_fn

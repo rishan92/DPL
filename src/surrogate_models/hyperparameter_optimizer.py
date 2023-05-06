@@ -12,10 +12,11 @@ from scipy.stats import norm
 import torch
 from types import SimpleNamespace
 import wandb
-import functools
+from functools import partial
 import matplotlib.pyplot as plt
 import seaborn as sns
 from pathlib import Path
+import warnings
 
 from src.benchmarks.base_benchmark import BaseBenchmark
 from src.dataset.tabular_dataset import TabularDataset
@@ -26,6 +27,9 @@ import global_variables as gv
 from src.history.history_manager import HistoryManager
 from src.surrogate_models.base_hyperparameter_optimizer import BaseHyperparameterOptimizer
 from src.plot.utils import plot_line
+import src.models.activation_functions
+from src.utils.utils import get_class_from_package, get_class_from_packages, get_inverse_function_class, \
+    numpy_to_torch_apply
 
 
 class HyperparameterOptimizer(BaseHyperparameterOptimizer):
@@ -196,17 +200,29 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
             hp_candidates=self.hp_candidates,
             max_benchmark_epochs=max_benchmark_epochs,
             fill_value=self.fill_value,
-            use_learning_curve=self.model_class.use_learning_curve,
-            use_learning_curve_mask=self.model_class.use_learning_curve_mask,
+            use_learning_curve=self.model_class.meta_use_learning_curve,
+            use_learning_curve_mask=self.model_class.meta_use_learning_curve_mask,
             fantasize_step=self.fantasize_step,
             use_target_normalization=self.meta.use_target_normalization,
+            model_output_normalization=self.model_class.meta_output_act_func,
             use_scaled_budgets=self.meta.use_scaled_budgets,
+            cnn_kernel_size=self.model_class.meta_cnn_kernel_size
         )
 
         self.real_curve_targets_map_pd: Optional[pd.DataFrame] = None
         self.prediction_params_pd: Optional[pd.DataFrame] = None
 
         self.target_normalization_value = 1
+
+        # Inverse function is only used for plotting
+        self.model_output_normalization_inverse_fn = None
+        inverse_torch_fn = get_inverse_function_class(self.model_class.meta_output_act_func)()
+        if inverse_torch_fn:
+            self.model_output_normalization_inverse_fn = partial(numpy_to_torch_apply, torch_function=inverse_torch_fn)
+
+            # val = [-1000, -10, -2, -1, 0, 0.25, 0.5, 0.75, 1, 2, 10, 1000]
+            # a = self.output_act_func(np.array(val))
+            # b = self.output_act_inverse_func(a)
 
     @staticmethod
     def get_default_meta(model_class):
@@ -315,11 +331,19 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
         mean_predictions, std_predictions, predict_infos = self.model.predict(test_data=test_data,
                                                                               train_data=train_data)
 
-        if self.meta.use_target_normalization:
-            mean_predictions = mean_predictions * self.target_normalization_value
-            std_predictions = std_predictions * self.target_normalization_value
-            if predict_infos is not None and 'pl_output' in predict_infos:
-                predict_infos['pl_output'] = predict_infos['pl_output'] * self.target_normalization_value
+        # # order between model_output_normalization_inverse_fn and use_target_normalization should be reversed
+        # # to match the order applied in making the training data
+        # if self.model_output_normalization_inverse_fn:
+        #     mean_predictions = self.model_output_normalization_inverse_fn(mean_predictions)
+        #     std_predictions = self.model_output_normalization_inverse_fn(std_predictions)
+        #     if predict_infos is not None and 'pl_output' in predict_infos:
+        #         predict_infos['pl_output'] = self.model_output_normalization_inverse_fn(predict_infos['pl_output'])
+
+        # if self.meta.use_target_normalization:
+        #     mean_predictions = mean_predictions * self.target_normalization_value
+        #     std_predictions = std_predictions * self.target_normalization_value
+        #     if predict_infos is not None and 'pl_output' in predict_infos:
+        #         predict_infos['pl_output'] = predict_infos['pl_output'] * self.target_normalization_value
 
         return mean_predictions, std_predictions, hp_indices, real_budgets, predict_infos
 
@@ -588,6 +612,15 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
 
         mean_data, std_data, predict_infos = self.model.predict(test_data=pred_test_data, train_data=train_data)
 
+        # order between model_output_normalization_inverse_fn and use_target_normalization should be reversed
+        # to match the order applied in making the training data. This is only calculated for plotting, since
+        # standard deviation calculation have no simple solution.
+        if self.model_type == "dyhpo" and self.model_output_normalization_inverse_fn:
+            mean_data = self.model_output_normalization_inverse_fn(mean_data)
+            # std_data = self.model_output_normalization_inverse_fn(std_data)
+            if predict_infos is not None and 'pl_output' in predict_infos:
+                predict_infos['pl_output'] = self.model_output_normalization_inverse_fn(predict_infos['pl_output'])
+
         if self.meta.use_target_normalization:
             mean_data = mean_data * self.target_normalization_value
             std_data = std_data * self.target_normalization_value
@@ -657,9 +690,18 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
 
         mean_data, std_data, predict_infos = self.model.predict(test_data=test_data, train_data=train_data)
 
+        # order between model_output_normalization_inverse_fn and use_target_normalization should be reversed
+        # to match the order applied in making the training data. This is only calculated for plotting, since
+        # standard deviation calculation have no simple solution.
+        if self.model_type == "dyhpo" and self.model_output_normalization_inverse_fn:
+            mean_data = self.model_output_normalization_inverse_fn(mean_data)
+            # std_data = self.model_output_normalization_inverse_fn(std_data)
+            if predict_infos is not None and 'pl_output' in predict_infos:
+                predict_infos['pl_output'] = self.model_output_normalization_inverse_fn(predict_infos['pl_output'])
+
         if self.meta.use_target_normalization:
             mean_data = mean_data * self.target_normalization_value
-            std_data = std_data * self.target_normalization_value
+            # std_data = std_data * self.target_normalization_value
             if predict_infos is not None and 'pl_output' in predict_infos:
                 predict_infos['pl_output'] = predict_infos['pl_output'] * self.target_normalization_value
 

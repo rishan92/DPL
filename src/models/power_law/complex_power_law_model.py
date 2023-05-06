@@ -23,6 +23,7 @@ class ComplexPowerLawModel(PowerLawModel):
             'learning_rate': 0.001,
             'act_func': 'LeakyReLU',
             'last_act_func': 'SelfGLU',
+            'output_act_func': None,
             'loss_function': 'L1Loss',
             'optimizer': 'Adam',
             'activate_early_stopping': False,
@@ -98,6 +99,8 @@ class ComplexPowerLawModel(PowerLawModel):
             ),
         )
         output = output_complex.real
+        if self.output_act_func and self.training:
+            output = self.output_act_func(output)
 
         info = {
             'alpha': alphas,

@@ -125,14 +125,24 @@ class EnsembleModel(BasePytorchModule):
         return model_loss[0]
 
     @classproperty
-    def use_learning_curve(cls):
+    def meta_use_learning_curve(cls):
         model_class = get_class("src/models/power_law", cls.meta.model_class_name)
-        return model_class.use_learning_curve
+        return model_class.meta_use_learning_curve
 
     @classproperty
-    def use_learning_curve_mask(cls):
+    def meta_use_learning_curve_mask(cls):
         model_class = get_class("src/models/power_law", cls.meta.model_class_name)
-        return model_class.use_learning_curve_mask
+        return model_class.meta_use_learning_curve_mask
+
+    @classproperty
+    def meta_output_act_func(cls):
+        model_class = get_class("src/models/power_law", cls.meta.model_class_name)
+        return model_class.meta_output_act_func
+
+    @classproperty
+    def meta_cnn_kernel_size(cls):
+        model_class = get_class("src/models/power_law", cls.meta.model_class_name)
+        return model_class.meta_cnn_kernel_size
 
     def reset(self):
         if gv.IS_WANDB and gv.PLOT_GRADIENTS:
