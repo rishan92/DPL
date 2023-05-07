@@ -22,7 +22,7 @@ class ConditionedPowerLawModel(PowerLawModel):
             'nr_cnn_layers': 2,
             'use_learning_curve': False,
             'use_learning_curve_mask': False,
-            'use_suggested_learning_rate': True,
+            'use_suggested_learning_rate': False,
             'learning_rate': 1e-3,
             'refine_learning_rate': 1e-3,
             'act_func': 'LeakyReLU',

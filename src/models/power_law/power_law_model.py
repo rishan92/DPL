@@ -326,7 +326,7 @@ class PowerLawModel(BasePytorchModule, ABC):
         lr_finder.range_test(train_dataloader, start_lr=1e-8, end_lr=1, num_iter=100, diverge_th=1.1)
         # lr_finder.plot()
         suggested_lr = lr_finder.get_suggested_lr()
-        print(f"suggested_lr {suggested_lr}")
+        # print(f"suggested_lr {suggested_lr}")
         return suggested_lr
 
     def __getstate__(self):

@@ -97,10 +97,9 @@ class BasePytorchModule(nn.Module, Meta, ABC):
 
         grads = grad_output[0]
 
-        if torch.isnan(grads).any():
-            is_nan_gradient = True
-
+        is_nan = torch.isnan(grads).any(dim=0)
         grads = torch.abs(grads).mean(dim=0)
+        grads[is_nan] = 100
         grads = grads.numpy()
 
         if gv.IS_WANDB and len(names) > 0:
