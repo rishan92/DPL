@@ -20,6 +20,7 @@ class ConditionedPowerLawModel(PowerLawModel):
             'kernel_size': 3,
             'nr_filters': 4,
             'nr_cnn_layers': 2,
+            'dropout_rate': 0.9,
             'use_learning_curve': False,
             'use_learning_curve_mask': False,
             'use_suggested_learning_rate': False,
@@ -30,7 +31,7 @@ class ConditionedPowerLawModel(PowerLawModel):
             'alpha_act_func': 'SelfGLU',
             'beta_act_func': 'SelfGLU',
             'gamma_act_func': 'SelfGLU',
-            'output_act_func': None,
+            'output_act_func': 'Sigmoid',
             'alpha_beta_is_difference': False,
             'loss_function': 'L1Loss',
             'optimizer': 'Adam',
@@ -50,10 +51,14 @@ class ConditionedPowerLawModel(PowerLawModel):
 
         layers.append(nn.Linear(nr_initial_features, self.meta.nr_units))
         layers.append(self.act_func)
+        if hasattr(self.meta, 'dropout_rate') and self.meta.dropout_rate != 0:
+            layers.append(nn.Dropout(self.meta.dropout_rate))
 
         for i in range(2, self.meta.nr_layers + 1):
             layers.append(nn.Linear(self.meta.nr_units, self.meta.nr_units))
             layers.append(self.act_func)
+            if hasattr(self.meta, 'dropout_rate') and self.meta.dropout_rate != 0:
+                layers.append(nn.Dropout(self.meta.dropout_rate))
 
         last_layer = nn.Linear(self.meta.nr_units, 3)
         layers.append(last_layer)
