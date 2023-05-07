@@ -24,6 +24,7 @@ class EnsembleModel(BasePytorchModule):
         self.models = nn.ModuleList([])
 
         self.model_train_dataloaders = [None] * self.meta.ensemble_size
+        self.model_val_dataloaders = [None] * self.meta.ensemble_size
 
         for i in range(self.meta.ensemble_size):
             self.models.append(
@@ -35,12 +36,18 @@ class EnsembleModel(BasePytorchModule):
                 )
             )
 
-    def set_dataloader(self, train_dataloader):
-        if train_dataloader is not None:
-            self.train_dataloader = train_dataloader
-            for i in range(self.meta.ensemble_size):
+    def set_dataloader(self, train_dataloader=None, val_dataloader=None):
+        assert train_dataloader is not None or val_dataloader is not None
+        self.train_dataloader = train_dataloader if train_dataloader else None
+        self.val_dataloader = val_dataloader if val_dataloader else None
+        for i in range(self.meta.ensemble_size):
+            if train_dataloader:
                 model_train_dataloader = train_dataloader.make_dataloader(seed=self.model_seeds[i])
                 self.model_train_dataloaders[i] = model_train_dataloader
+
+            if val_dataloader:
+                model_val_dataloader = val_dataloader.make_dataloader(seed=self.model_seeds[i])
+                self.model_val_dataloaders[i] = model_val_dataloader
 
     @staticmethod
     def get_default_meta():
@@ -84,7 +91,8 @@ class EnsembleModel(BasePytorchModule):
 
         return mean_predictions, std_predictions, predict_infos
 
-    def train_loop(self, train_dataset, should_refine=False, reset_optimizer=False, last_sample=None, **kwargs):
+    def train_loop(self, train_dataset, should_refine=False, reset_optimizer=False, last_sample=None, val_dataset=None,
+                   **kwargs):
         if should_refine:
             nr_epochs = self.meta.refine_nr_epochs
             batch_size = self.meta.refine_batch_size
@@ -95,23 +103,37 @@ class EnsembleModel(BasePytorchModule):
             should_weight_last_sample = False
 
         model_device = next(self.parameters()).device
+
         # make the training dataloader
         train_dataloader = SurrogateDataLoader(
             dataset=train_dataset, batch_size=batch_size, shuffle=True, seed=self.seed, dev=model_device,
             should_weight_last_sample=should_weight_last_sample, last_sample=last_sample,
             # drop_last=train_dataset.X.shape[0] > batch_size and train_dataset.X.shape[0] % batch_size < 2
         )
-        # initial dataloader is discarded
-        self.set_dataloader(train_dataloader=train_dataloader)
+
+        # make the validation dataloader
+        val_dataloader = None
+        if val_dataset:
+            val_dataloader = SurrogateDataLoader(
+                dataset=val_dataset, batch_size=batch_size, shuffle=True, seed=self.seed, dev=model_device,
+                should_weight_last_sample=should_weight_last_sample, last_sample=last_sample,
+                # drop_last=train_dataset.X.shape[0] > batch_size and train_dataset.X.shape[0] % batch_size < 2
+            )
+
+        self.set_dataloader(train_dataloader=train_dataloader, val_dataloader=val_dataloader)
 
         self.set_seed(self.seed)
         self.train()
 
-        for model, model_dataloader, seed in zip(self.models, self.model_train_dataloaders, self.model_seeds):
+        for model, model_train_dataloader, model_val_dataloader, seed in zip(self.models,
+                                                                             self.model_train_dataloaders,
+                                                                             self.model_val_dataloaders,
+                                                                             self.model_seeds):
             self.logger.info(f'Started training model with index: {model.instance_id}')
             model.train_loop(
                 nr_epochs=nr_epochs,
-                train_dataloader=model_dataloader,
+                train_dataloader=model_train_dataloader,
+                val_dataloader=model_val_dataloader,
                 reset_optimizer=reset_optimizer,
                 **kwargs
             )

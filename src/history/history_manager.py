@@ -15,6 +15,7 @@ from functools import partial
 from numpy.typing import NDArray
 from src.utils.utils import get_class_from_package, get_class_from_packages, numpy_to_torch_apply
 import src.models.activation_functions
+from src.benchmarks.base_benchmark import BaseBenchmark
 
 
 class HistoryManager:
@@ -141,8 +142,9 @@ class HistoryManager:
                 train_indices.append(hp_index)
                 train_budgets.append(budget)
                 train_labels.append(performances[budget - 1])
-                train_curve = performances[:budget - 1] if budget > 1 else [initial_empty_value]
-                train_curves.append(train_curve)
+                if self.use_learning_curve:
+                    train_curve = performances[:budget - 1] if budget > 1 else [initial_empty_value]
+                    train_curves.append(train_curve)
 
         train_curves = self.get_processed_curves(curves=train_curves, curve_size_mode=curve_size_mode,
                                                  real_budgets=train_budgets)
@@ -478,3 +480,124 @@ class HistoryManager:
         real_budgets = np.array(real_budgets, dtype=int)
 
         return hp_indices, hp_budgets, real_budgets, hp_curves
+
+    def all_configurations(self, curve_size_mode, benchmark: BaseBenchmark) -> \
+        Tuple[NDArray[int], NDArray[np.float32], NDArray[np.float32], Optional[NDArray[np.float32]], NDArray[bool]]:
+
+        train_indices = []
+        train_labels = []
+        train_budgets = []
+        train_curves = []
+        is_up_curve = []
+        initial_empty_value = self.get_initial_empty_value()
+
+        budgets = range(1, self.max_benchmark_epochs + 1)
+        for hp_index in range(0, self.hp_candidates.shape[0]):
+            performances = benchmark.get_curve(hp_index, budget=self.max_benchmark_epochs)
+            start_performance = performances[0]
+            for budget in budgets:
+                train_indices.append(hp_index)
+                train_budgets.append(budget)
+                train_labels.append(performances[budget - 1])
+                is_up_curve.append(performances[budget - 1] > start_performance)
+                if self.use_learning_curve:
+                    train_curve = performances[:budget - 1] if budget > 1 else [initial_empty_value]
+                    train_curves.append(train_curve)
+
+        train_curves = self.get_processed_curves(curves=train_curves, curve_size_mode=curve_size_mode,
+                                                 real_budgets=train_budgets)
+
+        train_indices = np.array(train_indices, dtype=int)
+        train_budgets = np.array(train_budgets, dtype=np.float32)
+        train_labels = np.array(train_labels, dtype=np.float32)
+        is_up_curve = np.array(is_up_curve, dtype=bool)
+
+        return train_indices, train_labels, train_budgets, train_curves, is_up_curve
+
+    def get_check_train_validation_dataset(self, curve_size_mode, benchmark: BaseBenchmark,
+                                           validation_configuration_ratio, validation_curve_ratio,
+                                           seed) -> (
+        TabularDataset, TabularDataset):
+        """This method is called to prepare the necessary training dataset
+        for training a model.
+
+        Returns:
+            train_dataset: A dataset consisting of examples, labels, budgets
+                and learning curves.
+        """
+
+        all_hp_indices, all_labels, all_budgets, all_curves, all_is_up_curve = \
+            self.all_configurations(curve_size_mode, benchmark=benchmark)
+
+        indices = np.arange(self.hp_candidates.shape[0])
+        np.random.seed(seed)
+        val_indices = np.random.choice(indices,
+                                       size=int(self.hp_candidates.shape[0] * validation_configuration_ratio) + 1,
+                                       replace=False)
+
+        budgets = np.arange(1, self.max_benchmark_epochs + 1)
+        val_budgets_indices = budgets[int(self.max_benchmark_epochs * (1 - validation_curve_ratio)) + 1:]
+
+        val_hp_index = np.isin(all_hp_indices, val_indices)
+        val_budget_index = np.isin(all_budgets, val_budgets_indices)
+        val_hp_index = np.logical_or(val_hp_index, val_budget_index)
+        train_hp_index = ~val_hp_index
+        a = val_hp_index.sum()
+        b = all_is_up_curve.sum()
+        # filter out the curve points that goes up from the validation dataset
+        all_is_down_curve = ~all_is_up_curve
+        val_hp_index = np.logical_and(val_hp_index, all_is_down_curve)
+        c = val_hp_index.sum()
+
+        if self.use_scaled_budgets:
+            # scale budgets to [0, 1]
+            all_budgets = all_budgets / self.max_benchmark_epochs
+
+        if self.use_target_normalization:
+            all_labels = all_labels / self.target_normalization_value
+
+        if self.model_output_normalization_fn:
+            all_labels = self.model_output_normalization_fn(all_labels)
+
+        # make train dataset
+        train_hp_indices = all_hp_indices[train_hp_index]
+        train_labels = all_labels[train_hp_index]
+        train_budgets = all_budgets[train_hp_index]
+        train_curves = all_curves[train_hp_index] if all_curves is not None else None
+
+        # This creates a copy
+        train_examples = self.hp_candidates[train_hp_indices]
+
+        train_examples = torch.from_numpy(train_examples)
+        train_labels = torch.from_numpy(train_labels)
+        train_budgets = torch.from_numpy(train_budgets)
+        train_curves = torch.from_numpy(train_curves) if train_curves is not None else None
+
+        # make validation dataset
+        val_hp_indices = all_hp_indices[val_hp_index]
+        val_labels = all_labels[val_hp_index]
+        val_budgets = all_budgets[val_hp_index]
+        val_curves = all_curves[val_hp_index] if all_curves is not None else None
+
+        val_examples = self.hp_candidates[val_hp_indices]
+
+        val_examples = torch.from_numpy(val_examples)
+        val_labels = torch.from_numpy(val_labels)
+        val_budgets = torch.from_numpy(val_budgets)
+        val_curves = torch.from_numpy(val_curves) if val_curves is not None else None
+
+        train_dataset = TabularDataset(
+            X=train_examples,
+            Y=train_labels,
+            budgets=train_budgets,
+            curves=train_curves,
+        )
+
+        val_dataset = TabularDataset(
+            X=val_examples,
+            Y=val_labels,
+            budgets=val_budgets,
+            curves=val_curves,
+        )
+
+        return train_dataset, val_dataset

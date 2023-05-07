@@ -191,6 +191,7 @@ class Framework:
                 output_path=self.result_dir,
                 max_value=self.max_value,
                 min_value=self.min_value,
+                benchmark=self.benchmark,
             )
         else:
             self.surrogate = Framework.surrogate_types[self.surrogate_name](

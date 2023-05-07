@@ -55,6 +55,7 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
         max_value: float = 100,
         min_value: float = 0,
         fill_value: str = 'zero',
+        benchmark=None
     ):
         """
         Args:
@@ -116,6 +117,7 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
         self.max_value = max_value
         self.min_value = min_value
         self.backbone = backbone
+        self.benchmark = benchmark
 
         self.pretrained_path = output_path / 'power_law' / f'checkpoint_{seed}.pth'
 
@@ -221,6 +223,9 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
             inverse_torch_fn = inverse_torch_class()
             self.model_output_normalization_inverse_fn = partial(numpy_to_torch_apply, torch_function=inverse_torch_fn)
 
+        if self.meta.check_model:
+            self.check_training()
+
     @staticmethod
     def get_default_meta(model_class):
         if model_class == EnsembleModel:
@@ -247,6 +252,10 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
             }
         else:
             raise NotImplementedError(f"{model_class=}")
+
+        hp["check_model"] = False
+        hp["validation_configuration_ratio"] = 0.5
+        hp['validation_curve_ratio'] = 0.75
 
         return hp
 
@@ -741,3 +750,25 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
         plt.savefig(file_path, dpi=200)
 
         plt.close()
+
+    def check_training(self):
+        train_dataset, val_dataset = self.history_manager.get_check_train_validation_dataset(
+            curve_size_mode=self.meta.curve_size_mode,
+            benchmark=self.benchmark,
+            validation_configuration_ratio=self.meta.validation_configuration_ratio,
+            validation_curve_ratio=self.meta.validation_curve_ratio,
+            seed=self.seed
+        )
+
+        if self.model is not None:
+            self.model.reset()
+        self.model = self.model_class(
+            nr_features=train_dataset.X.shape[1],
+            checkpoint_path=self.checkpoint_path,
+            seed=self.seed
+        )
+        self.model.to(self.dev)
+        return_state = self.model.train_loop(train_dataset=train_dataset, val_dataset=val_dataset)
+        if return_state < 0:
+            print("Training failed. Restarting.")
+            self.logger.warning("Training failed. Restarting.")

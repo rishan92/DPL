@@ -29,6 +29,9 @@ class BasePytorchModule(nn.Module, Meta, ABC):
         self.train_dataset = None
         self.train_dataloader = None
         self.train_dataloader_it = None
+        self.val_dataset = None
+        self.val_dataloader = None
+        self.val_dataloader_it = None
 
         self.checkpoint_path = checkpoint_path
 
@@ -47,10 +50,15 @@ class BasePytorchModule(nn.Module, Meta, ABC):
             np.random.seed(seed)
             random.seed(seed)
 
-    def set_dataloader(self, train_dataloader):
-        assert train_dataloader is not None
-        self.train_dataloader = train_dataloader
-        self.train_dataloader_it = iter(self.train_dataloader)
+    def set_dataloader(self, train_dataloader=None, val_dataloader=None):
+        assert train_dataloader is not None or val_dataloader is not None
+        if train_dataloader:
+            self.train_dataloader = train_dataloader
+            self.train_dataloader_it = iter(self.train_dataloader)
+
+        if val_dataloader:
+            self.val_dataloader = val_dataloader
+            self.val_dataloader_it = iter(self.val_dataloader)
 
     @classproperty
     def meta_use_learning_curve(cls):
