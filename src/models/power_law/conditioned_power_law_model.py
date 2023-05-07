@@ -31,6 +31,7 @@ class ConditionedPowerLawModel(PowerLawModel):
             'beta_act_func': 'SelfGLU',
             'gamma_act_func': 'SelfGLU',
             'output_act_func': None,
+            'alpha_is_difference': False,
             'loss_function': 'L1Loss',
             'optimizer': 'Adam',
             'activate_early_stopping': False,
@@ -122,6 +123,9 @@ class ConditionedPowerLawModel(PowerLawModel):
         alphas = self.alpha_act_func(alphas)
         betas = self.beta_act_func(betas)
         gammas = self.gamma_act_func(gammas)
+
+        if hasattr(self.meta, 'alpha_is_difference') and self.meta.alpha_is_difference:
+            alphas = betas * alphas
 
         output = torch.add(
             alphas,

@@ -7,6 +7,7 @@ from torch.optim.lr_scheduler import _LRScheduler
 import matplotlib.pyplot as plt
 from torch.utils.data import DataLoader
 from pathlib import Path
+from loguru import logger
 
 from packaging import version
 
@@ -152,6 +153,7 @@ class LRFinder(object):
         device=None,
         memory_cache=True,
         cache_dir=None,
+        is_used=False
     ):
         # Check if the optimizer is already attached to a scheduler
         self.optimizer = optimizer
@@ -163,6 +165,7 @@ class LRFinder(object):
         self.best_loss = None
         self.memory_cache = memory_cache
         self.cache_dir = cache_dir
+        self.is_used = is_used
 
         # Save the original state of the model and optimizer so they can be restored if
         # needed
@@ -523,9 +526,13 @@ class LRFinder(object):
             try:
                 min_grad_idx = (np.gradient(np.array(losses))).argmin()
             except ValueError:
-                print(
-                    "Failed to compute the gradients, there might not be enough points."
-                )
+                if self.is_used:
+                    logger.warning("Failed to compute the gradients, there might not be enough points.")
+                else:
+                    logger.debug("Failed to compute the gradients, there might not be enough points.")
+                # print(
+                #     "Failed to compute the gradients, there might not be enough points."
+                # )
             if min_grad_idx is not None:
                 # print("Suggested LR: {:.2E}".format(lrs[min_grad_idx]))
                 ax.scatter(
@@ -588,9 +595,13 @@ class LRFinder(object):
         try:
             min_grad_idx = (np.gradient(np.array(losses))).argmin()
         except ValueError:
-            print(
-                "Failed to compute the gradients, there might not be enough points."
-            )
+            if self.is_used:
+                logger.warning("Failed to compute the gradients, there might not be enough points.")
+            else:
+                logger.debug("Failed to compute the gradients, there might not be enough points.")
+            # print(
+            #     "Failed to compute the gradients, there might not be enough points."
+            # )
 
         if min_grad_idx is not None:
             return lrs[min_grad_idx]
