@@ -96,6 +96,10 @@ class BasePytorchModule(nn.Module, Meta, ABC):
         BasePytorchModule._view_gradient_step += 1
 
         grads = grad_output[0]
+
+        if torch.isnan(grads).any():
+            is_nan_gradient = True
+
         grads = torch.abs(grads).mean(dim=0)
         grads = grads.numpy()
 

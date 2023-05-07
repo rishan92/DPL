@@ -26,8 +26,9 @@ class TargetSpaceComplex6PowerLawModel(PowerLawModel):
             'learning_rate': 0.01,
             'refine_learning_rate': 0.001,
             'act_func': 'LeakyReLU',
-            'last_act_func': 'SelfGLU',
-            'alpha_act_func': 'SelfGLU',
+            'last_act_func': 'Identity',
+            'alpha_act_func': 'Identity',
+            'alphai_act_func': 'Identity',
             'output_act_func': None,
             'y2_is_difference': False,
             'loss_function': 'L1Loss',
@@ -97,8 +98,8 @@ class TargetSpaceComplex6PowerLawModel(PowerLawModel):
         y1_b = x[:, 2]
         y2_b = x[:, 3]
 
-        alphas_r = alphas_r_b
-        alphas_i = self.alpha_act_func(alphas_i_b)
+        alphas_r = self.alpha_act_func(alphas_r_b)
+        alphas_i = self.alphai_act_func(alphas_i_b)
         y1 = self.last_act_func(y1_b)
         y2 = self.last_act_func(y2_b)
 

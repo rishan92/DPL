@@ -22,11 +22,14 @@ class ConditionedPowerLawModel(PowerLawModel):
             'nr_cnn_layers': 2,
             'use_learning_curve': False,
             'use_learning_curve_mask': False,
-            'use_suggested_learning_rate': False,
+            'use_suggested_learning_rate': True,
             'learning_rate': 1e-3,
             'refine_learning_rate': 1e-3,
             'act_func': 'LeakyReLU',
-            'last_act_func': 'SelfGLU',
+            'last_act_func': 'Identity',
+            'alpha_act_func': 'Identity',
+            'beta_act_func': 'SelfGLU',
+            'gamma_act_func': 'SelfGLU',
             'output_act_func': None,
             'loss_function': 'L1Loss',
             'optimizer': 'Adam',
@@ -116,13 +119,17 @@ class ConditionedPowerLawModel(PowerLawModel):
         betas = x[:, 1]
         gammas = x[:, 2]
 
+        alphas = self.alpha_act_func(alphas)
+        betas = self.beta_act_func(betas)
+        gammas = self.gamma_act_func(gammas)
+
         output = torch.add(
             alphas,
             torch.mul(
-                self.last_act_func(betas),
+                betas,
                 torch.pow(
                     predict_budgets,
-                    torch.mul(self.last_act_func(gammas), -1)
+                    torch.mul(gammas, -1)
                 )
             ),
         )

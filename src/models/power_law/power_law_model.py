@@ -62,6 +62,9 @@ class PowerLawModel(BasePytorchModule, ABC):
         self.alpha_act_func = None
         self.beta_act_func = None
         self.gamma_act_func = None
+        self.alphai_act_func = None
+        self.betai_act_func = None
+        self.gammai_act_func = None
         self.output_act_func = None
         self.output_act_inverse_func = None
         self.linear_net = None
@@ -92,6 +95,16 @@ class PowerLawModel(BasePytorchModule, ABC):
             # a = self.output_act_func(torch.tensor(val))
             # b = self.output_act_inverse_func(a)
 
+        if hasattr(self.meta, "alphai_act_func"):
+            self.alphai_act_func = get_class_from_packages([torch.nn, src.models.activation_functions],
+                                                           self.meta.alphai_act_func)()
+        if hasattr(self.meta, "betai_act_func"):
+            self.betai_act_func = get_class_from_packages([torch.nn, src.models.activation_functions],
+                                                          self.meta.betai_act_func)()
+        if hasattr(self.meta, "gammai_act_func"):
+            self.gammai_act_func = get_class_from_packages([torch.nn, src.models.activation_functions],
+                                                           self.meta.gammai_act_func)()
+
         self.linear_net = self.get_linear_net()
 
         if hasattr(self.meta, "use_learning_curve") and self.meta.use_learning_curve:
@@ -102,6 +115,8 @@ class PowerLawModel(BasePytorchModule, ABC):
         self.has_batchnorm_layers = False
         self.optimizer = None
         self.lr_scheduler = None
+
+        self.hook_handle = None
 
         self.clip_gradients_value = None
         if hasattr(self.meta, 'clip_gradients') and self.meta.clip_gradients != 0:
@@ -117,7 +132,7 @@ class PowerLawModel(BasePytorchModule, ABC):
             if hasattr(self, 'param_names'):
                 hook = partial(self.gradient_logging_hook, names=self.param_names)
                 if hasattr(self, 'linear_net') and self.linear_net is not None:
-                    self.linear_net.register_full_backward_hook(hook=hook)
+                    self.hook_handle = self.linear_net.register_full_backward_hook(hook=hook)
                 else:
                     warnings.warn("Gradient flow tracking with wandb is not supported for this module.")
 
@@ -305,11 +320,13 @@ class PowerLawModel(BasePytorchModule, ABC):
         model = deepcopy(self)
         # Change instance id from zero to stop recursive calls.
         model.instance_id = 1000
+        model.hook_remove()
         model.set_optimizer(use_scheduler=False)
         lr_finder = LRFinder(model=model, optimizer=model.optimizer, criterion=model.criterion, device=model_device)
         lr_finder.range_test(train_dataloader, start_lr=1e-8, end_lr=1, num_iter=100, diverge_th=2)
         # lr_finder.plot()
         suggested_lr = lr_finder.get_suggested_lr()
+        print(f"suggested_lr {suggested_lr}")
         return suggested_lr
 
     def __getstate__(self):
@@ -324,6 +341,10 @@ class PowerLawModel(BasePytorchModule, ABC):
         self.__dict__.update(state)
         # Restore unpickable objects from the state dictionary
         self.logger = logger
+
+    def hook_remove(self):
+        if self.hook_handle:
+            self.hook_handle.remove()
 
     def reset(self):
         PowerLawModel._instance_counter = 0

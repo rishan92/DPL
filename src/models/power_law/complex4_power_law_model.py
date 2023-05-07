@@ -27,7 +27,11 @@ class Complex4PowerLawModel(PowerLawModel):
             'learning_rate': 1e-3,
             'act_func': 'LeakyReLU',
             'clip_gradients': 0,
-            'last_act_func': 'SelfGLU',
+            'last_act_func': 'Identity',
+            'alpha_act_func': 'Identity',
+            'beta_act_func': 'Identity',
+            'gamma_act_func': 'Identity',
+            'gammai_act_func': 'Identity',
             'output_act_func': None,
             'loss_function': 'L1Loss',
             'optimizer': 'Adam',
@@ -87,10 +91,10 @@ class Complex4PowerLawModel(PowerLawModel):
         gammas_r_b = x[:, 2]
         gammas_i_b = x[:, 3]
 
-        alphas_r = alphas_r_b
-        betas_r = self.last_act_func(betas_r_b)
-        gammas_r = self.last_act_func(gammas_r_b)
-        gammas_i = self.last_act_func(gammas_i_b)
+        alphas_r = self.alpha_act_func(alphas_r_b)
+        betas_r = self.beta_act_func(betas_r_b)
+        gammas_r = self.gamma_act_func(gammas_r_b)
+        gammas_i = self.gammai_act_func(gammas_i_b)
 
         b = torch.tensor(1 / 51)
         alphas_i = betas_r * torch.sin(-1 * b * gammas_i) / (torch.cos(-1 * b * gammas_i) - torch.exp(b * gammas_r))

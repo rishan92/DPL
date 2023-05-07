@@ -6,6 +6,7 @@ from tqdm.autonotebook import tqdm
 from torch.optim.lr_scheduler import _LRScheduler
 import matplotlib.pyplot as plt
 from torch.utils.data import DataLoader
+from pathlib import Path
 
 from packaging import version
 
@@ -236,30 +237,30 @@ class LRFinder(object):
                 e.g., moving CPU Tensors with pinned memory to CUDA devices. Default: True.
 
         Example (fastai approach):
-            >>> lr_finder = LRFinder(net, optimizer, criterion, device="cuda")
-            >>> lr_finder.range_test(dataloader, end_lr=100, num_iter=100)
+            # >>> lr_finder = LRFinder(net, optimizer, criterion, device="cuda")
+            # >>> lr_finder.range_test(dataloader, end_lr=100, num_iter=100)
 
         Example (Leslie Smith's approach):
-            >>> lr_finder = LRFinder(net, optimizer, criterion, device="cuda")
-            >>> lr_finder.range_test(trainloader, val_loader=val_loader, end_lr=1, num_iter=100, step_mode="linear")
+            # >>> lr_finder = LRFinder(net, optimizer, criterion, device="cuda")
+            # >>> lr_finder.range_test(trainloader, val_loader=val_loader, end_lr=1, num_iter=100, step_mode="linear")
 
         Gradient accumulation is supported; example:
-            >>> train_data = ...    # prepared dataset
-            >>> desired_bs, real_bs = 32, 4         # batch size
-            >>> accumulation_steps = desired_bs // real_bs     # required steps for accumulation
-            >>> dataloader = torch.utils.data.DataLoader(train_data, batch_size=real_bs, shuffle=True)
-            >>> acc_lr_finder = LRFinder(net, optimizer, criterion, device="cuda")
-            >>> acc_lr_finder.range_test(dataloader, end_lr=10, num_iter=100, accumulation_steps=accumulation_steps)
+            # >>> train_data = ...    # prepared dataset
+            # >>> desired_bs, real_bs = 32, 4         # batch size
+            # >>> accumulation_steps = desired_bs // real_bs     # required steps for accumulation
+            # >>> dataloader = torch.utils.data.DataLoader(train_data, batch_size=real_bs, shuffle=True)
+            # >>> acc_lr_finder = LRFinder(net, optimizer, criterion, device="cuda")
+            # >>> acc_lr_finder.range_test(dataloader, end_lr=10, num_iter=100, accumulation_steps=accumulation_steps)
 
         If your DataLoader returns e.g. dict, or other non standard output, intehit from TrainDataLoaderIter,
         redefine method `inputs_labels_from_batch` so that it outputs (inputs, lables) data:
-            >>> import torch_lr_finder
-            >>> class TrainIter(torch_lr_finder.TrainDataLoaderIter):
-            >>>     def inputs_labels_from_batch(self, batch_data):
-            >>>         return (batch_data['user_features'], batch_data['user_history']), batch_data['y_labels']
-            >>> train_data_iter = TrainIter(train_dl)
-            >>> finder = torch_lr_finder.LRFinder(model, optimizer, partial(model._train_loss, need_one_hot=False))
-            >>> finder.range_test(train_data_iter, end_lr=10, num_iter=300, diverge_th=10)
+            # >>> import torch_lr_finder
+            # >>> class TrainIter(torch_lr_finder.TrainDataLoaderIter):
+            # >>>     def inputs_labels_from_batch(self, batch_data):
+            # >>>         return (batch_data['user_features'], batch_data['user_history']), batch_data['y_labels']
+            # >>> train_data_iter = TrainIter(train_dl)
+            # >>> finder = torch_lr_finder.LRFinder(model, optimizer, partial(model._train_loss, need_one_hot=False))
+            # >>> finder.range_test(train_data_iter, end_lr=10, num_iter=300, diverge_th=10)
 
         Reference:
         [Training Neural Nets on Larger Batches: Practical Tips for 1-GPU, Multi-GPU & Distributed setups](
@@ -371,6 +372,7 @@ class LRFinder(object):
     def _train_batch(self, train_iter, accumulation_steps, non_blocking_transfer=True):
         self.model.train()
         total_loss = None  # for late initialization
+        is_nan_gradient = False
 
         self.optimizer.zero_grad()
         for i in range(accumulation_steps):
@@ -399,14 +401,25 @@ class LRFinder(object):
             else:
                 loss.backward()
 
+            if not is_nan_gradient:
+                for name, param in self.model.named_parameters():
+                    if param.grad is not None:
+                        if torch.isnan(param.grad).any():
+                            is_nan_gradient = True
+                            break
+
+            loss_value = loss.item()
+            if is_nan_gradient:
+                loss_value = 1000
+
             if total_loss is None:
-                total_loss = loss
+                total_loss = loss_value
             else:
-                total_loss += loss
+                total_loss += loss_value
 
         self.optimizer.step()
 
-        return total_loss.item()
+        return total_loss
 
     def _move_to_device(self, inputs, labels, non_blocking=True):
         def move(obj, device, non_blocking=True):
@@ -541,7 +554,7 @@ class LRFinder(object):
                 suggested_value = lrs[min_grad_idx]
             fig.suptitle(f"Suggested LR: {suggested_value:.2E}")
             # plt.show()
-            file_path = f"SuggestLearningRate_id_{LRFinder._calculation_id}"
+            file_path = Path(f"SuggestLearningRate_id_{LRFinder._calculation_id}")
             plt.savefig(file_path, dpi=70)
 
         if suggest_lr and min_grad_idx is not None:

@@ -24,7 +24,12 @@ class Complex5PowerLawModel(PowerLawModel):
             'use_learning_curve_mask': False,
             'learning_rate': 0.001,
             'act_func': 'LeakyReLU',
-            'last_act_func': 'SelfGLU',
+            'last_act_func': 'Identity',
+            'alpha_act_func': 'Identity',
+            'beta_act_func': 'Identity',
+            'gamma_act_func': 'Identity',
+            'alphai_act_func': 'Identity',
+            'gammai_act_func': 'Identity',
             'output_act_func': None,
             'loss_function': 'L1Loss',
             'optimizer': 'Adam',
@@ -85,9 +90,11 @@ class Complex5PowerLawModel(PowerLawModel):
         alphas_i = x[:, 3]
         gammas_i = x[:, 4]
 
-        betas_r = self.last_act_func(betas_r)
-        gammas_r = self.last_act_func(gammas_r)
-        gammas_i = self.last_act_func(gammas_i)
+        alphas_r = self.alpha_act_func(alphas_r)
+        betas_r = self.beta_act_func(betas_r)
+        gammas_r = self.gamma_act_func(gammas_r)
+        alphas_i = self.alphai_act_func(alphas_i)
+        gammas_i = self.gammai_act_func(gammas_i)
 
         betas_i = -alphas_i
 

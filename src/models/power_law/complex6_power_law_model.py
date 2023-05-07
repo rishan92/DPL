@@ -25,7 +25,13 @@ class Complex6PowerLawModel(PowerLawModel):
             'use_learning_curve_mask': False,
             'learning_rate': 0.001,
             'act_func': 'LeakyReLU',
-            'last_act_func': 'SelfGLU',
+            'last_act_func': 'Identity',
+            'alpha_act_func': 'Identity',
+            'beta_act_func': 'Identity',
+            'gamma_act_func': 'Identity',
+            'alphai_act_func': 'Identity',
+            'betai_act_func': 'Identity',
+            'gammai_act_func': 'Identity',
             'output_act_func': None,
             'loss_function': 'L1Loss',
             'optimizer': 'Adam',
@@ -94,12 +100,12 @@ class Complex6PowerLawModel(PowerLawModel):
         betas_i_b = x[:, 4]
         gammas_i_b = x[:, 5]
 
-        alphas_r = alphas_r_b
-        alphas_i = alphas_i_b
-        betas_r = self.last_act_func(betas_r_b)
-        betas_i = self.last_act_func(betas_i_b)
-        gammas_r = self.last_act_func(gammas_r_b)
-        gammas_i = self.last_act_func(gammas_i_b)
+        alphas_r = self.alpha_act_func(alphas_r_b)
+        betas_r = self.beta_act_func(betas_r_b)
+        gammas_r = self.gamma_act_func(gammas_r_b)
+        alphas_i = self.alphai_act_func(alphas_i_b)
+        betas_i = self.betai_act_func(betas_i_b)
+        gammas_i = self.gammai_act_func(gammas_i_b)
 
         alphas = alphas_r + 1j * alphas_i
         betas = betas_r + 1j * betas_i
