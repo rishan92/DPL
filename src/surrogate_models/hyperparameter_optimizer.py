@@ -198,6 +198,15 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
         self.checkpoint_path = output_path / 'checkpoints' / f'{dataset_name}' / f'{self.seed}'
         self.checkpoint_path.mkdir(parents=True, exist_ok=True)
 
+        self.target_normalization_value = 1
+        if self.meta.target_normalization_range is not None:
+            self.target_normalization_range = self.meta.target_normalization_range
+        else:
+            self.target_normalization_range = [0, 1]
+
+        self.target_normalization_inverse_fn = None
+        self.target_normalization_std_inverse_fn = None
+
         self.history_manager = HistoryManager(
             hp_candidates=self.hp_candidates,
             max_benchmark_epochs=max_benchmark_epochs,
@@ -206,6 +215,7 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
             use_learning_curve_mask=self.model_class.meta_use_learning_curve_mask,
             fantasize_step=self.fantasize_step,
             use_target_normalization=self.meta.use_target_normalization,
+            target_normalization_range=self.target_normalization_range,
             model_output_normalization=self.model_class.meta_output_act_func,
             use_scaled_budgets=self.meta.use_scaled_budgets,
             cnn_kernel_size=self.model_class.meta_cnn_kernel_size
@@ -213,8 +223,6 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
 
         self.real_curve_targets_map_pd: Optional[pd.DataFrame] = None
         self.prediction_params_pd: Optional[pd.DataFrame] = None
-
-        self.target_normalization_value = 1
 
         # Inverse function is only used for plotting
         self.model_output_normalization_inverse_fn = None
@@ -237,6 +245,7 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
                 'acq_mode': 'ei',
                 'acq_best_value_mode': 'normal',
                 'use_target_normalization': False,
+                'target_normalization_range': [0.2, 0.8],
                 'use_scaled_budgets': True,
             }
         elif model_class == DyHPOModel:
@@ -248,6 +257,7 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
                 'acq_mode': 'ei',
                 'acq_best_value_mode': 'mf',  # 'normal',  #    mf - multi-fidelity, normal, None
                 'use_target_normalization': False,
+                'target_normalization_range': [0.2, 0.8],
                 'use_scaled_budgets': True,
             }
         else:
@@ -346,10 +356,10 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
         #         predict_infos['pl_output'] = self.model_output_normalization_inverse_fn(predict_infos['pl_output'])
 
         # if self.meta.use_target_normalization:
-        #     mean_predictions = mean_predictions * self.target_normalization_value
-        #     std_predictions = std_predictions * self.target_normalization_value
+        #     mean_predictions = self.target_normalization_inverse_fn(mean_predictions)
+        #     std_predictions = self.target_normalization_std_inverse_fn(std_predictions)
         #     if predict_infos is not None and 'pl_output' in predict_infos:
-        #         predict_infos['pl_output'] = predict_infos['pl_output'] * self.target_normalization_value
+        #         predict_infos['pl_output'] = self.target_normalization_inverse_fn(predict_infos['pl_output'])
 
         return mean_predictions, std_predictions, hp_indices, real_budgets, predict_infos
 
@@ -475,6 +485,11 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
 
             if self.train:
                 self.target_normalization_value = self.history_manager.set_target_normalization_value()
+                gap = self.target_normalization_range[1] - self.target_normalization_range[0]
+                self.target_normalization_inverse_fn = \
+                    lambda x: (x - self.target_normalization_range[0]) * self.target_normalization_value / gap
+                self.target_normalization_std_inverse_fn = lambda x: x * self.target_normalization_value / gap
+
                 if self.pretrain:
                     # TODO Load the pregiven weights.
                     pass
@@ -628,10 +643,10 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
                 predict_infos['pl_output'] = self.model_output_normalization_inverse_fn(predict_infos['pl_output'])
 
         if self.meta.use_target_normalization:
-            mean_data = mean_data * self.target_normalization_value
-            std_data = std_data * self.target_normalization_value
+            mean_data = self.target_normalization_inverse_fn(mean_data)
+            std_data = self.target_normalization_std_inverse_fn(std_data)
             if predict_infos is not None and 'pl_output' in predict_infos:
-                predict_infos['pl_output'] = predict_infos['pl_output'] * self.target_normalization_value
+                predict_infos['pl_output'] = self.target_normalization_inverse_fn(predict_infos['pl_output'])
 
         plt.clf()
         if predict_infos is not None:
@@ -706,10 +721,10 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
                 predict_infos['pl_output'] = self.model_output_normalization_inverse_fn(predict_infos['pl_output'])
 
         if self.meta.use_target_normalization:
-            mean_data = mean_data * self.target_normalization_value
-            # std_data = std_data * self.target_normalization_value
+            mean_data = self.target_normalization_inverse_fn(mean_data)
+            # std_data = self.target_normalization_std_inverse_fn(std_data)
             if predict_infos is not None and 'pl_output' in predict_infos:
-                predict_infos['pl_output'] = predict_infos['pl_output'] * self.target_normalization_value
+                predict_infos['pl_output'] = self.target_normalization_inverse_fn(predict_infos['pl_output'])
 
         difference = real_curve_targets - mean_data
 

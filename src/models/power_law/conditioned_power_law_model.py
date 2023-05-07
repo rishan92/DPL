@@ -27,7 +27,7 @@ class ConditionedPowerLawModel(PowerLawModel):
             'refine_learning_rate': 1e-3,
             'act_func': 'LeakyReLU',
             'last_act_func': 'Identity',
-            'alpha_act_func': 'Identity',
+            'alpha_act_func': 'SelfGLU',
             'beta_act_func': 'SelfGLU',
             'gamma_act_func': 'SelfGLU',
             'output_act_func': None,

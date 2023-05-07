@@ -21,7 +21,7 @@ from src.benchmarks.base_benchmark import BaseBenchmark
 class HistoryManager:
     def __init__(self, hp_candidates, max_benchmark_epochs, fantasize_step, use_learning_curve, use_learning_curve_mask,
                  fill_value='zero', use_target_normalization=False, use_scaled_budgets=True,
-                 model_output_normalization=None, cnn_kernel_size=0):
+                 model_output_normalization=None, cnn_kernel_size=0, target_normalization_range=None):
         assert fill_value in ["zero", "last"], "Invalid fill value mode"
         # assert predict_mode in ["end_budget", "next_budget"], "Invalid predict mode"
         # assert curve_size_mode in ["fixed", "variable"], "Invalid curve size mode"
@@ -30,11 +30,17 @@ class HistoryManager:
         self.fill_value = fill_value
         self.use_learning_curve = use_learning_curve
         self.use_learning_curve_mask = use_learning_curve_mask
-        self.use_target_normalization = use_target_normalization
         self.use_scaled_budgets = use_scaled_budgets
         self.cnn_kernel_size = cnn_kernel_size
-        self.model_output_normalization = model_output_normalization
 
+        self.use_target_normalization = use_target_normalization
+        self.target_normalization_range = \
+            target_normalization_range if target_normalization_range is not None else [0, 1]
+        self.target_normalization_fn = None
+        self.max_curve_value = 0
+        self.target_normalization_value = 1
+
+        self.model_output_normalization = model_output_normalization
         self.model_output_normalization_fn = None
         if self.model_output_normalization and self.model_output_normalization != "Identity":
             torch_function = get_class_from_packages([torch.nn, src.models.activation_functions],
@@ -56,11 +62,11 @@ class HistoryManager:
         self.is_test_data_modified = True
         self.cached_test_dataset = None
 
-        self.max_curve_value = 0
-        self.target_normalization_value = 1
-
     def set_target_normalization_value(self):
         self.target_normalization_value = self.max_curve_value
+        gap = self.target_normalization_range[1] - self.target_normalization_range[0]
+        self.target_normalization_fn = lambda x: (x * gap / self.target_normalization_value) + \
+                                                 self.target_normalization_range[0]
         return self.target_normalization_value
 
     def get_initial_empty_value(self):
@@ -101,7 +107,7 @@ class HistoryManager:
             newp_budget = newp_budget / self.max_benchmark_epochs
 
         if self.use_target_normalization:
-            newp_performance = newp_performance / self.target_normalization_value
+            newp_performance = self.target_normalization_fn(newp_performance)
 
         if self.model_output_normalization_fn:
             newp_performance = self.model_output_normalization_fn(np.array(newp_performance)).item()
@@ -173,7 +179,7 @@ class HistoryManager:
             train_budgets = train_budgets / self.max_benchmark_epochs
 
         if self.use_target_normalization:
-            train_labels = train_labels / self.target_normalization_value
+            train_labels = self.target_normalization_fn(train_labels)
 
         if self.model_output_normalization_fn:
             train_labels = self.model_output_normalization_fn(train_labels)
@@ -554,7 +560,7 @@ class HistoryManager:
             all_budgets = all_budgets / self.max_benchmark_epochs
 
         if self.use_target_normalization:
-            all_labels = all_labels / self.target_normalization_value
+            all_labels = self.target_normalization_fn(all_labels)
 
         if self.model_output_normalization_fn:
             all_labels = self.model_output_normalization_fn(all_labels)
