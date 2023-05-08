@@ -263,7 +263,7 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
         else:
             raise NotImplementedError(f"{model_class=}")
 
-        hp["check_model"] = False
+        hp["check_model"] = True
         hp["validation_configuration_ratio"] = 0.5
         hp['validation_curve_ratio'] = 0.75
 
@@ -784,6 +784,6 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
         )
         self.model.to(self.dev)
         return_state = self.model.train_loop(train_dataset=train_dataset, val_dataset=val_dataset)
-        if return_state < 0:
+        if return_state is not None and return_state < 0:
             print("Training failed. Restarting.")
             self.logger.warning("Training failed. Restarting.")

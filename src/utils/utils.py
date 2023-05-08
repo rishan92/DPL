@@ -83,6 +83,8 @@ def get_inverse_function_class(act_func_name: str):
     if act_func_name:
         if act_func_name == "Sigmoid":
             inverse_function = "InverseSigmoid"
+        elif act_func_name == "ClipSigmoid":
+            inverse_function = "InverseClipSigmoid"
         elif act_func_name == "ClipLeakyReLU":
             inverse_function = "InverseClipLeakyReLU"
         elif act_func_name == "OffsetTanh":
