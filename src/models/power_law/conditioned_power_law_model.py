@@ -21,6 +21,7 @@ class ConditionedPowerLawModel(PowerLawModel):
             'nr_filters': 4,
             'nr_cnn_layers': 2,
             'dropout_rate': 0,
+            'use_batch_norm': False,
             'use_learning_curve': False,
             'use_learning_curve_mask': False,
             'use_suggested_learning_rate': False,
@@ -50,12 +51,16 @@ class ConditionedPowerLawModel(PowerLawModel):
             nr_initial_features = self.nr_features + self.meta.nr_filters
 
         layers.append(nn.Linear(nr_initial_features, self.meta.nr_units))
+        if hasattr(self.meta, 'use_batch_norm') and self.meta.use_batch_norm:
+            layers.append(nn.BatchNorm1d(self.meta.nr_units))
         layers.append(self.act_func)
         if hasattr(self.meta, 'dropout_rate') and self.meta.dropout_rate != 0:
             layers.append(nn.Dropout(self.meta.dropout_rate))
 
         for i in range(2, self.meta.nr_layers + 1):
             layers.append(nn.Linear(self.meta.nr_units, self.meta.nr_units))
+            if hasattr(self.meta, 'use_batch_norm') and self.meta.use_batch_norm:
+                layers.append(nn.BatchNorm1d(self.meta.nr_units))
             layers.append(self.act_func)
             if hasattr(self.meta, 'dropout_rate') and self.meta.dropout_rate != 0:
                 layers.append(nn.Dropout(self.meta.dropout_rate))
