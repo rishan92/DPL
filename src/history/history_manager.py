@@ -535,6 +535,9 @@ class HistoryManager:
         all_hp_indices, all_labels, all_budgets, all_curves, all_is_up_curve = \
             self.all_configurations(curve_size_mode, benchmark=benchmark)
 
+        self.max_curve_value = np.max(all_labels)
+        self.set_target_normalization_value()
+
         indices = np.arange(self.hp_candidates.shape[0])
         np.random.seed(seed)
         val_indices = np.random.choice(indices,
@@ -548,26 +551,27 @@ class HistoryManager:
         val_budget_index = np.isin(all_budgets, val_budgets_indices)
         val_hp_index = np.logical_or(val_hp_index, val_budget_index)
         train_hp_index = ~val_hp_index
-        a = val_hp_index.sum()
-        b = all_is_up_curve.sum()
+        # a = val_hp_index.sum()
+        # b = all_is_up_curve.sum()
         # filter out the curve points that goes up from the validation dataset
         all_is_down_curve = ~all_is_up_curve
         val_hp_index = np.logical_and(val_hp_index, all_is_down_curve)
-        c = val_hp_index.sum()
+        # c = val_hp_index.sum()
 
         if self.use_scaled_budgets:
             # scale budgets to [0, 1]
             all_budgets = all_budgets / self.max_benchmark_epochs
 
+        transformed_all_labels = all_labels
         if self.use_target_normalization:
-            all_labels = self.target_normalization_fn(all_labels)
+            transformed_all_labels = self.target_normalization_fn(transformed_all_labels)
 
         if self.model_output_normalization_fn:
-            all_labels = self.model_output_normalization_fn(all_labels)
+            transformed_all_labels = self.model_output_normalization_fn(transformed_all_labels)
 
         # make train dataset
         train_hp_indices = all_hp_indices[train_hp_index]
-        train_labels = all_labels[train_hp_index]
+        train_labels = transformed_all_labels[train_hp_index]
         train_budgets = all_budgets[train_hp_index]
         train_curves = all_curves[train_hp_index] if all_curves is not None else None
 
