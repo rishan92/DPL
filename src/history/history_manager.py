@@ -536,7 +536,7 @@ class HistoryManager:
             self.all_configurations(curve_size_mode, benchmark=benchmark)
 
         self.max_curve_value = np.max(all_labels)
-        self.set_target_normalization_value()
+        target_normalization_value = self.set_target_normalization_value()
 
         indices = np.arange(self.hp_candidates.shape[0])
         np.random.seed(seed)
@@ -610,4 +610,4 @@ class HistoryManager:
             curves=val_curves,
         )
 
-        return train_dataset, val_dataset
+        return train_dataset, val_dataset, target_normalization_value

@@ -768,13 +768,15 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
         plt.close()
 
     def check_training(self):
-        train_dataset, val_dataset = self.history_manager.get_check_train_validation_dataset(
-            curve_size_mode=self.meta.curve_size_mode,
-            benchmark=self.benchmark,
-            validation_configuration_ratio=self.meta.validation_configuration_ratio,
-            validation_curve_ratio=self.meta.validation_curve_ratio,
-            seed=self.seed
-        )
+        train_dataset, val_dataset, target_normalization_value = \
+            self.history_manager.get_check_train_validation_dataset(
+                curve_size_mode=self.meta.curve_size_mode,
+                benchmark=self.benchmark,
+                validation_configuration_ratio=self.meta.validation_configuration_ratio,
+                validation_curve_ratio=self.meta.validation_curve_ratio,
+                seed=self.seed
+            )
+        self.target_normalization_value = target_normalization_value
 
         if self.model is not None:
             self.model.reset()
@@ -783,6 +785,12 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
             checkpoint_path=self.checkpoint_path,
             seed=self.seed
         )
+        if self.meta.use_target_normalization:
+            gap = self.target_normalization_range[1] - self.target_normalization_range[0]
+            self.target_normalization_inverse_fn = \
+                lambda x: (x - self.target_normalization_range[0]) * self.target_normalization_value / gap
+            self.target_normalization_std_inverse_fn = lambda x: x * self.target_normalization_value / gap
+            self.model.set_target_normalization_inverse_function(self.target_normalization_inverse_fn)
         self.model.to(self.dev)
         return_state = self.model.train_loop(train_dataset=train_dataset, val_dataset=val_dataset)
         if return_state is not None and return_state < 0:

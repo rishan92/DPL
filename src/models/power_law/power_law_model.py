@@ -115,6 +115,7 @@ class PowerLawModel(BasePytorchModule, ABC):
         self.has_batchnorm_layers = False
         self.optimizer = None
         self.lr_scheduler = None
+        self.target_normalization_inverse_fn = None
 
         self.hook_handle = None
 
@@ -256,6 +257,8 @@ class PowerLawModel(BasePytorchModule, ABC):
                 #     loss = self.criterion(outputs.real, batch_labels) + imag_loss_factor * imag_loss
                 # else:
                 #     loss = self.criterion(outputs, batch_labels)
+                if self.target_normalization_inverse_fn:
+                    outputs = self.target_normalization_inverse_fn(outputs)
 
                 loss = self.criterion(outputs, batch_labels)
                 running_loss += loss.item()
@@ -378,6 +381,9 @@ class PowerLawModel(BasePytorchModule, ABC):
         self.__dict__.update(state)
         # Restore unpickable objects from the state dictionary
         self.logger = logger
+
+    def set_target_normalization_inverse_function(self, fn):
+        self.target_normalization_inverse_fn = fn
 
     def hook_remove(self):
         if self.hook_handle:
