@@ -139,7 +139,7 @@ class ConditionedPowerLawModel(PowerLawModel):
             alphas_plus_beta = alphas
             alpha_weight = betas
             alphas = alphas_plus_beta * alpha_weight
-            betas = alphas_plus_beta - alphas
+            betas = alphas_plus_beta * (1 - alpha_weight)
 
         output = torch.add(
             alphas,
