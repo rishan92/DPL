@@ -8,5 +8,6 @@ from .clip_relu import ClipReLU
 from .clip_leaky_relu import ClipLeakyReLU
 from .clip_sigmoid import ClipSigmoid
 from .inverse_sigmoid import InverseSigmoid
+from .inverse_clip_sigmoid import InverseClipSigmoid
 from .inverse_clip_leaky_relu import InverseClipLeakyReLU
 from .inverse_offset_tanh import InverseOffsetTanh
