@@ -117,7 +117,13 @@ class PowerLawModel(BasePytorchModule, ABC):
         self.lr_scheduler = None
         self.target_normalization_inverse_fn = None
 
-        self.regularization_factor = self.meta.weight_regularization_factor
+        self.regularization_factor = 0
+        if hasattr(self.meta, 'weight_regularization_factor') and self.meta.weight_regularization_factor != 0:
+            self.regularization_factor = self.meta.weight_regularization_factor
+
+        self.alpha_beta_constraint_factor = 0
+        if hasattr(self.meta, 'alpha_beta_constraint_factor') and self.meta.alpha_beta_constraint_factor != 0:
+            self.alpha_beta_constraint_factor = self.meta.alpha_beta_constraint_factor
 
         self.hook_handle = None
 
@@ -210,13 +216,14 @@ class PowerLawModel(BasePytorchModule, ABC):
 
                 # zero the parameter gradients
                 self.optimizer.zero_grad(set_to_none=True)
-                outputs, _ = self((batch_examples, batch_budgets, batch_curves))
+                outputs, predict_info = self((batch_examples, batch_budgets, batch_curves))
                 # if outputs.is_complex():
                 #     imag_loss_factor = 1
                 #     imag_loss = torch.abs(outputs.imag).mean()
                 #     loss = self.criterion(outputs.real, batch_labels) + imag_loss_factor * imag_loss
                 # else:
                 #     loss = self.criterion(outputs, batch_labels)
+
                 l1_norm = torch.tensor(0.0, requires_grad=True)
                 if self.regularization_factor != 0:
                     num_params = 0
@@ -225,7 +232,19 @@ class PowerLawModel(BasePytorchModule, ABC):
                         num_params += param.numel()
                     l1_norm = l1_norm / num_params
                     l1_norm = torch.max(torch.tensor(1), l1_norm) - 1
-                loss = self.criterion(outputs, batch_labels) + self.regularization_factor * l1_norm
+
+                if self.alpha_beta_constraint_factor != 0:
+                    alpha_plus_beta = predict_info['alpha'] + predict_info['beta']
+                    lower_loss = torch.clamp(-1 * alpha_plus_beta, min=0)
+                    upper_loss = torch.clamp(alpha_plus_beta - 1, min=0)
+                    alpha_beta_constraint_loss = torch.mean(lower_loss + upper_loss)
+                else:
+                    alpha_beta_constraint_loss = torch.tensor(0.0, requires_grad=True)
+
+                loss = self.criterion(outputs, batch_labels) + \
+                       self.regularization_factor * l1_norm + \
+                       self.alpha_beta_constraint_factor * alpha_beta_constraint_loss
+
                 loss.backward()
 
                 if self.clip_gradients_value:
@@ -269,7 +288,7 @@ class PowerLawModel(BasePytorchModule, ABC):
                 # else:
                 #     loss = self.criterion(outputs, batch_labels)
                 predict_infos.append(predict_info)
-                
+
                 if self.target_normalization_inverse_fn:
                     outputs = self.target_normalization_inverse_fn(outputs)
 
