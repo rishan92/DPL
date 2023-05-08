@@ -8,6 +8,7 @@ import matplotlib.pyplot as plt
 from torch.utils.data import DataLoader
 from pathlib import Path
 from loguru import logger
+import torch.nn as nn
 
 from packaging import version
 
@@ -53,11 +54,24 @@ class DataLoaderIter(object):
 
 
 class TrainDataLoaderIter(DataLoaderIter):
-    def __init__(self, data_loader, auto_reset=True):
+    def __init__(self, data_loader, auto_reset=True, min_batch=1):
         super().__init__(data_loader)
         self.auto_reset = auto_reset
+        self.min_batch = min_batch
 
     def __next__(self):
+        inputs, labels = self.get_next()
+        if self.min_batch > 1:
+            inputs2, labels2 = self.get_next()
+            labels = torch.concat([labels, labels2], dim=0)
+            inputs_data = []
+            for i, data in enumerate(inputs2):
+                inputs_data.append(torch.concat([inputs[i], data], dim=0))
+            inputs = tuple(inputs_data)
+
+        return inputs, labels
+
+    def get_next(self):
         try:
             batch = next(self._iterator)
             inputs, labels = self.inputs_labels_from_batch(batch)
@@ -180,6 +194,12 @@ class LRFinder(object):
         else:
             self.device = self.model_device
 
+        self.has_batchnorm_layers = False
+
+        for module in self.model.modules():
+            if isinstance(module, (nn.BatchNorm1d, nn.BatchNorm2d, nn.BatchNorm3d)):
+                self.has_batchnorm_layers = True
+
     def reset(self):
         """Restores the model and optimizer to their initial states."""
 
@@ -297,9 +317,10 @@ class LRFinder(object):
         if smooth_f < 0 or smooth_f >= 1:
             raise ValueError("smooth_f is outside the range [0, 1[")
 
+        min_batch = 2 if self.has_batchnorm_layers else 1
         # Create an iterator to get data batch by batch
         if isinstance(train_loader, DataLoader):
-            train_iter = TrainDataLoaderIter(train_loader)
+            train_iter = TrainDataLoaderIter(train_loader, min_batch=min_batch)
         elif isinstance(train_loader, TrainDataLoaderIter):
             train_iter = train_loader
         else:
