@@ -225,6 +225,8 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
         self.real_curve_targets_map_pd: Optional[pd.DataFrame] = None
         self.prediction_params_pd: Optional[pd.DataFrame] = None
 
+        self.surrogate_budget = 0
+
         # Inverse function is only used for plotting
         self.model_output_normalization_inverse_fn = None
         inverse_torch_class = get_inverse_function_class(self.model_class.meta_output_act_func)
@@ -318,7 +320,9 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
             self.model = self.model_class(
                 nr_features=train_dataset.X.shape[1],
                 checkpoint_path=self.checkpoint_path,
-                seed=self.seed
+                seed=self.seed,
+                total_budget=self.total_budget,
+                surrogate_budget=self.surrogate_budget
             )
             self.model.to(self.dev)
             return_state = self.model.train_loop(train_dataset=train_dataset)
@@ -448,6 +452,8 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
             hp_curve: List
                 The performance of the hyperparameter configuration.
         """
+        self.surrogate_budget += 1
+
         for index, curve_element in enumerate(hp_curve):
             if np.isnan(curve_element):
                 self.diverged_configs.add(hp_index)

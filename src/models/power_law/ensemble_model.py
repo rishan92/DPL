@@ -7,13 +7,37 @@ import torch.nn as nn
 from src.utils.utils import get_class, classproperty
 import global_variables as gv
 import wandb
+from pathlib import Path
+
+from src.models.power_law.power_law_model import PowerLawModel
 
 
 class EnsembleModel(BasePytorchModule):
-    def __init__(self, nr_features, seed=None, checkpoint_path: str = '.'):
+    _instantiated_count = 0
+
+    def __init__(self, nr_features, total_budget, surrogate_budget, seed=None, checkpoint_path: Path = '.'):
         super().__init__(nr_features=nr_features, seed=seed, checkpoint_path=checkpoint_path)
 
-        model_class = get_class("src/models/power_law", self.meta.model_class_name)
+        self.total_budget = total_budget
+        self.surrogate_budget = surrogate_budget
+        self.exploration_exploitation_strategy_budget = int(total_budget / 3)
+
+        model_class: PowerLawModel = get_class("src/models/power_law", self.meta.model_class_name)
+
+        if self.meta.flip_batch_norm:
+            if hasattr(model_class.meta, 'use_batch_norm'):
+                if EnsembleModel._instantiated_count % 2 == 1:
+                    model_class.meta.use_batch_norm = False
+                else:
+                    model_class.meta.use_batch_norm = True
+
+        if self.exploration_exploitation_strategy_budget < self.surrogate_budget:
+            if self.meta.exploration_exploitation_strategy == "batch_norm":
+                if hasattr(model_class.meta, 'use_batch_norm'):
+                    model_class.meta.use_batch_norm = False
+            else:
+                raise NotImplementedError
+
         self.model_instances: List[Type[model_class]] = [model_class] * self.meta.ensemble_size
 
         # set a seed already, so that it is deterministic when
@@ -35,6 +59,8 @@ class EnsembleModel(BasePytorchModule):
                     seed=self.model_seeds[i]
                 )
             )
+
+        EnsembleModel._instantiated_count += 1
 
     def set_dataloader(self, train_dataloader=None, val_dataloader=None):
         assert train_dataloader is not None or val_dataloader is not None
@@ -59,6 +85,8 @@ class EnsembleModel(BasePytorchModule):
             'refine_nr_epochs': 20,
             'batch_size': 64,
             'refine_batch_size': 64,
+            'exploration_exploitation_strategy': None,  # 'batch_norm',
+            'flip_batch_norm': False,
         }
         return hp
 
