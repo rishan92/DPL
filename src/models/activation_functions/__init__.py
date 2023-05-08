@@ -11,3 +11,6 @@ from .inverse_sigmoid import InverseSigmoid
 from .inverse_clip_sigmoid import InverseClipSigmoid
 from .inverse_clip_leaky_relu import InverseClipLeakyReLU
 from .inverse_offset_tanh import InverseOffsetTanh
+from .bounded_relu import BoundedReLU
+from .bounded_leaky_relu import BoundedLeakyReLU
+from .bounded_sigmoid import BoundedSigmoid

@@ -250,6 +250,7 @@ class PowerLawModel(BasePytorchModule, ABC):
     def validation_epoch(self):
         self.eval()
         running_loss = 0
+        predict_infos = []
         while True:
             try:
                 batch = next(self.val_dataloader_it)
@@ -260,13 +261,15 @@ class PowerLawModel(BasePytorchModule, ABC):
                 if self.has_batchnorm_layers and nr_examples_batch == 1:
                     return 0
 
-                outputs, _ = self((batch_examples, batch_budgets, batch_curves))
+                outputs, predict_info = self((batch_examples, batch_budgets, batch_curves))
                 # if outputs.is_complex():
                 #     imag_loss_factor = 1
                 #     imag_loss = torch.abs(outputs.imag).mean()
                 #     loss = self.criterion(outputs.real, batch_labels) + imag_loss_factor * imag_loss
                 # else:
                 #     loss = self.criterion(outputs, batch_labels)
+                predict_infos.append(predict_info)
+                
                 if self.target_normalization_inverse_fn:
                     outputs = self.target_normalization_inverse_fn(outputs)
 
