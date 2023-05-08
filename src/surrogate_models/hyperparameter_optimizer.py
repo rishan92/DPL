@@ -1,3 +1,4 @@
+import sys
 from copy import deepcopy
 import os
 import time
@@ -787,3 +788,5 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
         if return_state is not None and return_state < 0:
             print("Training failed. Restarting.")
             self.logger.warning("Training failed. Restarting.")
+
+        sys.exit(0)
