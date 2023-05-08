@@ -25,6 +25,7 @@ class ConditionedPowerLawModel(PowerLawModel):
             'use_learning_curve': False,
             'use_learning_curve_mask': False,
             'use_suggested_learning_rate': False,
+            'weight_regularization_factor': 0,
             'learning_rate': 1e-3,
             'refine_learning_rate': 1e-3,
             'act_func': 'LeakyReLU',

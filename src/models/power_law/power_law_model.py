@@ -117,6 +117,8 @@ class PowerLawModel(BasePytorchModule, ABC):
         self.lr_scheduler = None
         self.target_normalization_inverse_fn = None
 
+        self.regularization_factor = self.meta.weight_regularization_factor
+
         self.hook_handle = None
 
         self.clip_gradients_value = None
@@ -215,7 +217,15 @@ class PowerLawModel(BasePytorchModule, ABC):
                 #     loss = self.criterion(outputs.real, batch_labels) + imag_loss_factor * imag_loss
                 # else:
                 #     loss = self.criterion(outputs, batch_labels)
-                loss = self.criterion(outputs, batch_labels)
+                l1_norm = torch.tensor(0.0, requires_grad=True)
+                if self.regularization_factor != 0:
+                    num_params = 0
+                    for param in self.parameters():
+                        l1_norm = l1_norm + torch.norm(param, 1)
+                        num_params += param.numel()
+                    l1_norm = l1_norm / num_params
+                    l1_norm = torch.max(torch.tensor(1), l1_norm) - 1
+                loss = self.criterion(outputs, batch_labels) + self.regularization_factor * l1_norm
                 loss.backward()
 
                 if self.clip_gradients_value:
