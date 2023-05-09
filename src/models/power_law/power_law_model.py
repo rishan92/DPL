@@ -201,9 +201,10 @@ class PowerLawModel(BasePytorchModule, ABC):
             relevant_args = {k: v for k, v in args.items() if k in arg_names}
             self.lr_scheduler = lr_scheduler_class(self.optimizer, **relevant_args)
 
-    def train_epoch(self):
+    def train_epoch(self, max_batches=None):
         running_loss = 0
         is_nan_gradient = False
+        batch_count = 0
         while True:
             try:
                 batch = next(self.train_dataloader_it)
@@ -260,10 +261,17 @@ class PowerLawModel(BasePytorchModule, ABC):
                 self.optimizer.step()
 
                 running_loss += loss.item()
+                batch_count += 1
+
+                if max_batches is not None and batch_count >= max_batches:
+                    break
             except StopIteration:
                 self.train_dataloader_it = iter(self.train_dataloader)
                 break
-        normalized_loss = running_loss / len(self.train_dataloader)
+        if max_batches is None:
+            normalized_loss = running_loss / len(self.train_dataloader)
+        else:
+            normalized_loss = running_loss
         return normalized_loss, is_nan_gradient
 
     def validation_epoch(self):
@@ -300,8 +308,9 @@ class PowerLawModel(BasePytorchModule, ABC):
         normalized_loss = running_loss / len(self.val_dataloader)
         return normalized_loss
 
-    def train_loop(self, nr_epochs, train_dataloader=None, reset_optimizer=False, val_dataloader=None):
-        if (gv.PLOT_SUGGEST_LR or self.meta.use_suggested_learning_rate) and self.instance_id == 0:
+    def train_loop(self, nr_epochs, train_dataloader=None, reset_optimizer=False, val_dataloader=None,
+                   is_lr_finder=False):
+        if (gv.PLOT_SUGGEST_LR or self.meta.use_suggested_learning_rate) and self.instance_id == 0 and not is_lr_finder:
             PowerLawModel._suggested_lr = self.suggest_learning_rate(train_dataloader=train_dataloader)
             # if PowerLawModel._suggested_lr is not None:
             #     print(f"Suggested LR: {PowerLawModel._suggested_lr:.2E}")
@@ -311,7 +320,7 @@ class PowerLawModel(BasePytorchModule, ABC):
         if reset_optimizer or self.optimizer is None:
             self.set_optimizer(epochs=nr_epochs, use_scheduler=True)
 
-        if self.meta.use_suggested_learning_rate and PowerLawModel._suggested_lr is not None:
+        if self.meta.use_suggested_learning_rate and PowerLawModel._suggested_lr is not None and not is_lr_finder:
             for param_group in self.optimizer.param_groups:
                 param_group["lr"] = PowerLawModel._suggested_lr
 
@@ -322,11 +331,15 @@ class PowerLawModel(BasePytorchModule, ABC):
         best_loss = np.PINF
         best_state = deepcopy(self.state_dict())
         normalized_val_loss = None
+        is_nan_gradient = False
+        normalized_loss = 0
+        max_batches = 1 if is_lr_finder else None
 
         for epoch in range(0, nr_epochs):
-            normalized_loss, is_nan_gradient = self.train_epoch()
+            normalized_loss, is_nan_gradient = self.train_epoch(max_batches=max_batches)
             self.logger.debug(f'Epoch {epoch + 1}, Loss:{normalized_loss}')
-            PowerLawModel._global_epoch[self.instance_id] += 1
+            if not is_lr_finder:
+                PowerLawModel._global_epoch[self.instance_id] += 1
 
             if self.lr_scheduler and self.optimizer._step_count > 0:
                 self.lr_scheduler.step()
@@ -336,9 +349,13 @@ class PowerLawModel(BasePytorchModule, ABC):
                     normalized_val_loss = self.validation_epoch()
                     self.train()
 
-                current_lr = self.optimizer.param_groups[0]['lr']
-                if is_nan_gradient:
+                if is_nan_gradient and not is_lr_finder:
                     PowerLawModel._nan_gradients += 1
+
+                if is_lr_finder:
+                    continue
+
+                current_lr = self.optimizer.param_groups[0]['lr']
                 wandb_data = {
                     f"surrogate/model_{self.instance_id}/training_loss": normalized_loss,
                     f"surrogate/model_{self.instance_id}/epoch": PowerLawModel._global_epoch[self.instance_id],
@@ -369,7 +386,11 @@ class PowerLawModel(BasePytorchModule, ABC):
         if self.meta.activate_early_stopping:
             self.load_state_dict(best_state)
 
-        return 0
+        return_state = 0
+        if is_nan_gradient:
+            return_state = 2
+
+        return return_state, normalized_loss
 
     def predict(self, test_data):
         self.eval()
@@ -394,7 +415,7 @@ class PowerLawModel(BasePytorchModule, ABC):
         model.hook_remove()
         model.set_optimizer(use_scheduler=False)
         lr_finder = LRFinder(model=model, optimizer=model.optimizer, criterion=model.criterion, device=model_device,
-                             is_used=self.meta.use_suggested_learning_rate)
+                             is_used=self.meta.use_suggested_learning_rate, is_dyhpo=False)
         lr_finder.range_test(train_dataloader, start_lr=1e-8, end_lr=1, num_iter=100, diverge_th=1.1)
         # lr_finder.plot()
         suggested_lr = lr_finder.get_suggested_lr()

@@ -309,7 +309,7 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
         last_sample = self.history_manager.get_last_sample(curve_size_mode=self.meta.curve_size_mode)
 
         if should_refine:
-            return_state = self.model.train_loop(
+            return_state, _ = self.model.train_loop(
                 train_dataset=train_dataset,
                 should_refine=should_refine,
                 reset_optimizer=True,
@@ -326,7 +326,7 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
                 surrogate_budget=self.surrogate_budget
             )
             self.model.to(self.dev)
-            return_state = self.model.train_loop(train_dataset=train_dataset)
+            return_state, _ = self.model.train_loop(train_dataset=train_dataset)
 
         return return_state
 

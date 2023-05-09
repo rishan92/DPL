@@ -8,7 +8,6 @@ import numpy as np
 import torch
 import torch.nn as nn
 from torch import cat
-from loguru import logger
 
 import gpytorch
 from src.models.base.base_pytorch_module import BasePytorchModule

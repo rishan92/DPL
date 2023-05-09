@@ -28,6 +28,8 @@ import src.models.deep_kernel_learning
 from src.models.base.meta import Meta
 from src.utils.utils import get_class, classproperty
 import global_variables as gv
+from src.utils.torch_lr_finder import LRFinder
+from src.data_loader.surrogate_data_loader import SurrogateDataLoader
 
 
 class DyHPOModel(BasePytorchModule):
@@ -223,8 +225,27 @@ class DyHPOModel(BasePytorchModule):
             relevant_args = {k: v for k, v in args.items() if k in arg_names}
             self.lr_scheduler = lr_scheduler_class(self.optimizer, **relevant_args)
 
+    def lr_finder_train(self, nr_epochs, train_dataloader=None, **kwargs):
+        prev_epochs = self.meta.nr_epochs
+        self.meta.nr_epochs = nr_epochs
+
+        batch = next(train_dataloader)
+        batch_examples, batch_labels, batch_budgets, batch_curves = batch
+
+        train_dataset = TabularDataset(
+            X=batch_examples,
+            Y=batch_labels,
+            budgets=batch_budgets,
+            curves=batch_curves
+        )
+        return_state, loss = self.train_loop(train_dataset=train_dataset, **kwargs)
+
+        self.meta.nr_epochs = prev_epochs
+
+        return return_state, loss
+
     def train_loop(self, train_dataset: TabularDataset, should_refine: bool = False, load_checkpoint: bool = False,
-                   reset_optimizer=False, val_dataset: TabularDataset = None, **kwargs):
+                   reset_optimizer=False, val_dataset: TabularDataset = None, is_lr_finder=False, **kwargs):
         """
         Train the surrogate model.
 
@@ -238,6 +259,12 @@ class DyHPOModel(BasePytorchModule):
         train_dataset.to(model_device)
         if val_dataset:
             val_dataset.to(model_device)
+
+        if (gv.PLOT_SUGGEST_LR or self.meta.use_suggested_learning_rate) and not is_lr_finder:
+            train_dataloader = SurrogateDataLoader(
+                dataset=train_dataset, batch_size=64, shuffle=True, seed=self.seed, dev=model_device
+            )
+            DyHPOModel._suggested_lr = self.suggest_learning_rate(train_dataloader=train_dataloader)
 
         self.set_seed(self.seed)
         self.train()
@@ -259,6 +286,10 @@ class DyHPOModel(BasePytorchModule):
         if reset_optimizer or self.optimizer is None:
             self.set_optimizer(epochs=nr_epochs)
 
+        if self.meta.use_suggested_learning_rate and DyHPOModel._suggested_lr is not None and not is_lr_finder:
+            for param_group in self.optimizer.param_groups:
+                param_group["lr"] = DyHPOModel._suggested_lr
+
         x_train = train_dataset.X
         train_budgets = train_dataset.budgets
         train_curves = train_dataset.curves
@@ -270,15 +301,19 @@ class DyHPOModel(BasePytorchModule):
         # where the mean squared error will be stored
         # when predicting on the train set
         mae_value = 0.0
+        val_mae_value = 0.0
+        is_nan_gradient = False
+        loss_value = 0.0
 
         nr_examples_batch = x_train.size(dim=0)
         # if only one example in the batch, skip the batch.
         # Otherwise, the code will fail because of batchnorm
         if nr_examples_batch == 1:
-            return
+            return None, None
 
         for epoch_nr in range(0, nr_epochs):
-            DyHPOModel._global_epoch += 1
+            if not is_lr_finder:
+                DyHPOModel._global_epoch += 1
             is_nan_gradient = False
 
             # Zero backprop gradients
@@ -363,6 +398,12 @@ class DyHPOModel(BasePytorchModule):
                     val_mae_value = val_mae.detach().to('cpu').item()
                     self.train()
 
+                if is_nan_gradient and not is_lr_finder:
+                    DyHPOModel._nan_gradients += 1
+
+                if is_lr_finder:
+                    continue
+
                 self.logger.debug(
                     f'Epoch {epoch_nr} - MAE {mae_value}, '
                     f'Loss: {loss_value}, '
@@ -371,8 +412,6 @@ class DyHPOModel(BasePytorchModule):
                 )
 
                 current_lr = self.optimizer.param_groups[0]['lr']
-                if is_nan_gradient:
-                    DyHPOModel._nan_gradients += 1
 
                 wandb_data = {
                     "surrogate/dyhpo/training_loss": loss_value,
@@ -423,8 +462,13 @@ class DyHPOModel(BasePytorchModule):
 
         # return state -1 signals that training has failed. Hyperparameter optimizer decides what to do when training
         # fails. Currently, hyperparameter optimizer stop refining and start training from scratch.
-        return_state = -1 if (training_errored or is_diverging) else 0
-        return return_state
+        if training_errored or is_diverging:
+            return_state = -1
+        elif is_nan_gradient:
+            return_state = 2
+        else:
+            return_state = 0
+        return return_state, loss_value
 
     def predict(
         self,
@@ -662,8 +706,38 @@ class DyHPOModel(BasePytorchModule):
         self.target_normalization_inverse_fn = fn
         self.target_normalization_std_inverse_fn = std_fn
 
+    def suggest_learning_rate(self, train_dataloader=None):
+        model_device = next(self.parameters()).device
+        model = deepcopy(self)
+        model.hook_remove()
+        model.set_optimizer(use_scheduler=False)
+        lr_finder = LRFinder(model=model, optimizer=model.optimizer, criterion=None, device=model_device,
+                             is_used=self.meta.use_suggested_learning_rate, is_dyhpo=True)
+        lr_finder.range_test(train_dataloader, start_lr=1e-8, end_lr=1, num_iter=100, diverge_th=1.1)
+        # lr_finder.plot()
+        suggested_lr = lr_finder.get_suggested_lr()
+        # print(f"suggested_lr {suggested_lr}")
+        return suggested_lr
+
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        # Remove unpickable objects from the state dictionary
+        state['logger'] = None
+        state['_modules']['feature_extractor'].logger = None
+        return state
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        # Restore unpickable objects from the state dictionary
+        self.logger = logger
+        self.feature_extractor.logger = logger
+
     def hook_remove(self):
         self.feature_extractor.hook_remove()
+
+    @property
+    def has_batchnorm_layers(self):
+        return self.feature_extractor.has_batchnorm_layers
 
     def reset(self):
         if gv.IS_WANDB and gv.PLOT_GRADIENTS:

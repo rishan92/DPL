@@ -69,7 +69,9 @@ class TrainDataLoaderIter(DataLoaderIter):
                 inputs_data.append(torch.concat([inputs[i], data], dim=0))
             inputs = tuple(inputs_data)
 
-        return inputs, labels
+        # return inputs, labels
+
+        return inputs[0], labels, inputs[1], inputs[2]
 
     def get_next(self):
         try:
@@ -163,11 +165,12 @@ class LRFinder(object):
         self,
         model,
         optimizer,
-        criterion,
+        criterion=None,
         device=None,
         memory_cache=True,
         cache_dir=None,
-        is_used=False
+        is_used=False,
+        is_dyhpo=False
     ):
         # Check if the optimizer is already attached to a scheduler
         self.optimizer = optimizer
@@ -180,6 +183,7 @@ class LRFinder(object):
         self.memory_cache = memory_cache
         self.cache_dir = cache_dir
         self.is_used = is_used
+        self.is_dyhpo = is_dyhpo
 
         # Save the original state of the model and optimizer so they can be restored if
         # needed
@@ -344,16 +348,20 @@ class LRFinder(object):
 
         for iteration in range(num_iter):
             # Train on batch and retrieve loss
-            loss = self._train_batch(
-                train_iter,
-                accumulation_steps,
-                non_blocking_transfer=non_blocking_transfer,
-            )
-
-            if val_loader:
-                loss = self._validate(
-                    val_iter, non_blocking_transfer=non_blocking_transfer
+            if self.is_dyhpo:
+                return_state, loss = self.model.lr_finder_train(
+                    nr_epochs=accumulation_steps,
+                    train_dataloader=train_iter,
+                    is_lr_finder=True
                 )
+            else:
+                return_state, loss = self.model.train_loop(
+                    nr_epochs=accumulation_steps,
+                    train_dataloader=train_iter,
+                    is_lr_finder=True
+                )
+            if return_state is not None and (return_state < 0 or return_state == 2):
+                loss = 1000
 
             # Update the learning rate
             self.history["lr"].append(lr_schedule.get_lr()[0])
@@ -370,9 +378,44 @@ class LRFinder(object):
 
             # Check if the loss has diverged; if it has, stop the test
             self.history["loss"].append(loss)
-            if loss > diverge_th * self.best_loss:
+
+            diverge_value = self.best_loss + (diverge_th - 1) * abs(self.best_loss)
+            if loss > diverge_value:
                 # print("Stopping early, the loss has diverged")
                 break
+
+        # else:
+        #     for iteration in range(num_iter):
+        #         # Train on batch and retrieve loss
+        #         loss = self._train_batch(
+        #             train_iter,
+        #             accumulation_steps,
+        #             non_blocking_transfer=non_blocking_transfer,
+        #         )
+        #
+        #         if val_loader:
+        #             loss = self._validate(
+        #                 val_iter, non_blocking_transfer=non_blocking_transfer
+        #             )
+        #
+        #         # Update the learning rate
+        #         self.history["lr"].append(lr_schedule.get_lr()[0])
+        #         lr_schedule.step()
+        #
+        #         # Track the best loss and smooth it if smooth_f is specified
+        #         if iteration == 0:
+        #             self.best_loss = loss
+        #         else:
+        #             if smooth_f > 0:
+        #                 loss = smooth_f * loss + (1 - smooth_f) * self.history["loss"][-1]
+        #             if loss < self.best_loss:
+        #                 self.best_loss = loss
+        #
+        #         # Check if the loss has diverged; if it has, stop the test
+        #         self.history["loss"].append(loss)
+        #         if loss > diverge_th * self.best_loss:
+        #             # print("Stopping early, the loss has diverged")
+        #             break
 
         # print("Learning rate search finished. See the graph with {finder_name}.plot()")
 

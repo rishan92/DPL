@@ -164,6 +164,8 @@ class EnsembleModel(BasePytorchModule):
                 **kwargs
             )
 
+        return None, None
+
     def training_step(self):
         model_loss = []
         for model in self.models:
