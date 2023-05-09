@@ -255,10 +255,10 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
             hp = {
                 'fraction_random_configs': 0.1,
                 'initial_full_training_trials': 10,
-                'predict_mode': 'next_budget',  # 'end_budget',  #
+                'predict_mode': 'end_budget',  # 'end_budget',  #
                 'curve_size_mode': 'variable',  # 'fixed',
                 'acq_mode': 'ei',
-                'acq_best_value_mode': 'mf',  # 'normal',  #    mf - multi-fidelity, normal, None
+                'acq_best_value_mode': 'normal',  # 'normal',  #    mf - multi-fidelity, normal, None
                 'use_target_normalization': False,
                 'target_normalization_range': [0.2, 0.8],
                 'use_scaled_budgets': True,
@@ -267,8 +267,8 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
             raise NotImplementedError(f"{model_class=}")
 
         hp["check_model"] = False
-        hp["validation_configuration_ratio"] = 0.5
-        hp['validation_curve_ratio'] = 0.75
+        hp["validation_configuration_ratio"] = 0.9
+        hp['validation_curve_ratio'] = 0.9
 
         return hp
 
@@ -789,14 +789,20 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
         self.model = self.model_class(
             nr_features=train_dataset.X.shape[1],
             checkpoint_path=self.checkpoint_path,
-            seed=self.seed
+            seed=self.seed,
+            total_budget=self.total_budget,
+            surrogate_budget=1
         )
         if self.meta.use_target_normalization:
             gap = self.target_normalization_range[1] - self.target_normalization_range[0]
             self.target_normalization_inverse_fn = \
                 lambda x: (x - self.target_normalization_range[0]) * self.target_normalization_value / gap
             self.target_normalization_std_inverse_fn = lambda x: x * self.target_normalization_value / gap
-            self.model.set_target_normalization_inverse_function(self.target_normalization_inverse_fn)
+
+            self.model.set_target_normalization_inverse_function(
+                fn=self.target_normalization_inverse_fn,
+                std_fn=self.target_normalization_std_inverse_fn
+            )
         self.model.to(self.dev)
         return_state = self.model.train_loop(train_dataset=train_dataset, val_dataset=val_dataset)
         if return_state is not None and return_state < 0:

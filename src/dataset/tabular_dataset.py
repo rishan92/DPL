@@ -20,6 +20,16 @@ class TabularDataset(Dataset):
     def __getitem__(self, idx):
         return self.X[idx], self.Y[idx], self.budgets[idx], self.curves[idx]
 
+    def get_subset(self, idx) -> "TabularDataset":
+        subset = self[idx]
+        subset_dataset = TabularDataset(
+            X=subset[0],
+            Y=subset[1],
+            budgets=subset[2],
+            curves=subset[3]
+        )
+        return subset_dataset
+
     def to(self, device):
         self.X.to(device)
         self.budgets.to(device)

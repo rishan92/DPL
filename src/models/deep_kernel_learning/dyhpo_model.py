@@ -1,12 +1,11 @@
+import time
 from copy import deepcopy
 import os
 from typing import Dict, Tuple, Any, Optional
 from numpy.typing import NDArray
-
 import numpy as np
 import torch
 from loguru import logger
-
 import gpytorch
 import wandb
 from gpytorch.constraints import Interval, GreaterThan, LessThan
@@ -16,8 +15,11 @@ import inspect
 from torch.nn.utils import clip_grad_norm_
 import itertools
 from functools import partial
+import torch.nn.functional as F
+from torch.utils.data import Subset
+import traceback
 
-from src.models.deep_kernel_learning.feature_extractor import FeatureExtractor
+from src.models.deep_kernel_learning.base_feature_extractor import BaseFeatureExtractor
 from src.models.deep_kernel_learning.gp_regression_model import GPRegressionModel
 from src.models.base.base_pytorch_module import BasePytorchModule
 from src.dataset.tabular_dataset import TabularDataset
@@ -34,10 +36,14 @@ class DyHPOModel(BasePytorchModule):
     """
     _global_epoch = 0
     _training_errors = 0
+    _suggested_lr = None
+    _nan_gradients = 0
 
     def __init__(
         self,
         nr_features,
+        total_budget,
+        surrogate_budget,
         checkpoint_path: Path = '.',
         seed=None
     ):
@@ -65,11 +71,13 @@ class DyHPOModel(BasePytorchModule):
         self.power_law_criterion_class = get_class_from_packages([torch.nn, src.models.deep_kernel_learning],
                                                                  self.meta.power_law_loss_function)
 
-        self.feature_extractor: FeatureExtractor = self.feature_extractor_class(nr_features=nr_features)
+        self.feature_extractor: BaseFeatureExtractor = self.feature_extractor_class(nr_features=nr_features)
         self.feature_output_size = self.get_feature_extractor_output_size(nr_features=nr_features)
 
         self.early_stopping_patience = self.meta.nr_patience_epochs
         self.seed = seed
+        self.total_budget = total_budget
+        self.surrogate_budget = surrogate_budget
 
         if self.meta.noise_lower_bound is not None and self.meta.noise_upper_bound is not None:
             self.noise_constraint = Interval(lower_bound=self.meta.noise_lower_bound,
@@ -107,8 +115,16 @@ class DyHPOModel(BasePytorchModule):
         if hasattr(self.meta, 'clip_gradients') and self.meta.clip_gradients != 0:
             self.clip_gradients_value = self.meta.clip_gradients
 
-        if gv.PLOT_GRADIENTS:
-            self.feature_extractor.set_register_full_backward_hook()
+        self.target_normalization_inverse_fn = None
+        self.target_normalization_std_inverse_fn = None
+
+        self.regularization_factor = 0
+        if hasattr(self.meta, 'weight_regularization_factor') and self.meta.weight_regularization_factor != 0:
+            self.regularization_factor = self.meta.weight_regularization_factor
+
+        self.alpha_beta_constraint_factor = 0
+        if hasattr(self.meta, 'alpha_beta_constraint_factor') and self.meta.alpha_beta_constraint_factor != 0:
+            self.alpha_beta_constraint_factor = self.meta.alpha_beta_constraint_factor
 
         if gv.IS_WANDB and gv.PLOT_GRADIENTS:
             wandb.watch([self.feature_extractor, self.model, self.likelihood], log='all', idx=0, log_freq=10)
@@ -130,11 +146,14 @@ class DyHPOModel(BasePytorchModule):
             'refine_learning_rate': 1e-3,
             'power_law_loss_function': 'MSELoss',
             'power_law_loss_factor': 0.1,
+            'weight_regularization_factor': 0,
+            'alpha_beta_constraint_factor': 0,
             'noise_lower_bound': 1e-4,  # None,  #
             'noise_upper_bound': 1e-3,  # None,  #
             'use_seperate_lengthscales': False,
             'optimize_likelihood': False,
             'use_scale_to_bounds': False,
+            'use_suggested_learning_rate': False,
             'optimizer': 'Adam',
             'reset_on_divergence': False,
             'learning_rate_scheduler': None,
@@ -205,7 +224,7 @@ class DyHPOModel(BasePytorchModule):
             self.lr_scheduler = lr_scheduler_class(self.optimizer, **relevant_args)
 
     def train_loop(self, train_dataset: TabularDataset, should_refine: bool = False, load_checkpoint: bool = False,
-                   reset_optimizer=False, **kwargs):
+                   reset_optimizer=False, val_dataset: TabularDataset = None, **kwargs):
         """
         Train the surrogate model.
 
@@ -217,6 +236,8 @@ class DyHPOModel(BasePytorchModule):
         """
         model_device = next(self.parameters()).device
         train_dataset.to(model_device)
+        if val_dataset:
+            val_dataset.to(model_device)
 
         self.set_seed(self.seed)
         self.train()
@@ -230,8 +251,10 @@ class DyHPOModel(BasePytorchModule):
 
         if should_refine:
             nr_epochs = self.meta.refine_nr_epochs
+            batch_size = 64
         else:
             nr_epochs = self.meta.nr_epochs
+            batch_size = 64
 
         if reset_optimizer or self.optimizer is None:
             self.set_optimizer(epochs=nr_epochs)
@@ -256,13 +279,31 @@ class DyHPOModel(BasePytorchModule):
 
         for epoch_nr in range(0, nr_epochs):
             DyHPOModel._global_epoch += 1
+            is_nan_gradient = False
 
             # Zero backprop gradients
             self.optimizer.zero_grad()
 
-            projected_x, _ = self.feature_extractor(x_train, train_budgets, train_curves)
+            projected_x, predict_info = self.feature_extractor(x_train, train_budgets, train_curves)
             self.model.set_train_data(projected_x, y_train, strict=False)
             output: gpytorch.ExactMarginalLogLikelihood = self.model(projected_x)
+
+            l1_norm = torch.tensor(0.0, requires_grad=True)
+            if self.regularization_factor != 0:
+                num_params = 0
+                for param in self.parameters():
+                    l1_norm = l1_norm + torch.norm(param, 1)
+                    num_params += param.numel()
+                l1_norm = l1_norm / num_params
+                l1_norm = torch.max(torch.tensor(1), l1_norm) - 1
+
+            if self.alpha_beta_constraint_factor != 0:
+                alpha_plus_beta = predict_info['alpha'] + predict_info['beta']
+                lower_loss = torch.clamp(-1 * alpha_plus_beta, min=0)
+                upper_loss = torch.clamp(alpha_plus_beta - 1, min=0)
+                alpha_beta_constraint_loss = torch.mean(lower_loss + upper_loss)
+            else:
+                alpha_beta_constraint_loss = torch.tensor(0.0, requires_grad=True)
 
             try:
                 # Calc loss and backprop derivatives
@@ -273,7 +314,9 @@ class DyHPOModel(BasePytorchModule):
                 mean_prediction = prediction.mean
                 power_law_loss = self.power_law_criterion(mean_prediction, power_law_output)
 
-                loss = mll_loss + self.meta.power_law_loss_factor * power_law_loss
+                loss = mll_loss + self.meta.power_law_loss_factor * power_law_loss + \
+                       self.regularization_factor * l1_norm + \
+                       self.alpha_beta_constraint_factor * alpha_beta_constraint_loss
 
                 mae = gpytorch.metrics.mean_absolute_error(prediction, self.model.train_targets)
                 power_law_mae = gpytorch.metrics.mean_absolute_error(prediction, power_law_output.detach())
@@ -288,6 +331,13 @@ class DyHPOModel(BasePytorchModule):
 
                 loss.backward()
 
+                if not is_nan_gradient:
+                    for name, param in self.named_parameters():
+                        if param.grad is not None:
+                            if torch.isnan(param.grad).any():
+                                is_nan_gradient = True
+                                break
+
                 if self.clip_gradients_value:
                     if not self.meta.optimize_likelihood:
                         parameters = itertools.chain(self.model.parameters(), self.feature_extractor.parameters())
@@ -300,6 +350,19 @@ class DyHPOModel(BasePytorchModule):
                 if self.lr_scheduler and self.optimizer._step_count > 0:
                     self.lr_scheduler.step()
 
+                if val_dataset:
+                    stime = time.perf_counter()
+                    means, stds, predict_infos, val_power_law_loss = self._batch_predict(
+                        test_data=val_dataset,
+                        train_data=train_dataset,
+                        target_normalization_inverse_fn=self.target_normalization_inverse_fn,
+                        target_normalization_std_inverse_fn=self.target_normalization_std_inverse_fn
+                    )
+                    means_tensor = torch.from_numpy(means).to(model_device)
+                    val_mae = F.l1_loss(means_tensor, val_dataset.Y, reduction='mean')
+                    val_mae_value = val_mae.detach().to('cpu').item()
+                    self.train()
+
                 self.logger.debug(
                     f'Epoch {epoch_nr} - MAE {mae_value}, '
                     f'Loss: {loss_value}, '
@@ -308,6 +371,9 @@ class DyHPOModel(BasePytorchModule):
                 )
 
                 current_lr = self.optimizer.param_groups[0]['lr']
+                if is_nan_gradient:
+                    DyHPOModel._nan_gradients += 1
+
                 wandb_data = {
                     "surrogate/dyhpo/training_loss": loss_value,
                     "surrogate/dyhpo/training_mll_loss": mll_loss_value,
@@ -319,11 +385,19 @@ class DyHPOModel(BasePytorchModule):
                     "surrogate/dyhpo/epoch": DyHPOModel._global_epoch,
                     "surrogate/dyhpo/training_errors": DyHPOModel._training_errors,
                     "surrogate/dyhpo/learning_rate": current_lr,
+                    "surrogate/dyhpo/nan_gradients": DyHPOModel._nan_gradients,
                 }
+                if val_dataset:
+                    wandb_data["surrogate/dyhpo/validation_loss"] = val_mae_value
+                if gv.PLOT_SUGGEST_LR or self.meta.use_suggested_learning_rate:
+                    wandb_data["surrogate/dyhpo/suggested_lr"] = DyHPOModel._suggested_lr
+
                 wandb.log(wandb_data)
 
             except Exception as training_error:
-                self.logger.error(f'The following error happened at epoch {nr_epochs} while training: {training_error}')
+                self.logger.error(f'The following error happened at epoch {epoch_nr} while training: {training_error}')
+                self.logger.exception(training_error)
+                traceback.print_exc()
                 # raise training_error
                 # An error has happened, trigger the restart of the optimization and restart
                 # the model with default hyperparameters.
@@ -355,8 +429,32 @@ class DyHPOModel(BasePytorchModule):
     def predict(
         self,
         test_data: TabularDataset,
-        train_data: TabularDataset
+        train_data: TabularDataset,
+        target_normalization_inverse_fn=None,
+        target_normalization_std_inverse_fn=None
     ) -> Tuple[NDArray[np.float32], NDArray[np.float32], Optional[Dict[str, Any]]]:
+        means, stds, predict_info, power_law_loss = self._predict(
+            test_data=test_data,
+            train_data=train_data,
+            target_normalization_inverse_fn=target_normalization_inverse_fn,
+            target_normalization_std_inverse_fn=target_normalization_std_inverse_fn
+        )
+
+        power_law_loss = power_law_loss / len(test_data)
+
+        wandb.log({
+            "surrogate/dyhpo/testing_power_law_MAE": power_law_loss
+        })
+
+        return means, stds, predict_info
+
+    def _predict(
+        self,
+        test_data: TabularDataset,
+        train_data: TabularDataset,
+        target_normalization_inverse_fn=None,
+        target_normalization_std_inverse_fn=None
+    ) -> Tuple[NDArray[np.float32], NDArray[np.float32], Optional[Dict[str, Any]], float]:
         """
 
         Args:
@@ -389,21 +487,84 @@ class DyHPOModel(BasePytorchModule):
             )
             preds: gpytorch.distributions.Distribution = self.likelihood(self.model(projected_test_x))
 
-            power_law_output = projected_test_x[:, -1]
-            power_law_loss = gpytorch.metrics.mean_absolute_error(preds, power_law_output)
-            power_law_loss_value = power_law_loss.detach().to('cpu').item()
-            wandb.log({
-                "surrogate/dyhpo/testing_power_law_MAE": power_law_loss_value
-            })
+            means = preds.mean
+            stds = preds.stddev
 
-        means = preds.mean.detach().to('cpu').numpy().reshape(-1, )
-        stds = preds.stddev.detach().to('cpu').numpy().reshape(-1, )
+            power_law_output = projected_test_x[:, -1]
+
+            if target_normalization_inverse_fn:
+                means = target_normalization_inverse_fn(means)
+                stds = target_normalization_std_inverse_fn(stds)
+                power_law_output = target_normalization_inverse_fn(power_law_output)
+
+            power_law_loss = F.l1_loss(means, power_law_output, reduction='sum')
+            power_law_loss_value = power_law_loss.detach().to('cpu').item()
+
+        means = means.detach().to('cpu').numpy().reshape(-1, )
+        stds = stds.detach().to('cpu').numpy().reshape(-1, )
 
         predict_infos = test_predict_infos
         if predict_infos is not None:
             predict_infos = {key: value.detach().to('cpu').numpy() for key, value in predict_infos.items()}
 
-        return means, stds, predict_infos
+        return means, stds, predict_infos, power_law_loss_value
+
+    def _batch_predict(
+        self,
+        test_data: TabularDataset,
+        train_data: TabularDataset,
+        **kwargs
+    ) -> Tuple[NDArray[np.float32], NDArray[np.float32], Optional[Dict[str, Any]], float]:
+        """
+
+        Args:
+            train_data: A dictionary that has the training
+                examples, features, budgets and learning curves.
+            test_data: Same as for the training data, but it is
+                for the testing part and it does not feature labels.
+
+        Returns:
+            means, stds: The means of the predictions for the
+                testing points and the standard deviations.
+        """
+        model_device = next(self.parameters()).device
+        train_data.to(model_device)
+        test_data.to(model_device)
+
+        self.eval()
+
+        batch_size = 512
+        last_batch_index = int(len(test_data) / batch_size) - 1 if len(test_data) >= batch_size else 0
+
+        mean_data = []
+        std_data = []
+        predict_info_data = []
+        power_law_loss_data = []
+
+        for i in range(0, last_batch_index + 1):
+            if i == last_batch_index:
+                batch_indices = range(i * batch_size, len(test_data))
+            else:
+                batch_indices = range(i * batch_size, ((i + 1) * batch_size))
+            batch_data = test_data.get_subset(batch_indices)
+            means, stds, predict_info, power_law_loss = \
+                self._predict(test_data=batch_data, train_data=train_data, **kwargs)
+
+            mean_data.append(means)
+            std_data.append(stds)
+            predict_info_data.append(predict_info)
+            power_law_loss_data.append(power_law_loss)
+
+        power_law_loss = np.sum(power_law_loss_data).item() / len(test_data)
+        means = np.concatenate(mean_data, axis=0)
+        stds = np.concatenate(std_data, axis=0)
+
+        predict_infos = None
+        if predict_info_data[0] is not None:
+            predict_infos = \
+                {key: np.concatenate([d[key] for d in predict_info_data]) for key in predict_info_data[0].keys()}
+
+        return means, stds, predict_infos, power_law_loss
 
     def load_checkpoint(self):
         """
@@ -467,14 +628,24 @@ class DyHPOModel(BasePytorchModule):
         self.likelihood.eval()
 
     @classproperty
-    def use_learning_curve(cls):
+    def meta_use_learning_curve(cls):
         model_class = get_class("src/models/deep_kernel_learning", cls.meta.feature_class_name)
-        return model_class.use_learning_curve
+        return model_class.meta_use_learning_curve
 
     @classproperty
-    def use_learning_curve_mask(cls):
+    def meta_use_learning_curve_mask(cls):
         model_class = get_class("src/models/deep_kernel_learning", cls.meta.feature_class_name)
-        return model_class.use_learning_curve_mask
+        return model_class.meta_use_learning_curve_mask
+
+    @classproperty
+    def meta_output_act_func(cls):
+        model_class = get_class("src/models/deep_kernel_learning", cls.meta.feature_class_name)
+        return model_class.meta_output_act_func
+
+    @classproperty
+    def meta_cnn_kernel_size(cls):
+        model_class = get_class("src/models/deep_kernel_learning", cls.meta.feature_class_name)
+        return model_class.meta_cnn_kernel_size
 
     def get_feature_extractor_output_size(self, nr_features):
         valid_budget_size = 50
@@ -487,7 +658,13 @@ class DyHPOModel(BasePytorchModule):
         output_size = output.shape[-1]
         return output_size
 
+    def set_target_normalization_inverse_function(self, fn, std_fn=None):
+        self.target_normalization_inverse_fn = fn
+        self.target_normalization_std_inverse_fn = std_fn
+
+    def hook_remove(self):
+        self.feature_extractor.hook_remove()
+
     def reset(self):
         if gv.IS_WANDB and gv.PLOT_GRADIENTS:
             wandb.unwatch()
-

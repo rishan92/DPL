@@ -11,12 +11,14 @@ from torch import cat
 from loguru import logger
 import warnings
 from functools import partial
-
+from abc import ABC, abstractmethod
 import gpytorch
+
 from src.models.base.base_pytorch_module import BasePytorchModule
 import src.models.activation_functions
-from src.utils.utils import get_class_from_package, get_class_from_packages
-from abc import ABC, abstractmethod
+from src.utils.utils import get_class_from_package, get_class_from_packages, get_inverse_function_class
+import global_variables as gv
+from src.utils.torch_lr_finder import LRFinder
 
 
 class BaseFeatureExtractor(BasePytorchModule, ABC):
@@ -35,6 +37,8 @@ class BaseFeatureExtractor(BasePytorchModule, ABC):
         self.linear_net = None
         self.after_cnn_linear_net = None
         self.cnn_net = None
+        self.output_act_func = None
+        self.output_act_inverse_func = None
 
         if hasattr(self.meta, "act_func"):
             self.act_func = get_class_from_packages([torch.nn, src.models.activation_functions], self.meta.act_func)()
@@ -51,10 +55,51 @@ class BaseFeatureExtractor(BasePytorchModule, ABC):
             self.gamma_act_func = get_class_from_packages([torch.nn, src.models.activation_functions],
                                                           self.meta.gamma_act_func)()
 
+        if hasattr(self.meta, "output_act_func") and self.meta.output_act_func:
+            self.output_act_func = get_class_from_packages([torch.nn, src.models.activation_functions],
+                                                           self.meta.output_act_func)()
+
+            output_act_inverse_class = get_inverse_function_class(self.meta.output_act_func)
+            self.output_act_inverse_func = output_act_inverse_class() if output_act_inverse_class else None
+
         # set nr_units as a List
         self.meta.nr_units = self.get_layer_units()
 
-        self.nr_initial_features = None
+        self.nr_initial_features = nr_features
+
+        self.linear_net = self.get_linear_net()
+
+        if callable(getattr(self, "get_after_cnn_linear_net", None)):
+            self.after_cnn_linear_net = self.get_after_cnn_linear_net()
+
+        if hasattr(self.meta, "use_learning_curve") and self.meta.use_learning_curve:
+            self.cnn_net = self.get_cnn_net()
+
+        self.has_batchnorm_layers = False
+
+        self.hook_handle = None
+
+        self.post_init()
+
+    def post_init(self):
+        self.has_batchnorm_layers = self.get_has_batchnorm_layers()
+        self.has_batchnorm_layers = True
+
+        if gv.PLOT_GRADIENTS:
+            if hasattr(self, 'param_names'):
+                hook = partial(self.gradient_logging_hook, names=self.param_names)
+                if self.after_cnn_linear_net is not None:
+                    self.hook_handle = self.after_cnn_linear_net.register_full_backward_hook(hook=hook)
+                if self.linear_net is not None:
+                    self.hook_handle = self.linear_net.register_full_backward_hook(hook=hook)
+                else:
+                    warnings.warn("Gradient flow tracking with wandb is not supported for this module.")
+
+    def get_has_batchnorm_layers(self):
+        for module in self.modules():
+            if isinstance(module, (nn.BatchNorm1d, nn.BatchNorm2d, nn.BatchNorm3d)):
+                return True
+        return False
 
     def get_layer_units(self):
         if isinstance(self.meta.nr_units, List):
@@ -68,12 +113,6 @@ class BaseFeatureExtractor(BasePytorchModule, ABC):
 
         return nr_units
 
-    def set_register_full_backward_hook(self):
-        if hasattr(self, 'param_names'):
-            hook = partial(self.gradient_logging_hook, names=self.param_names)
-            if hasattr(self, 'after_cnn_linear_net') and self.after_cnn_linear_net is not None:
-                self.after_cnn_linear_net.register_full_backward_hook(hook=hook)
-            elif hasattr(self, 'linear_net') and self.linear_net is not None:
-                self.linear_net.register_full_backward_hook(hook=hook)
-            else:
-                warnings.warn("Gradient flow tracking with wandb is not supported for this module.")
+    def hook_remove(self):
+        if self.hook_handle:
+            self.hook_handle.remove()

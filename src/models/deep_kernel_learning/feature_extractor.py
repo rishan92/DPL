@@ -23,15 +23,14 @@ class FeatureExtractor(BaseFeatureExtractor):
     """
 
     def __init__(self, nr_features, seed=None):
-        super().__init__(nr_features, seed=seed)
+        nr_initial_features = nr_features + 1
+        super().__init__(nr_initial_features, seed=seed)
 
         # self.linear_net = self.get_linear_net()
         # self.after_cnn_linear_net = self.get_after_cnn_linear_net()
         #
         # if self.meta.use_learning_curve:
         #     self.cnn_net = self.get_cnn_net()
-
-        self.nr_initial_features = self.nr_features + 1
 
         self.fc1 = nn.Linear(self.nr_initial_features, self.meta.nr_units[0])
         self.bn1 = nn.BatchNorm1d(self.meta.nr_units[0])

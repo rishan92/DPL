@@ -172,9 +172,9 @@ class EnsembleModel(BasePytorchModule):
 
         return model_loss[0]
 
-    def set_target_normalization_inverse_function(self, fn):
+    def set_target_normalization_inverse_function(self, fn, std_fn=None):
         for model in self.models:
-            model.set_target_normalization_inverse_function(fn)
+            model.set_target_normalization_inverse_function(fn=fn, std_fn=std_fn)
 
     @classproperty
     def meta_use_learning_curve(cls):

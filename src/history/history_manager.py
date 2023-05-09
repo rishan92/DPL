@@ -543,6 +543,8 @@ class HistoryManager:
         val_indices = np.random.choice(indices,
                                        size=int(self.hp_candidates.shape[0] * validation_configuration_ratio) + 1,
                                        replace=False)
+        if len(val_indices) == self.hp_candidates.shape[0]:
+            val_indices = []
 
         budgets = np.arange(1, self.max_benchmark_epochs + 1)
         val_budgets_indices = budgets[int(self.max_benchmark_epochs * (1 - validation_curve_ratio)) + 1:]

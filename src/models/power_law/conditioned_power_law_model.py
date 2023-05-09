@@ -1,12 +1,9 @@
 import torch
 import torch.nn as nn
-from copy import deepcopy
-import numpy as np
-import wandb
 import math
 
 from src.models.power_law.power_law_model import PowerLawModel
-from .scaling_layer import ScalingLayer
+from src.models.layers.scaling_layer import ScalingLayer
 
 
 class ConditionedPowerLawModel(PowerLawModel):

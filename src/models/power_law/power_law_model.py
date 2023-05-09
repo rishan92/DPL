@@ -110,7 +110,7 @@ class PowerLawModel(BasePytorchModule, ABC):
         if hasattr(self.meta, "use_learning_curve") and self.meta.use_learning_curve:
             self.cnn_net = self.get_cnn_net()
 
-        self.criterion = get_class_from_package(torch.nn, self.meta.loss_function)()
+        self.criterion = get_class_from_package(torch.nn, self.meta.loss_function)(reduction='sum')
 
         self.has_batchnorm_layers = False
         self.optimizer = None
@@ -247,15 +247,15 @@ class PowerLawModel(BasePytorchModule, ABC):
 
                 loss.backward()
 
-                if self.clip_gradients_value:
-                    clip_grad_norm_(self.parameters(), self.clip_gradients_value)
-
                 if not is_nan_gradient:
                     for name, param in self.named_parameters():
                         if param.grad is not None:
                             if torch.isnan(param.grad).any():
                                 is_nan_gradient = True
                                 break
+
+                if self.clip_gradients_value:
+                    clip_grad_norm_(self.parameters(), self.clip_gradients_value)
 
                 self.optimizer.step()
 
@@ -298,7 +298,6 @@ class PowerLawModel(BasePytorchModule, ABC):
                 self.val_dataloader_it = iter(self.val_dataloader)
                 break
         normalized_loss = running_loss / len(self.val_dataloader)
-        self.train()
         return normalized_loss
 
     def train_loop(self, nr_epochs, train_dataloader=None, reset_optimizer=False, val_dataloader=None):
@@ -329,13 +328,14 @@ class PowerLawModel(BasePytorchModule, ABC):
             self.logger.debug(f'Epoch {epoch + 1}, Loss:{normalized_loss}')
             PowerLawModel._global_epoch[self.instance_id] += 1
 
-            if val_dataloader:
-                normalized_val_loss = self.validation_epoch()
-
             if self.lr_scheduler and self.optimizer._step_count > 0:
                 self.lr_scheduler.step()
 
             if self.instance_id == 0:
+                if val_dataloader:
+                    normalized_val_loss = self.validation_epoch()
+                    self.train()
+
                 current_lr = self.optimizer.param_groups[0]['lr']
                 if is_nan_gradient:
                     PowerLawModel._nan_gradients += 1
@@ -414,7 +414,7 @@ class PowerLawModel(BasePytorchModule, ABC):
         # Restore unpickable objects from the state dictionary
         self.logger = logger
 
-    def set_target_normalization_inverse_function(self, fn):
+    def set_target_normalization_inverse_function(self, fn, std_fn=None):
         self.target_normalization_inverse_fn = fn
 
     def hook_remove(self):
