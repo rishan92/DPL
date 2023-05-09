@@ -25,8 +25,6 @@ class FeatureExtractorDYHPO(BaseFeatureExtractor):
     def __init__(self, nr_features, seed=None):
         super().__init__(nr_features, seed=seed)
 
-        # self.linear_net = self.get_linear_net()
-
         # self.fc1 = nn.Linear(self.nr_initial_features, self.meta.nr_units[0])
         # self.bn1 = nn.BatchNorm1d(self.meta.nr_units[0])
         # for i in range(1, self.meta.nr_layers - 1):
@@ -70,7 +68,7 @@ class FeatureExtractorDYHPO(BaseFeatureExtractor):
             'use_learning_curve': False,
             'use_learning_curve_mask': False,
             'act_func': 'LeakyReLU',
-            'last_act_func': 'Identity',
+            'last_act_func': 'GELU',
             'alpha_act_func': 'Identity',
             'beta_act_func': 'GELU',
             'gamma_act_func': 'GELU',
@@ -154,8 +152,8 @@ class FeatureExtractorDYHPO(BaseFeatureExtractor):
 
         for i in range(1, self.meta.nr_layers):
             layers.append(nn.Linear(self.meta.nr_units[i - 1], self.meta.nr_units[i]))
-            if hasattr(self.meta, 'use_batch_norm') and self.meta.use_batch_norm:
-                layers.append(nn.BatchNorm1d(self.meta.nr_units[i]))
+            # if hasattr(self.meta, 'use_batch_norm') and self.meta.use_batch_norm:
+            #     layers.append(nn.BatchNorm1d(self.meta.nr_units[i]))
             layers.append(self.act_func)
             if hasattr(self.meta, 'dropout_rate') and self.meta.dropout_rate != 0:
                 layers.append(nn.Dropout(self.meta.dropout_rate))

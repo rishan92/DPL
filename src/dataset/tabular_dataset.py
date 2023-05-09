@@ -15,7 +15,7 @@ class TabularDataset(Dataset):
             self.curves = self.curves.expand(self.X.size(0), -1)
 
     def __len__(self):
-        return self.Y.size(0)
+        return self.X.size(0)
 
     def __getitem__(self, idx):
         return self.X[idx], self.Y[idx], self.budgets[idx], self.curves[idx]

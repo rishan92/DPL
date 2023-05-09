@@ -267,6 +267,7 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
             raise NotImplementedError(f"{model_class=}")
 
         hp["check_model"] = False
+        hp["check_model_predict_mode"] = 'all'  # 'end'
         hp["validation_configuration_ratio"] = 0.9
         hp['validation_curve_ratio'] = 0.9
 
@@ -780,6 +781,7 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
                 benchmark=self.benchmark,
                 validation_configuration_ratio=self.meta.validation_configuration_ratio,
                 validation_curve_ratio=self.meta.validation_curve_ratio,
+                validation_mode=self.meta.check_model_predict_mode,
                 seed=self.seed
             )
         self.target_normalization_value = target_normalization_value

@@ -23,6 +23,7 @@ class FeatureExtractor(BaseFeatureExtractor):
     """
 
     def __init__(self, nr_features, seed=None):
+        # adding one since we concatenate the features with the budget
         nr_initial_features = nr_features + 1
         super().__init__(nr_initial_features, seed=seed)
 
@@ -76,8 +77,6 @@ class FeatureExtractor(BaseFeatureExtractor):
 
     def get_linear_net(self):
         layers = []
-        # adding one since we concatenate the features with the budget
-        self.nr_initial_features = self.nr_features + 1
 
         layers.append(nn.Linear(self.nr_initial_features, self.meta.nr_units[0]))
         layers.append(nn.BatchNorm1d(self.meta.nr_units[0]))

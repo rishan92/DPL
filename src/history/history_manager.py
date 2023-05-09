@@ -521,7 +521,7 @@ class HistoryManager:
         return train_indices, train_labels, train_budgets, train_curves, is_up_curve
 
     def get_check_train_validation_dataset(self, curve_size_mode, benchmark: BaseBenchmark,
-                                           validation_configuration_ratio, validation_curve_ratio,
+                                           validation_configuration_ratio, validation_curve_ratio, validation_mode,
                                            seed) -> (
         TabularDataset, TabularDataset):
         """This method is called to prepare the necessary training dataset
@@ -552,7 +552,13 @@ class HistoryManager:
         val_hp_index = np.isin(all_hp_indices, val_indices)
         val_budget_index = np.isin(all_budgets, val_budgets_indices)
         val_hp_index = np.logical_or(val_hp_index, val_budget_index)
+
         train_hp_index = ~val_hp_index
+        
+        if validation_mode == "end":
+            val_budget_index = all_budgets == self.max_benchmark_epochs
+            val_hp_index = np.logical_and(val_hp_index, val_budget_index)
+
         # a = val_hp_index.sum()
         # b = all_is_up_curve.sum()
         # filter out the curve points that goes up from the validation dataset

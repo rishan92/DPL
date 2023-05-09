@@ -145,11 +145,11 @@ class DyHPOModel(BasePytorchModule):
             'learning_rate': 1e-3,
             'refine_learning_rate': 1e-3,
             'power_law_loss_function': 'MSELoss',
-            'power_law_loss_factor': 0.1,
+            'power_law_loss_factor': 0.5,
             'weight_regularization_factor': 0,
             'alpha_beta_constraint_factor': 0,
-            'noise_lower_bound': 1e-4,  # None,  #
-            'noise_upper_bound': 1e-3,  # None,  #
+            'noise_lower_bound': 1e-4,  # 1e-4,  #
+            'noise_upper_bound': 1e-3,  # 1e-3,  #
             'use_seperate_lengthscales': False,
             'optimize_likelihood': False,
             'use_scale_to_bounds': False,
