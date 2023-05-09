@@ -35,8 +35,6 @@ class EnsembleModel(BasePytorchModule):
             if self.meta.exploration_exploitation_strategy == "batch_norm":
                 if hasattr(model_class.meta, 'use_batch_norm'):
                     model_class.meta.use_batch_norm = False
-            else:
-                raise NotImplementedError
 
         self.model_instances: List[Type[model_class]] = [model_class] * self.meta.ensemble_size
 

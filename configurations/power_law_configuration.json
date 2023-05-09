@@ -6,7 +6,14 @@
     "acq_mode": "ei",
     "acq_best_value_mode": "normal",
     "use_target_normalization": false,
+    "target_normalization_range": [
+        0.2,
+        0.8
+    ],
     "use_scaled_budgets": true,
+    "check_model": false,
+    "validation_configuration_ratio": 0.9,
+    "validation_curve_ratio": 0.9,
     "model": {
         "model_class_name": "ConditionedPowerLawModel",
         "ensemble_size": 5,
@@ -14,21 +21,40 @@
         "refine_nr_epochs": 20,
         "batch_size": 64,
         "refine_batch_size": 64,
+        "exploration_exploitation_strategy": "batch_norm",
+        "flip_batch_norm": false,
         "model": {
             "nr_units": 128,
             "nr_layers": 2,
             "kernel_size": 3,
             "nr_filters": 4,
             "nr_cnn_layers": 2,
+            "dropout_rate": 0,
+            "use_batch_norm": true,
             "use_learning_curve": false,
             "use_learning_curve_mask": false,
-            "learning_rate": 0.001,
+            "use_suggested_learning_rate": false,
+            "weight_regularization_factor": 0,
+            "alpha_beta_constraint_factor": 0,
+            "learning_rate": 3e-3,
+            "refine_learning_rate": 1e-3,
             "act_func": "LeakyReLU",
-            "last_act_func": "SelfGLU",
+            "last_act_func": "Identity",
+            "alpha_act_func": "Sigmoid",
+            "beta_act_func": "Sigmoid",
+            "gamma_act_func": "Abs",
+            "output_act_func": "ClipLeakyReLU",
+            "alpha_beta_is_difference": false,
             "loss_function": "L1Loss",
             "optimizer": "Adam",
             "activate_early_stopping": false,
-            "early_stopping_it": 0
+            "early_stopping_it": 0,
+            "use_scaling_layer": false,
+            "scaling_layer_bias_values": [
+                0,
+                0,
+                1.171254937568839
+            ]
         }
     }
 }
