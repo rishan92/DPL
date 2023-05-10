@@ -219,7 +219,8 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
             target_normalization_range=self.target_normalization_range,
             model_output_normalization=self.model_class.meta_output_act_func,
             use_scaled_budgets=self.meta.use_scaled_budgets,
-            cnn_kernel_size=self.model_class.meta_cnn_kernel_size
+            cnn_kernel_size=self.model_class.meta_cnn_kernel_size,
+            use_sample_weights=self.model_class.meta_use_sample_weights,
         )
 
         self.real_curve_targets_map_pd: Optional[pd.DataFrame] = None
@@ -806,7 +807,7 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
                 std_fn=self.target_normalization_std_inverse_fn
             )
         self.model.to(self.dev)
-        return_state = self.model.train_loop(train_dataset=train_dataset, val_dataset=val_dataset)
+        return_state, _ = self.model.train_loop(train_dataset=train_dataset, val_dataset=val_dataset)
         if return_state is not None and return_state < 0:
             print("Training failed. Restarting.")
             self.logger.warning("Training failed. Restarting.")

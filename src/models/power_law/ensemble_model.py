@@ -198,6 +198,11 @@ class EnsembleModel(BasePytorchModule):
         model_class = get_class("src/models/power_law", cls.meta.model_class_name)
         return model_class.meta_cnn_kernel_size
 
+    @classproperty
+    def meta_use_sample_weights(cls):
+        model_class = get_class("src/models/power_law", cls.meta.model_class_name)
+        return model_class.meta_use_sample_weights
+
     def reset(self):
         if gv.IS_WANDB and gv.PLOT_GRADIENTS:
             wandb.unwatch()

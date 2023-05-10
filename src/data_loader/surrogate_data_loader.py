@@ -24,6 +24,7 @@ class SurrogateDataLoader(DataLoader):
         self.should_weight_last_sample = should_weight_last_sample
         self.last_sample = last_sample
         self.kwargs = kwargs
+        self.data_size = 5
 
     def __len__(self):
         return super().__len__()
@@ -31,15 +32,15 @@ class SurrogateDataLoader(DataLoader):
     def __iter__(self):
         batches = super().__iter__()
         if self.should_weight_last_sample:
-            weighted_batch: List[Optional[torch.Tensor]] = [None] * 4
+            weighted_batch: List[Optional[torch.Tensor]] = [None] * self.data_size
             for b in batches:
-                for i in range(4):
-                    weighted_batch[i] = torch.cat((b[i], self.last_sample[i]))
-                yield weighted_batch[0].to(self.device), weighted_batch[1].to(self.device), \
-                      weighted_batch[2].to(self.device), weighted_batch[3].to(self.device)
+                for i in range(self.data_size):
+                    weighted_batch[i] = torch.cat((b[i], self.last_sample[i])).to(self.device)
+                yield weighted_batch[0], weighted_batch[1], weighted_batch[2], weighted_batch[3], weighted_batch[4]
         else:
             for b in batches:
-                yield b[0].to(self.device), b[1].to(self.device), b[2].to(self.device), b[3].to(self.device)
+                yield b[0].to(self.device), b[1].to(self.device), b[2].to(self.device), b[3].to(self.device), b[4].to(
+                    self.device)
 
     def make_dataloader(self, seed=0):
         instance = SurrogateDataLoader(seed=seed, dev=self.device,

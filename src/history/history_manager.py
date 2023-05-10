@@ -21,7 +21,8 @@ from src.benchmarks.base_benchmark import BaseBenchmark
 class HistoryManager:
     def __init__(self, hp_candidates, max_benchmark_epochs, fantasize_step, use_learning_curve, use_learning_curve_mask,
                  fill_value='zero', use_target_normalization=False, use_scaled_budgets=True,
-                 model_output_normalization=None, cnn_kernel_size=0, target_normalization_range=None):
+                 model_output_normalization=None, cnn_kernel_size=0, target_normalization_range=None,
+                 use_sample_weights=False):
         assert fill_value in ["zero", "last"], "Invalid fill value mode"
         # assert predict_mode in ["end_budget", "next_budget"], "Invalid predict mode"
         # assert curve_size_mode in ["fixed", "variable"], "Invalid curve size mode"
@@ -32,6 +33,7 @@ class HistoryManager:
         self.use_learning_curve_mask = use_learning_curve_mask
         self.use_scaled_budgets = use_scaled_budgets
         self.cnn_kernel_size = cnn_kernel_size
+        self.use_sample_weights = use_sample_weights
 
         self.use_target_normalization = use_target_normalization
         self.target_normalization_range = \
@@ -197,6 +199,7 @@ class HistoryManager:
             Y=train_labels,
             budgets=train_budgets,
             curves=train_curves,
+            use_sample_weights=self.use_sample_weights
         )
 
         self.cached_train_dataset = train_dataset
@@ -554,7 +557,7 @@ class HistoryManager:
         val_hp_index = np.logical_or(val_hp_index, val_budget_index)
 
         train_hp_index = ~val_hp_index
-        
+
         if validation_mode == "end":
             val_budget_index = all_budgets == self.max_benchmark_epochs
             val_hp_index = np.logical_and(val_hp_index, val_budget_index)
@@ -609,6 +612,7 @@ class HistoryManager:
             Y=train_labels,
             budgets=train_budgets,
             curves=train_curves,
+            use_sample_weights=self.use_sample_weights
         )
 
         val_dataset = TabularDataset(

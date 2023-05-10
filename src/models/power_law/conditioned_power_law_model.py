@@ -22,6 +22,7 @@ class ConditionedPowerLawModel(PowerLawModel):
             'use_learning_curve': False,
             'use_learning_curve_mask': False,
             'use_suggested_learning_rate': False,
+            'use_sample_weights': False,
             'weight_regularization_factor': 0,
             'alpha_beta_constraint_factor': 0,
             'learning_rate': 3e-3,

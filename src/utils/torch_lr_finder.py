@@ -71,7 +71,7 @@ class TrainDataLoaderIter(DataLoaderIter):
 
         # return inputs, labels
 
-        return inputs[0], labels, inputs[1], inputs[2]
+        return inputs[0], labels, inputs[1], inputs[2], inputs[3]
 
     def get_next(self):
         try:

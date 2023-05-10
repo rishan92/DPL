@@ -115,7 +115,11 @@ class PowerLawModel(BasePytorchModule, ABC):
         if hasattr(self.meta, "use_learning_curve") and self.meta.use_learning_curve:
             self.cnn_net = self.get_cnn_net()
 
-        self.criterion = get_class_from_package(torch.nn, self.meta.loss_function)(reduction='sum')
+        if self.meta.use_sample_weights:
+            reduction = 'none'
+        else:
+            reduction = 'mean'
+        self.criterion = get_class_from_package(torch.nn, self.meta.loss_function)(reduction=reduction)
 
         self.has_batchnorm_layers = False
         self.optimizer = None
@@ -216,7 +220,7 @@ class PowerLawModel(BasePytorchModule, ABC):
         while True:
             try:
                 batch = next(self.train_dataloader_it)
-                batch_examples, batch_labels, batch_budgets, batch_curves = batch
+                batch_examples, batch_labels, batch_budgets, batch_curves, batch_weights = batch
                 nr_examples_batch = batch_examples.shape[0]
                 # if only one example in the batch, skip the batch.
                 # Otherwise, the code will fail because of batchnormalization.
@@ -250,8 +254,14 @@ class PowerLawModel(BasePytorchModule, ABC):
                 else:
                     alpha_beta_constraint_loss = torch.tensor(0.0, requires_grad=True)
 
-                loss = self.criterion(outputs, batch_labels) + \
-                       self.regularization_factor * l1_norm + \
+                criterion_loss = self.criterion(outputs, batch_labels)
+
+                if self.meta.use_sample_weights:
+                    batch_weights /= batch_weights.sum()
+                    batch_weights *= nr_examples_batch
+                    criterion_loss = (criterion_loss * batch_weights).mean()
+
+                loss = criterion_loss + self.regularization_factor * l1_norm + \
                        self.alpha_beta_constraint_factor * alpha_beta_constraint_loss
 
                 loss.backward()
@@ -268,7 +278,7 @@ class PowerLawModel(BasePytorchModule, ABC):
 
                 self.optimizer.step()
 
-                running_loss += loss.item()
+                running_loss += loss.item() * nr_examples_batch
                 batch_count += 1
 
                 if max_batches is not None and batch_count >= max_batches:
@@ -292,7 +302,7 @@ class PowerLawModel(BasePytorchModule, ABC):
         while True:
             try:
                 batch = next(self.val_dataloader_it)
-                batch_examples, batch_labels, batch_budgets, batch_curves = batch
+                batch_examples, batch_labels, batch_budgets, batch_curves, _ = batch
                 nr_examples_batch = batch_examples.shape[0]
                 # if only one example in the batch, skip the batch.
                 # Otherwise, the code will fail because of batchnormalization.
