@@ -266,7 +266,7 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
         else:
             raise NotImplementedError(f"{model_class=}")
 
-        hp["check_model"] = False
+        hp["check_model"] = True
         hp["check_model_predict_mode"] = 'all'  # 'end'
         hp["validation_configuration_ratio"] = 0.9
         hp['validation_curve_ratio'] = 0.9

@@ -316,11 +316,11 @@ class PowerLawModel(BasePytorchModule, ABC):
                 running_loss += loss.item()
 
                 new_value = outputs.detach()
+                start_index = iteration * batch_size
+                end_index = iteration * batch_size + nr_examples_batch
                 if self.instance_id == 0:
-                    PowerLawModel._validation_online['mean'][epoch, iteration * batch_size:] = new_value
+                    PowerLawModel._validation_online['mean'][epoch, start_index:end_index] = new_value
                 else:
-                    start_index = iteration * batch_size
-                    end_index = iteration * batch_size + nr_examples_batch
                     delta = new_value - PowerLawModel._validation_online['mean'][epoch, start_index:end_index]
                     PowerLawModel._validation_online['mean'][epoch, start_index:end_index] += delta / (
                         self.instance_id + 1)
@@ -410,6 +410,7 @@ class PowerLawModel(BasePytorchModule, ABC):
 
                     wandb_data = {
                         f"surrogate/check_training/epoch": PowerLawModel._global_epoch[self.instance_id],
+                        f"surrogate/check_training/train_loss": normalized_loss,
                         f"surrogate/check_training/validation_loss": normalized_val_loss,
                         f"surrogate/check_training/validation_std_correlation": val_correlation_value
                     }

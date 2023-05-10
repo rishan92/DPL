@@ -430,6 +430,7 @@ class DyHPOModel(BasePytorchModule):
                 }
                 if val_dataset:
                     wandb_data["surrogate/check_training/epoch"] = DyHPOModel._global_epoch
+                    wandb_data["surrogate/check_training/train_loss"] = mae_value
                     wandb_data["surrogate/check_training/validation_loss"] = val_mae_value
                     wandb_data["surrogate/check_training/validation_std_correlation"] = val_correlation_value
                 if gv.PLOT_SUGGEST_LR or self.meta.use_suggested_learning_rate:
