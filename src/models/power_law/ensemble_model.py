@@ -141,7 +141,7 @@ class EnsembleModel(BasePytorchModule):
         val_dataloader = None
         if val_dataset:
             val_dataloader = SurrogateDataLoader(
-                dataset=val_dataset, batch_size=batch_size, shuffle=True, seed=self.seed, dev=model_device,
+                dataset=val_dataset, batch_size=512, shuffle=False, seed=self.seed, dev=model_device,
                 should_weight_last_sample=should_weight_last_sample, last_sample=last_sample,
                 # drop_last=train_dataset.X.shape[0] > batch_size and train_dataset.X.shape[0] % batch_size < 2
             )

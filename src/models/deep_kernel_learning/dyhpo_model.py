@@ -386,7 +386,6 @@ class DyHPOModel(BasePytorchModule):
                     self.lr_scheduler.step()
 
                 if val_dataset:
-                    stime = time.perf_counter()
                     means, stds, predict_infos, val_power_law_loss = self._batch_predict(
                         test_data=val_dataset,
                         train_data=train_dataset,
@@ -396,6 +395,9 @@ class DyHPOModel(BasePytorchModule):
                     means_tensor = torch.from_numpy(means).to(model_device)
                     val_mae = F.l1_loss(means_tensor, val_dataset.Y, reduction='mean')
                     val_mae_value = val_mae.detach().to('cpu').item()
+                    difference = np.abs(means - val_dataset.Y.numpy())
+                    val_correlation_value = np.corrcoef(stds, difference)
+                    val_correlation_value = val_correlation_value[0, 1]
                     self.train()
 
                 if is_nan_gradient and not is_lr_finder:
@@ -427,7 +429,9 @@ class DyHPOModel(BasePytorchModule):
                     "surrogate/dyhpo/nan_gradients": DyHPOModel._nan_gradients,
                 }
                 if val_dataset:
-                    wandb_data["surrogate/dyhpo/validation_loss"] = val_mae_value
+                    wandb_data["surrogate/check_training/epoch"] = DyHPOModel._global_epoch
+                    wandb_data["surrogate/check_training/validation_loss"] = val_mae_value
+                    wandb_data["surrogate/check_training/validation_std_correlation"] = val_correlation_value
                 if gv.PLOT_SUGGEST_LR or self.meta.use_suggested_learning_rate:
                     wandb_data["surrogate/dyhpo/suggested_lr"] = DyHPOModel._suggested_lr
 

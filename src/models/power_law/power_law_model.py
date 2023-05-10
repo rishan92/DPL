@@ -10,6 +10,7 @@ import inspect
 from torch.nn.utils import clip_grad_norm_
 import warnings
 from loguru import logger
+import torch.nn.functional as F
 
 from src.models.base.base_pytorch_module import BasePytorchModule
 import src.models.activation_functions
@@ -23,6 +24,10 @@ class PowerLawModel(BasePytorchModule, ABC):
     _global_epoch = {}
     _suggested_lr = None
     _nan_gradients = 0
+    _validation_outputs = {}
+    _validation_epoch_outputs = {}
+    _validation_corr = {}
+    _validation_online = {}
 
     def __init__(
         self,
@@ -131,6 +136,9 @@ class PowerLawModel(BasePytorchModule, ABC):
         if hasattr(self.meta, 'clip_gradients') and self.meta.clip_gradients != 0:
             self.clip_gradients_value = self.meta.clip_gradients
 
+        PowerLawModel._validation_online['mean'] = []
+        PowerLawModel._validation_online['std'] = []
+
         self.post_init()
 
     def post_init(self):
@@ -213,7 +221,7 @@ class PowerLawModel(BasePytorchModule, ABC):
                 # if only one example in the batch, skip the batch.
                 # Otherwise, the code will fail because of batchnormalization.
                 if self.has_batchnorm_layers and nr_examples_batch == 1:
-                    return 0, is_nan_gradient
+                    continue
 
                 # zero the parameter gradients
                 self.optimizer.zero_grad(set_to_none=True)
@@ -269,15 +277,18 @@ class PowerLawModel(BasePytorchModule, ABC):
                 self.train_dataloader_it = iter(self.train_dataloader)
                 break
         if max_batches is None:
-            normalized_loss = running_loss / len(self.train_dataloader)
+            normalized_loss = running_loss / len(self.train_dataloader.dataset)
         else:
             normalized_loss = running_loss
         return normalized_loss, is_nan_gradient
 
-    def validation_epoch(self):
+    def validation_epoch(self, epoch):
         self.eval()
         running_loss = 0
         predict_infos = []
+        iteration = 0
+        batch_size = 512
+
         while True:
             try:
                 batch = next(self.val_dataloader_it)
@@ -286,7 +297,7 @@ class PowerLawModel(BasePytorchModule, ABC):
                 # if only one example in the batch, skip the batch.
                 # Otherwise, the code will fail because of batchnormalization.
                 if self.has_batchnorm_layers and nr_examples_batch == 1:
-                    return 0
+                    continue
 
                 outputs, predict_info = self((batch_examples, batch_budgets, batch_curves))
                 # if outputs.is_complex():
@@ -300,12 +311,28 @@ class PowerLawModel(BasePytorchModule, ABC):
                 if self.target_normalization_inverse_fn:
                     outputs = self.target_normalization_inverse_fn(outputs)
 
-                loss = self.criterion(outputs, batch_labels)
+                loss = F.l1_loss(outputs, batch_labels, reduction='sum')
+
                 running_loss += loss.item()
+
+                new_value = outputs.detach()
+                if self.instance_id == 0:
+                    PowerLawModel._validation_online['mean'][epoch, iteration * batch_size:] = new_value
+                else:
+                    start_index = iteration * batch_size
+                    end_index = iteration * batch_size + nr_examples_batch
+                    delta = new_value - PowerLawModel._validation_online['mean'][epoch, start_index:end_index]
+                    PowerLawModel._validation_online['mean'][epoch, start_index:end_index] += delta / (
+                        self.instance_id + 1)
+                    delta2 = new_value - PowerLawModel._validation_online['mean'][epoch, start_index:end_index]
+                    PowerLawModel._validation_online['std'][epoch, start_index:end_index] += delta * delta2
+
+                iteration += 1
             except StopIteration:
                 self.val_dataloader_it = iter(self.val_dataloader)
                 break
-        normalized_loss = running_loss / len(self.val_dataloader)
+        normalized_loss = running_loss / len(self.val_dataloader.dataset)
+
         return normalized_loss
 
     def train_loop(self, nr_epochs, train_dataloader=None, reset_optimizer=False, val_dataloader=None,
@@ -344,17 +371,18 @@ class PowerLawModel(BasePytorchModule, ABC):
             if self.lr_scheduler and self.optimizer._step_count > 0:
                 self.lr_scheduler.step()
 
-            if self.instance_id == 0:
-                if val_dataloader:
-                    normalized_val_loss = self.validation_epoch()
-                    self.train()
+            if val_dataloader:
+                if self.instance_id == 0 and epoch == 0:
+                    PowerLawModel._validation_online['mean'] = torch.zeros(
+                        (nr_epochs, len(self.val_dataloader.dataset)))
+                    PowerLawModel._validation_online['std'] = torch.zeros((nr_epochs, len(self.val_dataloader.dataset)))
+                normalized_val_loss = self.validation_epoch(epoch)
+                self.train()
 
-                if is_nan_gradient and not is_lr_finder:
-                    PowerLawModel._nan_gradients += 1
+            if is_nan_gradient and not is_lr_finder:
+                PowerLawModel._nan_gradients += 1
 
-                if is_lr_finder:
-                    continue
-
+            if self.instance_id == 0 and not is_lr_finder:
                 current_lr = self.optimizer.param_groups[0]['lr']
                 wandb_data = {
                     f"surrogate/model_{self.instance_id}/training_loss": normalized_loss,
@@ -364,9 +392,28 @@ class PowerLawModel(BasePytorchModule, ABC):
                 }
                 if val_dataloader:
                     wandb_data[f"surrogate/model_{self.instance_id}/validation_loss"] = normalized_val_loss
+
                 if gv.PLOT_SUGGEST_LR or self.meta.use_suggested_learning_rate:
                     wandb_data[f"surrogate/model_{self.instance_id}/suggested_lr"] = PowerLawModel._suggested_lr
                 wandb.log(wandb_data)
+
+            if self.instance_id == self.max_instances - 1 and not is_lr_finder:
+                if val_dataloader:
+                    labels = val_dataloader.dataset.Y
+                    means = PowerLawModel._validation_online['mean'][epoch, :]
+                    stds = PowerLawModel._validation_online['std'][epoch, :]
+                    stds = (stds / (self.max_instances - 1)) ** 0.5
+                    difference = torch.abs(means - labels)
+                    val_correlation_value = np.corrcoef(stds.detach().numpy(), difference.detach().numpy())
+                    val_correlation_value = val_correlation_value[0, 1]
+                    normalized_val_loss = F.l1_loss(means, labels, reduction='mean')
+
+                    wandb_data = {
+                        f"surrogate/check_training/epoch": PowerLawModel._global_epoch[self.instance_id],
+                        f"surrogate/check_training/validation_loss": normalized_val_loss,
+                        f"surrogate/check_training/validation_std_correlation": val_correlation_value
+                    }
+                    wandb.log(wandb_data)
 
             if self.meta.activate_early_stopping:
                 if normalized_loss < best_loss:
