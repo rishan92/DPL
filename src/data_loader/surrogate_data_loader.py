@@ -3,6 +3,7 @@ import torch
 import numpy as np
 import random
 from typing import List, Tuple, Any, Type, Optional
+import copy
 
 
 def seed_worker(worker_id):
@@ -43,8 +44,15 @@ class SurrogateDataLoader(DataLoader):
                     self.device)
 
     def make_dataloader(self, seed=0):
+        kwargs = copy.copy(self.kwargs)
+        dataset = self.kwargs['dataset']
+        if dataset.use_sample_weights:
+            new_dataset = copy.copy(dataset)
+            new_dataset.reset_sample_weights()
+            kwargs['dataset'] = new_dataset
+
         instance = SurrogateDataLoader(seed=seed, dev=self.device,
                                        should_weight_last_sample=self.should_weight_last_sample,
                                        last_sample=self.last_sample,
-                                       **self.kwargs)
+                                       **kwargs)
         return instance

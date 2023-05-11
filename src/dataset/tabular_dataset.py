@@ -17,8 +17,12 @@ class TabularDataset(Dataset):
         self.use_sample_weights = use_sample_weights
         self.dummy_weight = torch.tensor(1)
         if use_sample_weights:
-            # self.weights = torch.rand((self.X.shape[0],))
-            self.weights = torch.randn((self.X.shape[0],)) * 0.1
+            self.weights = torch.rand((self.X.shape[0],))
+            # self.weights = torch.randn((self.X.shape[0],)) * 0.1
+            
+    def reset_sample_weights(self):
+        if self.use_sample_weights:
+            self.weights = torch.rand((self.X.shape[0],))
 
     def __len__(self):
         return self.X.size(0)
