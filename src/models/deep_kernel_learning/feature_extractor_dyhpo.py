@@ -70,9 +70,10 @@ class FeatureExtractorDYHPO(BaseFeatureExtractor):
             'last_act_func': 'Identity',
             'alpha_act_func': 'Sigmoid',
             'beta_act_func': 'Sigmoid',
-            'gamma_act_func': 'Abs',
+            'gamma_act_func': 'Sigmoid',
             'output_act_func': 'ClipLeakyReLU',
             'alpha_beta_is_difference': True,
+            'use_gamma_constraint': False,
             'use_scaling_layer': False,
             'scaling_layer_bias_values': [0, 0, math.log(0.01) / math.log(1 / 51)]  # [0, 0, 1.17125493757],
         }
@@ -185,6 +186,10 @@ class FeatureExtractorDYHPO(BaseFeatureExtractor):
             alpha_weight = betas
             alphas = alphas_plus_beta * alpha_weight
             betas = alphas_plus_beta * (1 - alpha_weight)
+
+        if hasattr(self.meta, 'use_gamma_constraint') and self.meta.use_gamma_constraint:
+            gamma_constraint = torch.log((1 - alphas) / betas) / torch.log(torch.tensor(51))
+            gammas = gammas * gamma_constraint
 
         output = torch.add(
             alphas,

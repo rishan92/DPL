@@ -34,6 +34,7 @@ class ConditionedPowerLawModel(PowerLawModel):
             'gamma_act_func': 'Abs',
             'output_act_func': 'ClipLeakyReLU',
             'alpha_beta_is_difference': False,
+            'use_gamma_constraint': False,
             'loss_function': 'L1Loss',
             'optimizer': 'Adam',
             'activate_early_stopping': False,
@@ -139,6 +140,10 @@ class ConditionedPowerLawModel(PowerLawModel):
             alpha_weight = betas
             alphas = alphas_plus_beta * alpha_weight
             betas = alphas_plus_beta * (1 - alpha_weight)
+
+        if hasattr(self.meta, 'use_gamma_constraint') and self.meta.use_gamma_constraint:
+            gamma_constraint = torch.log((1 - alphas) / betas) / torch.log(torch.tensor(51))
+            gammas = gammas * gamma_constraint
 
         output = torch.add(
             alphas,
