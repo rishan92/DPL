@@ -230,13 +230,13 @@ class DyHPOModel(BasePytorchModule):
         self.meta.nr_epochs = nr_epochs
 
         batch = next(train_dataloader)
-        batch_examples, batch_labels, batch_budgets, batch_curves = batch
+        batch_examples, batch_labels, batch_budgets, batch_curves, batch_weights = batch
 
         train_dataset = TabularDataset(
             X=batch_examples,
             Y=batch_labels,
             budgets=batch_budgets,
-            curves=batch_curves
+            curves=batch_curves,
         )
         return_state, loss = self.train_loop(train_dataset=train_dataset, **kwargs)
 
