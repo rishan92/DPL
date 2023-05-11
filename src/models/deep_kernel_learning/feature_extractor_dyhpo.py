@@ -72,7 +72,7 @@ class FeatureExtractorDYHPO(BaseFeatureExtractor):
             'beta_act_func': 'Sigmoid',
             'gamma_act_func': 'Abs',
             'output_act_func': 'ClipLeakyReLU',
-            'alpha_beta_is_difference': False,
+            'alpha_beta_is_difference': True,
             'use_scaling_layer': False,
             'scaling_layer_bias_values': [0, 0, math.log(0.01) / math.log(1 / 51)]  # [0, 0, 1.17125493757],
         }

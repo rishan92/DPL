@@ -128,6 +128,11 @@ class DyHPOModel(BasePytorchModule):
         if hasattr(self.meta, 'alpha_beta_constraint_factor') and self.meta.alpha_beta_constraint_factor != 0:
             self.alpha_beta_constraint_factor = self.meta.alpha_beta_constraint_factor
 
+        self.l1_loss_factor = 0
+        self.l1_loss = torch.nn.L1Loss()
+        if hasattr(self.meta, 'l1_loss_factor') and self.meta.l1_loss_factor != 0:
+            self.l1_loss_factor = self.meta.l1_loss_factor
+
         if gv.IS_WANDB and gv.PLOT_GRADIENTS:
             wandb.watch([self.feature_extractor, self.model, self.likelihood], log='all', idx=0, log_freq=10)
 
@@ -140,14 +145,15 @@ class DyHPOModel(BasePytorchModule):
             'refine_nr_epochs': 50,
             'feature_class_name': 'FeatureExtractorDYHPO',
             # 'FeatureExtractor',  #  'FeatureExtractorPowerLaw',
-            'gp_class_name': 'GPRegressionModel',
+            'gp_class_name': 'GPRegressionPowerLawMeanModel',
             # 'GPRegressionPowerLawMeanModel',  #  'GPRegressionModel'
             'likelihood_class_name': 'GaussianLikelihood',
             'mll_loss_function': 'ExactMarginalLogLikelihood',
-            'learning_rate': 1e-4,
+            'learning_rate': 1e-3,
             'refine_learning_rate': 1e-3,
             'power_law_loss_function': 'MSELoss',
-            'power_law_loss_factor': 0.5,
+            'power_law_loss_factor': 0,
+            'l1_loss_factor': 0,
             'weight_regularization_factor': 0,
             'alpha_beta_constraint_factor': 0,
             'noise_lower_bound': 1e-4,  # 1e-4,  #
@@ -349,9 +355,14 @@ class DyHPOModel(BasePytorchModule):
                 mean_prediction = prediction.mean
                 power_law_loss = self.power_law_criterion(mean_prediction, power_law_output)
 
+                l1_loss = torch.tensor(0.0, requires_grad=True)
+                if self.l1_loss_factor != 0:
+                    l1_loss = self.l1_loss(mean_prediction, self.model.train_targets)
+
                 loss = mll_loss + self.meta.power_law_loss_factor * power_law_loss + \
                        self.regularization_factor * l1_norm + \
-                       self.alpha_beta_constraint_factor * alpha_beta_constraint_loss
+                       self.alpha_beta_constraint_factor * alpha_beta_constraint_loss + \
+                       self.l1_loss_factor * l1_loss
 
                 mae = gpytorch.metrics.mean_absolute_error(prediction, self.model.train_targets)
                 power_law_mae = gpytorch.metrics.mean_absolute_error(prediction, power_law_output.detach())
@@ -363,6 +374,7 @@ class DyHPOModel(BasePytorchModule):
                 power_law_mae_value = power_law_mae.detach().to('cpu').item()
                 lengthscale_value = self.model.covar_module.base_kernel.lengthscale[0, 0].detach().to('cpu').item()
                 noise_value = self.model.likelihood.noise.detach().to('cpu').item()
+                l1_loss_value = l1_loss.detach().to('cpu').item()
 
                 loss.backward()
 
@@ -428,6 +440,8 @@ class DyHPOModel(BasePytorchModule):
                     "surrogate/dyhpo/learning_rate": current_lr,
                     "surrogate/dyhpo/nan_gradients": DyHPOModel._nan_gradients,
                 }
+                if self.l1_loss_factor != 0:
+                    wandb_data["surrogate/dyhpo/l1_loss"] = l1_loss_value
                 if val_dataset:
                     wandb_data["surrogate/check_training/epoch"] = DyHPOModel._global_epoch
                     wandb_data["surrogate/check_training/train_loss"] = mae_value
