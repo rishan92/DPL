@@ -229,7 +229,7 @@ class Framework:
             hp_index, budget = self.surrogate.suggest()
 
             if gv.PLOT_PRED_CURVES and (
-                budget == 10 or budget == 10 or budget == 20 or budget == 40 or self.benchmark_name == 'synthetic'):
+                budget == 10 or budget == 10 or budget == 20 or budget == 40 or self.benchmark_name == 'synthetic'):  # or self.benchmark_name == 'lcbench_mini'):
                 self.surrogate.plot_pred_curve(
                     hp_index=hp_index,
                     benchmark=self.benchmark,

@@ -1,3 +1,5 @@
+import math
+
 import torch
 import torch.nn as nn
 from copy import deepcopy
@@ -116,7 +118,7 @@ class PowerLawModel(BasePytorchModule, ABC):
             self.cnn_net = self.get_cnn_net()
 
         if self.meta.use_sample_weights:
-            reduction = 'mean'
+            reduction = 'none'
         else:
             reduction = 'mean'
         self.criterion = get_class_from_package(torch.nn, self.meta.loss_function)(reduction=reduction)
@@ -133,6 +135,14 @@ class PowerLawModel(BasePytorchModule, ABC):
         self.alpha_beta_constraint_factor = 0
         if hasattr(self.meta, 'alpha_beta_constraint_factor') and self.meta.alpha_beta_constraint_factor != 0:
             self.alpha_beta_constraint_factor = self.meta.alpha_beta_constraint_factor
+
+        self.gamma_constraint_factor = 0
+        if hasattr(self.meta, 'gamma_constraint_factor') and self.meta.gamma_constraint_factor != 0:
+            self.gamma_constraint_factor = self.meta.gamma_constraint_factor
+
+        self.output_constraint_factor = 0
+        if hasattr(self.meta, 'output_constraint_factor') and self.meta.output_constraint_factor != 0:
+            self.output_constraint_factor = self.meta.output_constraint_factor
 
         self.hook_handle = None
 
@@ -206,8 +216,12 @@ class PowerLawModel(BasePytorchModule, ABC):
             args["epochs"] = epochs
             args["total_steps"] = epochs
             args["lr_lambda"] = lambda step: 1 - step / args["total_iters"]
+            args["gamma"] = math.exp(math.log(args["exp_min"] / self.meta.learning_rate) / args["total_iters"])
             if is_refine and 'refine_max_lr' in args and args["refine_max_lr"]:
                 args["max_lr"] = args["refine_max_lr"]
+            if is_refine and 'refine_exp_min' in args and args["refine_exp_min"]:
+                args["gamma"] = math.exp(
+                    math.log(args["refine_exp_min"] / self.meta.refine_learning_rate) / args["total_iters"])
 
             arg_names = inspect.getfullargspec(lr_scheduler_class.__init__).args
             relevant_args = {k: v for k, v in args.items() if k in arg_names}
@@ -220,7 +234,7 @@ class PowerLawModel(BasePytorchModule, ABC):
         while True:
             try:
                 batch = next(self.train_dataloader_it)
-                batch_examples, batch_labels, batch_budgets, batch_curves, batch_noise = batch
+                batch_examples, batch_labels, batch_budgets, batch_curves, batch_weights = batch
                 nr_examples_batch = batch_examples.shape[0]
                 # if only one example in the batch, skip the batch.
                 # Otherwise, the code will fail because of batchnormalization.
@@ -254,18 +268,38 @@ class PowerLawModel(BasePytorchModule, ABC):
                 else:
                     alpha_beta_constraint_loss = torch.tensor(0.0, requires_grad=True)
 
-                if self.meta.use_sample_weights:
-                    batch_labels = batch_labels + batch_noise
+                if self.gamma_constraint_factor != 0:
+                    gamma = predict_info['gamma']
+                    gamma_upper_bound = \
+                        torch.log((1 - predict_info['alpha'] - torch.tensor(1e-4)) / (
+                            predict_info['beta'] + torch.tensor(1e-4))) / torch.log(torch.tensor(51))
+                    lower_loss = torch.clamp(-1 * gamma, min=0)
+                    upper_loss = torch.clamp(gamma - gamma_upper_bound, min=0)
+                    gamma_constraint_loss = torch.mean(lower_loss + upper_loss)
+                else:
+                    gamma_constraint_loss = torch.tensor(0.0, requires_grad=True)
+
+                if self.output_constraint_factor != 0:
+                    lower_loss = torch.clamp(-1 * outputs, min=0)
+                    upper_loss = torch.clamp(outputs - 1, min=0)
+                    output_constraint_loss = torch.mean(lower_loss + upper_loss)
+                else:
+                    output_constraint_loss = torch.tensor(0.0, requires_grad=True)
+
+                # if self.meta.use_sample_weights:
+                #     batch_labels = batch_labels + batch_noise
 
                 criterion_loss = self.criterion(outputs, batch_labels)
 
-                # if self.meta.use_sample_weights:
-                #     batch_weights /= batch_weights.sum()
-                #     batch_weights *= nr_examples_batch
-                #     criterion_loss = (criterion_loss * batch_weights).mean()
+                if self.meta.use_sample_weights:
+                    batch_weights /= batch_weights.sum()
+                    batch_weights *= nr_examples_batch
+                    criterion_loss = (criterion_loss * batch_weights).mean()
 
                 loss = criterion_loss + self.regularization_factor * l1_norm + \
-                       self.alpha_beta_constraint_factor * alpha_beta_constraint_loss
+                       self.alpha_beta_constraint_factor * alpha_beta_constraint_loss + \
+                       self.gamma_constraint_factor * gamma_constraint_loss + \
+                       self.output_constraint_factor * output_constraint_loss
 
                 loss.backward()
 

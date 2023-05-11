@@ -132,15 +132,6 @@ class TargetSpaceComplex6PowerLawModel(PowerLawModel):
         if self.output_act_func and self.training:
             output = self.output_act_func(output)
 
-        # do_dar, = grad(output, alphas_r_b, create_graph=True)
-        # do_dy1, = grad(output, y1_b, create_graph=True)
-        # do_dy2, = grad(output, y2_b, create_graph=True)
-        # do_dai, = grad(output, alphas_i_b, create_graph=True)
-        # print(f"{do_dar=}")
-        # print(f"{do_dy1=}")
-        # print(f"{do_dy2=}")
-        # print(f"{do_dai=}")
-
         info = {
             'alpha': alphas,
             'beta': betas,

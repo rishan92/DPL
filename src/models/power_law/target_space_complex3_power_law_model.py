@@ -4,10 +4,11 @@ import math
 
 from src.models.power_law.power_law_model import PowerLawModel
 from src.models.layers.scaling_layer import ScalingLayer
+import src.models.activation_functions as act
 
 
-class TargetSpaceComplexPowerLawModel(PowerLawModel):
-    param_names = ('alphas_r', 'y1', 'y2')
+class TargetSpaceComplex3PowerLawModel(PowerLawModel):
+    param_names = ('alphas_r', 'betas_r', 'gammas_r')
 
     @staticmethod
     def get_default_meta():
@@ -17,18 +18,41 @@ class TargetSpaceComplexPowerLawModel(PowerLawModel):
             'kernel_size': 3,
             'nr_filters': 4,
             'nr_cnn_layers': 2,
+            'dropout_rate': 0,
+            'use_batch_norm': False,
             'use_learning_curve': False,
             'use_learning_curve_mask': False,
-            'learning_rate': 0.001,
+            'use_suggested_learning_rate': False,
+            'use_sample_weights': False,
+            'weight_regularization_factor': 0,
+            'alpha_beta_constraint_factor': 0,
+            'gamma_constraint_factor': 0,
+            'learning_rate': 1e-3,
+            'refine_learning_rate': 1e-3,
             'act_func': 'LeakyReLU',
-            'last_act_func': 'Sigmoid',
-            'output_act_func': None,
+            'last_act_func': 'Identity',
+            'alpha_act_func': 'Sigmoid',
+            'beta_act_func': 'Sigmoid',
+            'gamma_act_func': 'Sigmoid',
+            'output_act_func': 'ClipLeakyReLU',
+            'alpha_beta_is_difference': True,
+            'use_gamma_constraint': True,
             'loss_function': 'L1Loss',
             'optimizer': 'Adam',
+            'learning_rate_scheduler': 'ExponentialLR',
+            # 'CosineAnnealingLR' 'LambdaLR' 'OneCycleLR' 'ExponentialLR'
+            'learning_rate_scheduler_args': {
+                'total_iters_factor': 1.0,
+                'eta_min': 1e-6,
+                'max_lr': 1e-4,
+                'refine_max_lr': 1e-3,
+                'exp_min': 1e-5,
+                'refine_exp_min': 1e-6,
+            },
             'activate_early_stopping': False,
             'early_stopping_it': 0,
             'use_scaling_layer': False,
-            'scaling_layer_bias_values': [0, 0, math.log(0.01) / math.log(1 / 51)]  # [0, 0, 1.17125493757]
+            'scaling_layer_bias_values': [0.0, 0.0, 0.0]  # [0, 0, 1.17125493757],
         }
         return hp
 
@@ -40,11 +64,19 @@ class TargetSpaceComplexPowerLawModel(PowerLawModel):
             nr_initial_features = self.nr_features + self.meta.nr_filters
 
         layers.append(nn.Linear(nr_initial_features, self.meta.nr_units))
+        if hasattr(self.meta, 'use_batch_norm') and self.meta.use_batch_norm:
+            layers.append(nn.BatchNorm1d(self.meta.nr_units))
         layers.append(self.act_func)
+        if hasattr(self.meta, 'dropout_rate') and self.meta.dropout_rate != 0:
+            layers.append(nn.Dropout(self.meta.dropout_rate))
 
         for i in range(2, self.meta.nr_layers + 1):
             layers.append(nn.Linear(self.meta.nr_units, self.meta.nr_units))
+            if hasattr(self.meta, 'use_batch_norm') and self.meta.use_batch_norm:
+                layers.append(nn.BatchNorm1d(self.meta.nr_units))
             layers.append(self.act_func)
+            if hasattr(self.meta, 'dropout_rate') and self.meta.dropout_rate != 0:
+                layers.append(nn.Dropout(self.meta.dropout_rate))
 
         last_layer = nn.Linear(self.meta.nr_units, 3)
         layers.append(last_layer)
@@ -80,12 +112,25 @@ class TargetSpaceComplexPowerLawModel(PowerLawModel):
         y1 = x[:, 1]
         y2 = x[:, 2]
 
-        y1 = self.last_act_func(y1)
-        y2 = self.last_act_func(y2)
+        alphas = self.alpha_act_func(alphas)
+        y1 = self.beta_act_func(y1)
+        y2 = self.gamma_act_func(y2)
 
-        # y2 = y1 * y2_diff
+        if hasattr(self.meta, 'alpha_beta_is_difference') and self.meta.alpha_beta_is_difference:
+            y2 = y1 * y2
+            # min_val = torch.min(y1, y2)
+            # max_val = torch.max(y1, y2)
+            # y1 = max_val
+            # y2 = min_val
 
-        val = (y2 - alphas) / (y1 - alphas)
+        if hasattr(self.meta, 'use_gamma_constraint') and self.meta.use_gamma_constraint:
+            alphas = alphas * y2
+            # min_val = torch.min(y2, alphas)
+            # max_val = torch.max(y2, alphas)
+            # y2 = max_val
+            # alphas = min_val
+
+        val = ((y2 - alphas) / (y1 - alphas + torch.tensor(1e-4))) + torch.tensor(1e-4)
 
         abs_val = torch.abs(val)
         log_abs_val = torch.log(abs_val)

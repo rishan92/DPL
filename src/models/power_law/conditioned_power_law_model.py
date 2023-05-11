@@ -18,14 +18,16 @@ class ConditionedPowerLawModel(PowerLawModel):
             'nr_filters': 4,
             'nr_cnn_layers': 2,
             'dropout_rate': 0,
-            'use_batch_norm': True,
+            'use_batch_norm': False,
             'use_learning_curve': False,
             'use_learning_curve_mask': False,
             'use_suggested_learning_rate': False,
             'use_sample_weights': False,
             'weight_regularization_factor': 0,
             'alpha_beta_constraint_factor': 0,
-            'learning_rate': 3e-3,
+            'gamma_constraint_factor': 0,
+            'output_constraint_factor': 0,
+            'learning_rate': 1e-3,
             'refine_learning_rate': 1e-3,
             'act_func': 'LeakyReLU',
             'last_act_func': 'Identity',
@@ -33,10 +35,20 @@ class ConditionedPowerLawModel(PowerLawModel):
             'beta_act_func': 'Sigmoid',
             'gamma_act_func': 'Abs',
             'output_act_func': 'ClipLeakyReLU',
-            'alpha_beta_is_difference': False,
+            'alpha_beta_is_difference': True,
             'use_gamma_constraint': False,
             'loss_function': 'L1Loss',
             'optimizer': 'Adam',
+            'learning_rate_scheduler': 'ExponentialLR',
+            # 'CosineAnnealingLR' 'LambdaLR' 'OneCycleLR' 'ExponentialLR'
+            'learning_rate_scheduler_args': {
+                'total_iters_factor': 1.0,
+                'eta_min': 1e-6,
+                'max_lr': 1e-4,
+                'refine_max_lr': 1e-3,
+                'exp_min': 1e-5,
+                'refine_exp_min': 1e-6,
+            },
             'activate_early_stopping': False,
             'early_stopping_it': 0,
             'use_scaling_layer': False,
@@ -142,7 +154,13 @@ class ConditionedPowerLawModel(PowerLawModel):
             betas = alphas_plus_beta * (1 - alpha_weight)
 
         if hasattr(self.meta, 'use_gamma_constraint') and self.meta.use_gamma_constraint:
-            gamma_constraint = torch.log((1 - alphas) / betas) / torch.log(torch.tensor(51))
+            # min_alpha_beta = torch.tensor(1e-3)
+            # gamma_constraint = torch.log((1 - min_alpha_beta) / min_alpha_beta) / torch.log(
+            #     torch.tensor(51))
+            gamma_constraint = \
+                torch.log((1 - alphas - torch.tensor(1e-4)) / (
+                    betas + torch.tensor(1e-4))) / torch.log(torch.tensor(51))
+
             gammas = gammas * gamma_constraint
 
         output = torch.add(

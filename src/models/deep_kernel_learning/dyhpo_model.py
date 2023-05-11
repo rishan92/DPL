@@ -398,7 +398,7 @@ class DyHPOModel(BasePytorchModule):
                     self.lr_scheduler.step()
 
                 if val_dataset:
-                    means, stds, predict_infos, val_power_law_loss = self._batch_predict(
+                    means, stds, predict_infos, val_power_law_mae = self._batch_predict(
                         test_data=val_dataset,
                         train_data=train_dataset,
                         target_normalization_inverse_fn=self.target_normalization_inverse_fn,
@@ -447,6 +447,7 @@ class DyHPOModel(BasePytorchModule):
                     wandb_data["surrogate/check_training/train_loss"] = mae_value
                     wandb_data["surrogate/check_training/validation_loss"] = val_mae_value
                     wandb_data["surrogate/check_training/validation_std_correlation"] = val_correlation_value
+                    wandb_data["surrogate/dyhpo/validation_power_law_MAE"] = val_power_law_mae
                 if gv.PLOT_SUGGEST_LR or self.meta.use_suggested_learning_rate:
                     wandb_data["surrogate/dyhpo/suggested_lr"] = DyHPOModel._suggested_lr
 

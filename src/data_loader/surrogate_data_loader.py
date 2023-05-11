@@ -26,6 +26,7 @@ class SurrogateDataLoader(DataLoader):
         self.last_sample = last_sample
         self.kwargs = kwargs
         self.data_size = 5
+        self.last_sample_weight = torch.rand((1,))
 
     def __len__(self):
         return super().__len__()
@@ -35,8 +36,10 @@ class SurrogateDataLoader(DataLoader):
         if self.should_weight_last_sample:
             weighted_batch: List[Optional[torch.Tensor]] = [None] * self.data_size
             for b in batches:
-                for i in range(self.data_size):
+                for i in range(self.data_size - 1):
                     weighted_batch[i] = torch.cat((b[i], self.last_sample[i])).to(self.device)
+                weighted_batch[self.data_size - 1] = torch.cat((b[self.data_size - 1], self.last_sample_weight)).to(
+                    self.device)
                 yield weighted_batch[0], weighted_batch[1], weighted_batch[2], weighted_batch[3], weighted_batch[4]
         else:
             for b in batches:
