@@ -144,7 +144,7 @@ class DyHPOModel(BasePytorchModule):
             # 'GPRegressionPowerLawMeanModel',  #  'GPRegressionModel'
             'likelihood_class_name': 'GaussianLikelihood',
             'mll_loss_function': 'ExactMarginalLogLikelihood',
-            'learning_rate': 1e-3,
+            'learning_rate': 1e-4,
             'refine_learning_rate': 1e-3,
             'power_law_loss_function': 'MSELoss',
             'power_law_loss_factor': 0.5,
