@@ -79,7 +79,7 @@ class EnsembleModel(BasePytorchModule):
             'model_class_name': 'TargetSpaceComplex3PowerLawModel',
             # 'ConditionedPowerLawModel', # 'ComplexPowerLawModel',  # 'TargetSpaceComplexPowerLawModel',
             'ensemble_size': 5,
-            'nr_epochs': 250,
+            'nr_epochs': 500,
             'refine_nr_epochs': 20,
             'batch_size': 64,
             'refine_batch_size': 64,
@@ -202,6 +202,10 @@ class EnsembleModel(BasePytorchModule):
     def meta_use_sample_weights(cls):
         model_class = get_class("src/models/power_law", cls.meta.model_class_name)
         return model_class.meta_use_sample_weights
+
+    @property
+    def has_batchnorm_layers(self):
+        return self.model[0].has_batchnorm_layers
 
     def reset(self):
         if gv.IS_WANDB and gv.PLOT_GRADIENTS:

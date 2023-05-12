@@ -321,7 +321,7 @@ class DyHPOModel(BasePytorchModule):
         nr_examples_batch = x_train.size(dim=0)
         # if only one example in the batch, skip the batch.
         # Otherwise, the code will fail because of batchnorm
-        if nr_examples_batch == 1:
+        if self.has_batchnorm_layers and nr_examples_batch == 1:
             return None, None
 
         for epoch_nr in range(0, nr_epochs):

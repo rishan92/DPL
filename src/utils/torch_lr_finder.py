@@ -198,11 +198,11 @@ class LRFinder(object):
         else:
             self.device = self.model_device
 
-        self.has_batchnorm_layers = False
+        self.has_batchnorm_layers = self.model.has_batchnorm_layers
 
-        for module in self.model.modules():
-            if isinstance(module, (nn.BatchNorm1d, nn.BatchNorm2d, nn.BatchNorm3d)):
-                self.has_batchnorm_layers = True
+        # for module in self.model.modules():
+        #     if isinstance(module, (nn.BatchNorm1d, nn.BatchNorm2d, nn.BatchNorm3d)):
+        #         self.has_batchnorm_layers = True
 
     def reset(self):
         """Restores the model and optimizer to their initial states."""
