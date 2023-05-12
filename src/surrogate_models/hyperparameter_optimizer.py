@@ -251,6 +251,7 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
                 'use_target_normalization': False,
                 'target_normalization_range': [0.2, 0.8],
                 'use_scaled_budgets': True,
+                'use_exploitation_sampling': False,
             }
         elif model_class == DyHPOModel:
             hp = {
@@ -263,6 +264,7 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
                 'use_target_normalization': False,
                 'target_normalization_range': [0.2, 0.8],
                 'use_scaled_budgets': True,
+                'use_exploitation_sampling': False,
             }
         else:
             raise NotImplementedError(f"{model_class=}")
@@ -392,12 +394,24 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
         else:
             mean_predictions, std_predictions, hp_indices, real_budgets, predict_infos = self._predict()
 
+            evaluated_mask = None
+            if hasattr(self.meta, 'use_exploitation_sampling') and self.meta.use_exploitation_sampling:
+                ex_sampling_probability = self.surrogate_budget / self.total_budget
+                random_number = np.random.uniform(0, 1)
+                if random_number < ex_sampling_probability:
+                    evaluated_indices = self.history_manager.get_evaluted_indices()
+                    if len(evaluated_indices) != 0:
+                        evaluated_indices = np.array(evaluated_indices)
+                        all_hp_indices = np.array(hp_indices)
+                        evaluated_mask = np.isin(all_hp_indices, evaluated_indices)
+
             best_prediction_index = self.find_suggested_config(
                 mean_predictions,
                 std_predictions,
                 real_budgets,
                 acq_mode=self.meta.acq_mode,
-                acq_best_value_mode=self.meta.acq_best_value_mode
+                acq_best_value_mode=self.meta.acq_best_value_mode,
+                exploitation_mask=evaluated_mask
             )
 
             """
@@ -581,6 +595,7 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
         budgets: NDArray[int] = None,
         acq_mode: str = 'ei',
         acq_best_value_mode: str = None,
+        exploitation_mask=None
     ) -> int:
         """Return the hyperparameter with the highest acq function value.
 
@@ -617,6 +632,9 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
             mean_stds,
             acq_mode=acq_mode,
         )
+
+        if exploitation_mask is not None:
+            acq_func_values[~exploitation_mask] = np.NINF
 
         max_value_index = np.argmax(acq_func_values)
         max_value_index = int(max_value_index)

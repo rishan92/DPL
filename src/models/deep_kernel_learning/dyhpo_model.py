@@ -163,6 +163,7 @@ class DyHPOModel(BasePytorchModule):
             'optimize_likelihood': False,
             'use_scale_to_bounds': False,
             'use_suggested_learning_rate': False,
+            'use_weight_by_budget': True,
             'optimizer': 'Adam',
             'reset_on_divergence': False,
             'learning_rate_scheduler': 'ExponentialLR',

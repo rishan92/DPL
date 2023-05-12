@@ -43,18 +43,22 @@ class SyntheticBench(BaseBenchmark):
         column_index = pd.MultiIndex.from_product(iterables, names=self.hp_names)
         self.benchmark_data = pd.DataFrame(index=np.arange(1, self.max_budget + 1), columns=column_index)
 
-        y1 = 0.8
-        y2 = 0.3
-        alphas = 0.15
-        # y1 = 0.42
-        # y2 = 0.37
-        # alphas = 0.36
+        # y1 = 0.8
+        # y2 = 0.3
+        # alphas = 0.15
+        # # y1 = 0.42
+        # # y2 = 0.37
+        # # alphas = 0.36
+        #
+        # betas = y2 - alphas
+        # gammas = math.log((y2 - alphas) / (y1 - alphas)) / math.log(1 / self.max_budget)
+        #
+        # scaled_budgets = np.arange(1, self.max_budget + 1) / self.max_budget
+        # curve = alphas + betas * np.power(scaled_budgets, -1 * gammas)
 
-        betas = y2 - alphas
-        gammas = math.log((y2 - alphas) / (y1 - alphas)) / math.log(1 / self.max_budget)
-
-        scaled_budgets = np.arange(1, self.max_budget + 1) / self.max_budget
-        curve = alphas + betas * np.power(scaled_budgets, -1 * gammas)
+        curve = np.zeros((self.max_budget,))
+        curve[:5] = -0.06 * np.arange(0, 5) + 0.8
+        curve[5:] = 0.5
 
         self.benchmark_data.loc[:, 0] = curve
 

@@ -24,6 +24,7 @@ class TargetSpaceComplex3PowerLawModel(PowerLawModel):
             'use_learning_curve_mask': False,
             'use_suggested_learning_rate': False,
             'use_sample_weights': False,
+            'use_weight_by_budget': False,
             'weight_regularization_factor': 0,
             'alpha_beta_constraint_factor': 0,
             'gamma_constraint_factor': 0,
@@ -52,7 +53,7 @@ class TargetSpaceComplex3PowerLawModel(PowerLawModel):
             'activate_early_stopping': False,
             'early_stopping_it': 0,
             'use_scaling_layer': False,
-            'scaling_layer_bias_values': [0.0, 0.0, 0.0]  # [0, 0, 1.17125493757],
+            'scaling_layer_bias_values': [0.0, -0.2, 0.0]  # [0, 0, 1.17125493757],
         }
         return hp
 

@@ -95,6 +95,12 @@ class HistoryManager:
         else:
             return []
 
+    def get_evaluted_indices(self):
+        if len(self.examples) == 0:
+            return []
+        else:
+            return list(self.examples.keys())
+
     def get_last_sample(self, curve_size_mode):
         newp_index, newp_budget, newp_performance, newp_curve = self.last_point
 
