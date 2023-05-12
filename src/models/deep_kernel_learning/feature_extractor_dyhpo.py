@@ -58,24 +58,24 @@ class FeatureExtractorDYHPO(BaseFeatureExtractor):
     def get_default_meta():
         hp = {
             'nr_layers': 2,
-            'nr_units': [64, 128],
+            'nr_units': [128, 128],
             'cnn_nr_channels': 4,
             'cnn_kernel_size': 3,
             'cnn_nr_layers': 1,
             'dropout_rate': 0,
-            'use_batch_norm': True,
+            'use_batch_norm': False,
             'use_learning_curve': False,
             'use_learning_curve_mask': False,
             'act_func': 'LeakyReLU',
             'last_act_func': 'Identity',
             'alpha_act_func': 'Sigmoid',
             'beta_act_func': 'Sigmoid',
-            'gamma_act_func': 'Sigmoid',
+            'gamma_act_func': 'Abs',
             'output_act_func': 'ClipLeakyReLU',
-            'alpha_beta_is_difference': False,
+            'alpha_beta_is_difference': True,
             'use_gamma_constraint': False,
             'use_scaling_layer': False,
-            'scaling_layer_bias_values': [0, 0, math.log(0.01) / math.log(1 / 51)]  # [0, 0, 1.17125493757],
+            'scaling_layer_bias_values': None,  # [0, 0, 0]  # [0, 0, 1.17125493757],
         }
         return hp
 
@@ -165,6 +165,7 @@ class FeatureExtractorDYHPO(BaseFeatureExtractor):
             if hasattr(self.meta, "scaling_layer_bias_values") and self.meta.scaling_layer_bias_values:
                 bias_values = self.meta.scaling_layer_bias_values
             scaling_layer = ScalingLayer(in_features=3, bias_values=bias_values)
+            layers.append(self.act_func)
             layers.append(scaling_layer)
 
         net = torch.nn.Sequential(*layers)

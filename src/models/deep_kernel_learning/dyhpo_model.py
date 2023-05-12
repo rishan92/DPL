@@ -18,6 +18,7 @@ from functools import partial
 import torch.nn.functional as F
 from torch.utils.data import Subset
 import traceback
+import math
 
 from src.models.deep_kernel_learning.base_feature_extractor import BaseFeatureExtractor
 from src.models.deep_kernel_learning.gp_regression_model import GPRegressionModel
@@ -143,35 +144,36 @@ class DyHPOModel(BasePytorchModule):
             'nr_patience_epochs': 10,
             'nr_epochs': 1000,
             'refine_nr_epochs': 50,
-            'feature_class_name': 'FeatureExtractorDYHPO',
-            # 'FeatureExtractor',  #  'FeatureExtractorPowerLaw',
+            'feature_class_name': 'FeatureExtractorTargetSpaceDYHPO',
+            # 'FeatureExtractor',  #  'FeatureExtractorDYHPO',  # 'FeatureExtractorTargetSpaceDYHPO'
             'gp_class_name': 'GPRegressionPowerLawMeanModel',
             # 'GPRegressionPowerLawMeanModel',  #  'GPRegressionModel'
             'likelihood_class_name': 'GaussianLikelihood',
             'mll_loss_function': 'ExactMarginalLogLikelihood',
-            'learning_rate': 1e-3,
+            'learning_rate': 1.5e-3,
             'refine_learning_rate': 1e-3,
             'power_law_loss_function': 'MSELoss',
             'power_law_loss_factor': 0,
-            'l1_loss_factor': 0,
+            'l1_loss_factor': 10,
             'weight_regularization_factor': 0,
             'alpha_beta_constraint_factor': 0,
             'noise_lower_bound': 1e-4,  # 1e-4,  #
             'noise_upper_bound': 1e-3,  # 1e-3,  #
-            'use_seperate_lengthscales': False,
+            'use_seperate_lengthscales': True,
             'optimize_likelihood': False,
             'use_scale_to_bounds': False,
             'use_suggested_learning_rate': False,
             'optimizer': 'Adam',
             'reset_on_divergence': False,
-            'learning_rate_scheduler': None,
+            'learning_rate_scheduler': 'ExponentialLR',
             # 'CosineAnnealingLR' 'LambdaLR' 'OneCycleLR' 'ExponentialLR'
             'learning_rate_scheduler_args': {
-                'total_iters_factor': 1,
-                'eta_min': 1e-4,
-                'max_lr': 1e-3,
-                'refine_max_lr': 1e-4,
-                'gamma': 0.9,
+                'total_iters_factor': 1.0,
+                'eta_min': 1e-6,
+                'max_lr': 1e-4,
+                'refine_max_lr': 1e-3,
+                'exp_min': 1e-6,
+                'refine_exp_min': 1e-6,
             },
         }
 
@@ -188,7 +190,7 @@ class DyHPOModel(BasePytorchModule):
         cls.meta = SimpleNamespace(**meta)
         return meta
 
-    def set_optimizer(self, **kwargs):
+    def set_optimizer(self, use_scheduler=False, **kwargs):
         is_refine = self.optimizer is not None
         if is_refine and hasattr(self.meta, 'refine_learning_rate') and self.meta.refine_learning_rate:
             learning_rate = self.meta.refine_learning_rate
@@ -203,7 +205,8 @@ class DyHPOModel(BasePytorchModule):
         else:
             self.optimizer = optimizer_class(self.parameters(), lr=learning_rate)
 
-        self.set_lr_scheduler(is_refine=is_refine, **kwargs)
+        if use_scheduler:
+            self.set_lr_scheduler(is_refine=is_refine, **kwargs)
 
     def set_lr_scheduler(self, is_refine: bool, **kwargs):
         if hasattr(self.meta, 'learning_rate_scheduler') and self.meta.learning_rate_scheduler:
@@ -224,8 +227,12 @@ class DyHPOModel(BasePytorchModule):
             args["epochs"] = epochs
             args["total_steps"] = epochs
             args["lr_lambda"] = lambda step: 1 - step / args["total_iters"]
+            args["gamma"] = math.exp(math.log(args["exp_min"] / self.meta.learning_rate) / args["total_iters"])
             if is_refine and 'refine_max_lr' in args and args["refine_max_lr"]:
                 args["max_lr"] = args["refine_max_lr"]
+            if is_refine and 'refine_exp_min' in args and args["refine_exp_min"]:
+                args["gamma"] = math.exp(
+                    math.log(args["refine_exp_min"] / self.meta.refine_learning_rate) / args["total_iters"])
 
             arg_names = inspect.getfullargspec(lr_scheduler_class.__init__).args
             relevant_args = {k: v for k, v in args.items() if k in arg_names}
@@ -290,7 +297,7 @@ class DyHPOModel(BasePytorchModule):
             batch_size = 64
 
         if reset_optimizer or self.optimizer is None:
-            self.set_optimizer(epochs=nr_epochs)
+            self.set_optimizer(epochs=nr_epochs, use_scheduler=True)
 
         if self.meta.use_suggested_learning_rate and DyHPOModel._suggested_lr is not None and not is_lr_finder:
             for param_group in self.optimizer.param_groups:
@@ -394,7 +401,7 @@ class DyHPOModel(BasePytorchModule):
 
                 self.optimizer.step()
 
-                if self.lr_scheduler and self.optimizer._step_count > 0:
+                if self.lr_scheduler:
                     self.lr_scheduler.step()
 
                 if val_dataset:

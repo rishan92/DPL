@@ -267,7 +267,7 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
         else:
             raise NotImplementedError(f"{model_class=}")
 
-        hp["check_model"] = True
+        hp["check_model"] = False
         hp["check_model_predict_mode"] = 'all'  # 'end'
         hp["validation_configuration_ratio"] = 0.9
         hp['validation_curve_ratio'] = 0.9
@@ -656,6 +656,10 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
             std_data = self.target_normalization_std_inverse_fn(std_data)
             if predict_infos is not None and 'pl_output' in predict_infos:
                 predict_infos['pl_output'] = self.target_normalization_inverse_fn(predict_infos['pl_output'])
+
+        # import torch.nn.functional as F
+        # val_mae = F.l1_loss(torch.from_numpy(mean_data), torch.tensor(real_curve), reduction='mean')
+        # print("val", val_mae)
 
         plt.clf()
         if predict_infos is not None:
