@@ -79,12 +79,13 @@ class EnsembleModel(BasePytorchModule):
             'model_class_name': 'TargetSpaceComplex3PowerLawModel',
             # 'ConditionedPowerLawModel', # 'ComplexPowerLawModel',  # 'TargetSpaceComplexPowerLawModel',
             'ensemble_size': 5,
-            'nr_epochs': 500,
+            'nr_epochs': 250,
             'refine_nr_epochs': 20,
             'batch_size': 64,
             'refine_batch_size': 64,
             'exploration_exploitation_strategy': None,  # 'batch_norm',
             'flip_batch_norm': False,
+            'use_resampling': False,
         }
         return hp
 
@@ -130,10 +131,12 @@ class EnsembleModel(BasePytorchModule):
 
         model_device = next(self.parameters()).device
 
+        use_resampling = hasattr(self.meta, 'use_resampling') and self.meta.use_resampling
+
         # make the training dataloader
         train_dataloader = SurrogateDataLoader(
             dataset=train_dataset, batch_size=batch_size, shuffle=True, seed=self.seed, dev=model_device,
-            should_weight_last_sample=should_weight_last_sample, last_sample=last_sample,
+            should_weight_last_sample=should_weight_last_sample, last_sample=last_sample, use_resampling=use_resampling
             # drop_last=train_dataset.X.shape[0] > batch_size and train_dataset.X.shape[0] % batch_size < 2
         )
 

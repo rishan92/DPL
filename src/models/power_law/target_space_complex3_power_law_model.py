@@ -27,19 +27,19 @@ class TargetSpaceComplex3PowerLawModel(PowerLawModel):
             'weight_regularization_factor': 0,
             'alpha_beta_constraint_factor': 0,
             'gamma_constraint_factor': 0,
-            'learning_rate': 1.5e-3,
+            'learning_rate': 1e-3,
             'refine_learning_rate': 1e-3,
             'act_func': 'LeakyReLU',
             'last_act_func': 'Identity',
             'alpha_act_func': 'Sigmoid',
             'beta_act_func': 'Sigmoid',
             'gamma_act_func': 'Sigmoid',
-            'output_act_func': 'ClipLeakyReLU',
+            'output_act_func': None,
             'alpha_beta_is_difference': True,
             'use_gamma_constraint': True,
             'loss_function': 'L1Loss',
             'optimizer': 'Adam',
-            'learning_rate_scheduler': 'ExponentialLR',
+            'learning_rate_scheduler': None,
             # 'CosineAnnealingLR' 'LambdaLR' 'OneCycleLR' 'ExponentialLR'
             'learning_rate_scheduler_args': {
                 'total_iters_factor': 1.0,
@@ -135,16 +135,16 @@ class TargetSpaceComplex3PowerLawModel(PowerLawModel):
         abs_val = torch.abs(val)
         log_abs_val = torch.log(abs_val)
 
-        # Calculate the angle (imaginary part)
-        angle = torch.atan2(torch.tensor(0.0), val)
+        # # Calculate the angle (imaginary part)
+        # angle = torch.atan2(torch.tensor(0.0), val)
+        #
+        # log_val = torch.complex(log_abs_val, angle)
 
-        log_val = torch.complex(log_abs_val, angle)
-
-        gammas = log_val / torch.log(torch.tensor(1 / 51))
+        gammas = log_abs_val / torch.log(torch.tensor(1 / 51))
 
         betas = y2 - alphas
 
-        output_complex = torch.add(
+        output = torch.add(
             alphas,
             torch.mul(
                 betas,
@@ -154,7 +154,7 @@ class TargetSpaceComplex3PowerLawModel(PowerLawModel):
                 )
             ),
         )
-        output = output_complex.real
+        # output = output_complex.real
         if self.output_act_func and self.training:
             output = self.output_act_func(output)
 

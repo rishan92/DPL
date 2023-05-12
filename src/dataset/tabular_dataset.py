@@ -1,5 +1,6 @@
 import torch
 from torch.utils.data import Dataset
+from sklearn.utils import resample
 
 
 class TabularDataset(Dataset):
@@ -24,6 +25,30 @@ class TabularDataset(Dataset):
         if self.use_sample_weights:
             self.weights = torch.rand((self.X.shape[0],))
             # self.weights = torch.randn((self.X.shape[0],)) * 0.1
+
+    def resample_dataset(self):
+        data = [self.X, self.budgets]
+        if self.Y is not None:
+            data.append(self.Y)
+        if self.curves is not None:
+            data.append(self.curves)
+        if self.weights is not None:
+            data.append(self.weights)
+
+        boot_data = resample(*data)
+
+        self.X = boot_data[0]
+        self.budgets = boot_data[1]
+        index = 2
+        if self.Y is not None:
+            self.Y = boot_data[index]
+            index += 1
+        if self.curves is not None:
+            self.curves = boot_data[index]
+            index += 1
+        if self.weights is not None:
+            self.weights = boot_data[index]
+            index += 1
 
     def __len__(self):
         return self.X.size(0)

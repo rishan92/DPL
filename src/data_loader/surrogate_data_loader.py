@@ -1,4 +1,4 @@
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, WeightedRandomSampler
 import torch
 import numpy as np
 import random
@@ -13,7 +13,8 @@ def seed_worker(worker_id):
 
 
 class SurrogateDataLoader(DataLoader):
-    def __init__(self, seed=0, dev='cpu', should_weight_last_sample=False, last_sample=None, **kwargs):
+    def __init__(self, seed=0, dev='cpu', should_weight_last_sample=False, last_sample=None, use_resampling=False,
+                 **kwargs):
         if seed is not None:
             g = torch.Generator()
             g.manual_seed(int(seed))
@@ -27,6 +28,7 @@ class SurrogateDataLoader(DataLoader):
         self.kwargs = kwargs
         self.data_size = 5
         self.last_sample_weight = torch.rand((1,))
+        self.use_resampling = use_resampling
 
     def __len__(self):
         return super().__len__()
@@ -54,8 +56,18 @@ class SurrogateDataLoader(DataLoader):
             new_dataset.reset_sample_weights()
             kwargs['dataset'] = new_dataset
 
+        # weights = torch.rand((len(dataset),))
+        # sampler = WeightedRandomSampler(weights, num_samples=len(weights), replacement=True)
+        # kwargs['sampler'] = sampler
+        # kwargs['shuffle'] = False
+        if self.use_resampling:
+            new_dataset = copy.copy(dataset)
+            new_dataset.resample_dataset()
+            kwargs['dataset'] = new_dataset
+
         instance = SurrogateDataLoader(seed=seed, dev=self.device,
                                        should_weight_last_sample=self.should_weight_last_sample,
                                        last_sample=self.last_sample,
+                                       use_resampling=self.use_resampling,
                                        **kwargs)
         return instance
