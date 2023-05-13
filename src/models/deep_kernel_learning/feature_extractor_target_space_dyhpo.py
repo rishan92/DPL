@@ -71,7 +71,7 @@ class FeatureExtractorTargetSpaceDYHPO(BaseFeatureExtractor):
             'alpha_act_func': 'Sigmoid',
             'beta_act_func': 'Sigmoid',
             'gamma_act_func': 'Sigmoid',
-            'output_act_func': 'ClipLeakyReLU',
+            'output_act_func': None,
             'alpha_beta_is_difference': True,
             'use_gamma_constraint': True,
             'use_scaling_layer': False,

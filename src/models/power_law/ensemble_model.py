@@ -211,6 +211,11 @@ class EnsembleModel(BasePytorchModule):
         model_class = get_class("src/models/power_law", cls.meta.model_class_name)
         return model_class.meta_use_sample_weight_by_budget
 
+    @classproperty
+    def meta_sample_weight_by_budget_strategy(cls):
+        model_class = get_class("src/models/power_law", cls.meta.model_class_name)
+        return model_class.meta_sample_weight_by_budget_strategy
+
     @property
     def has_batchnorm_layers(self):
         return self.model[0].has_batchnorm_layers

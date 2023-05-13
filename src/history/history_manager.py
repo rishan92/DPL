@@ -16,13 +16,14 @@ from numpy.typing import NDArray
 from src.utils.utils import get_class_from_package, get_class_from_packages, numpy_to_torch_apply
 import src.models.activation_functions
 from src.benchmarks.base_benchmark import BaseBenchmark
+import matplotlib.pyplot as plt
 
 
 class HistoryManager:
     def __init__(self, hp_candidates, max_benchmark_epochs, fantasize_step, use_learning_curve, use_learning_curve_mask,
                  fill_value='zero', use_target_normalization=False, use_scaled_budgets=True,
                  model_output_normalization=None, cnn_kernel_size=0, target_normalization_range=None,
-                 use_sample_weights=False, use_sample_weight_by_budget=False):
+                 use_sample_weights=False, use_sample_weight_by_budget=False, sample_weight_by_budget_strategy=None):
         assert fill_value in ["zero", "last"], "Invalid fill value mode"
         # assert predict_mode in ["end_budget", "next_budget"], "Invalid predict mode"
         # assert curve_size_mode in ["fixed", "variable"], "Invalid curve size mode"
@@ -35,6 +36,7 @@ class HistoryManager:
         self.cnn_kernel_size = cnn_kernel_size
         self.use_sample_weights = use_sample_weights
         self.use_sample_weight_by_budget = use_sample_weight_by_budget
+        self.sample_weight_by_budget_strategy = sample_weight_by_budget_strategy
 
         self.use_target_normalization = use_target_normalization
         self.target_normalization_range = \
@@ -157,13 +159,26 @@ class HistoryManager:
         train_weights = []
         initial_empty_value = self.get_initial_empty_value()
 
+        if self.sample_weight_by_budget_strategy is not None:
+            if self.sample_weight_by_budget_strategy.isdigit():
+                power_value = int(self.sample_weight_by_budget_strategy)
+                weight_fn = lambda w: np.power(w / self.max_benchmark_epochs, power_value)
+            elif self.sample_weight_by_budget_strategy == "softmax":
+                weight_fn = lambda w: np.exp(w - np.max(w))
+            else:
+                raise NotImplementedError
+        else:
+            weight_fn = lambda w: w
+
         for hp_index in self.examples:
             budgets = self.examples[hp_index]
             performances = self.performances[hp_index]
 
             weights = budgets.astype(np.float32)
+            weights = weight_fn(weights)
             weights /= weights.sum()
             weights *= weights.shape[0]
+
             for i, budget in enumerate(budgets):
                 train_indices.append(hp_index)
                 train_budgets.append(budget)

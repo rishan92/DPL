@@ -25,6 +25,7 @@ class TargetSpaceComplex3PowerLawModel(PowerLawModel):
             'use_suggested_learning_rate': False,
             'use_sample_weights': False,
             'use_sample_weight_by_budget': True,
+            'sample_weight_by_budget_strategy': None,
             'weight_regularization_factor': 0,
             'alpha_beta_constraint_factor': 0,
             'gamma_constraint_factor': 0,
