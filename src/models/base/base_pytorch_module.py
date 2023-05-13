@@ -102,6 +102,13 @@ class BasePytorchModule(nn.Module, Meta, ABC):
         else:
             return False
 
+    @classproperty
+    def meta_use_sample_weight_by_budget(cls):
+        if hasattr(cls.meta, 'use_sample_weight_by_budget'):
+            return cls.meta.use_sample_weight_by_budget
+        else:
+            return False
+
     def print_parameters(self):
         for name, param in self.named_parameters():
             print(f"{name}: {param}")

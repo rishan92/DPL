@@ -221,6 +221,7 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
             use_scaled_budgets=self.meta.use_scaled_budgets,
             cnn_kernel_size=self.model_class.meta_cnn_kernel_size,
             use_sample_weights=self.model_class.meta_use_sample_weights,
+            use_sample_weight_by_budget=self.model_class.meta_use_sample_weight_by_budget,
         )
 
         self.real_curve_targets_map_pd: Optional[pd.DataFrame] = None

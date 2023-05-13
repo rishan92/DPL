@@ -22,7 +22,7 @@ class HistoryManager:
     def __init__(self, hp_candidates, max_benchmark_epochs, fantasize_step, use_learning_curve, use_learning_curve_mask,
                  fill_value='zero', use_target_normalization=False, use_scaled_budgets=True,
                  model_output_normalization=None, cnn_kernel_size=0, target_normalization_range=None,
-                 use_sample_weights=False):
+                 use_sample_weights=False, use_sample_weight_by_budget=False):
         assert fill_value in ["zero", "last"], "Invalid fill value mode"
         # assert predict_mode in ["end_budget", "next_budget"], "Invalid predict mode"
         # assert curve_size_mode in ["fixed", "variable"], "Invalid curve size mode"
@@ -34,6 +34,7 @@ class HistoryManager:
         self.use_scaled_budgets = use_scaled_budgets
         self.cnn_kernel_size = cnn_kernel_size
         self.use_sample_weights = use_sample_weights
+        self.use_sample_weight_by_budget = use_sample_weight_by_budget
 
         self.use_target_normalization = use_target_normalization
         self.target_normalization_range = \
@@ -80,6 +81,7 @@ class HistoryManager:
         self.performances[hp_index] = hp_curve
 
         initial_empty_value = self.get_initial_empty_value()
+
         self.last_point = (hp_index, b, hp_curve[b - 1], hp_curve[0:b - 1] if b > 1 else [initial_empty_value])
 
         max_curve = np.max(hp_curve)
@@ -128,7 +130,12 @@ class HistoryManager:
             modified_curve = torch.tensor([0], dtype=torch.float32)
             modified_curve = torch.unsqueeze(modified_curve, dim=0)
 
-        last_sample = (new_example, newp_performance, newp_budget, modified_curve)
+        if self.cached_train_dataset is not None:
+            weight = self.cached_train_dataset.get_weight(x=new_example, budget=newp_budget)
+        else:
+            weight = torch.tensor(1)
+
+        last_sample = (new_example, newp_performance, newp_budget, modified_curve, weight)
         return last_sample
 
     def history_configurations(self, curve_size_mode) -> \
@@ -205,7 +212,8 @@ class HistoryManager:
             Y=train_labels,
             budgets=train_budgets,
             curves=train_curves,
-            use_sample_weights=self.use_sample_weights
+            use_sample_weights=self.use_sample_weights,
+            use_sample_weight_by_budget=self.use_sample_weight_by_budget
         )
 
         self.cached_train_dataset = train_dataset
@@ -618,7 +626,8 @@ class HistoryManager:
             Y=train_labels,
             budgets=train_budgets,
             curves=train_curves,
-            use_sample_weights=self.use_sample_weights
+            use_sample_weights=self.use_sample_weights,
+            use_sample_weight_by_budget=self.use_sample_weight_by_budget
         )
 
         val_dataset = TabularDataset(

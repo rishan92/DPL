@@ -117,7 +117,7 @@ class PowerLawModel(BasePytorchModule, ABC):
         if hasattr(self.meta, "use_learning_curve") and self.meta.use_learning_curve:
             self.cnn_net = self.get_cnn_net()
 
-        if self.meta.use_sample_weights or self.meta.use_weight_by_budget:
+        if self.meta.use_sample_weights or self.meta.use_sample_weight_by_budget:
             reduction = 'none'
         else:
             reduction = 'mean'
@@ -295,16 +295,17 @@ class PowerLawModel(BasePytorchModule, ABC):
                     batch_weights /= batch_weights.sum()
                     batch_weights *= nr_examples_batch
                     criterion_loss = (criterion_loss * batch_weights).mean()
-                elif self.meta.use_weight_by_budget:
-                    batch_weights = batch_budgets.clone()
-                    # batch_weights_min = batch_weights.min()
-                    # batch_weights_max = batch_weights.max()
-                    # batch_weights_gap = batch_weights_max - batch_weights_min
-                    # if batch_weights_gap != 0:
-                    #     batch_weights = (batch_weights - batch_weights_min) / batch_weights_gap
-                    #     batch_weights = 1 - batch_weights
-                    batch_weights /= batch_weights.sum()
-                    batch_weights *= nr_examples_batch
+                elif self.meta.use_sample_weight_by_budget:
+                    # batch_weights = batch_budgets.clone()
+                    # # batch_weights_min = batch_weights.min()
+                    # # batch_weights_max = batch_weights.max()
+                    # # batch_weights_gap = batch_weights_max - batch_weights_min
+                    # # if batch_weights_gap != 0:
+                    # #     batch_weights = (batch_weights - batch_weights_min) / batch_weights_gap
+                    # #     batch_weights = 1 - batch_weights
+                    # batch_weights /= batch_weights.sum()
+                    # batch_weights *= nr_examples_batch
+
                     criterion_loss = (criterion_loss * batch_weights).mean()
 
                 loss = criterion_loss + self.regularization_factor * l1_norm + \
