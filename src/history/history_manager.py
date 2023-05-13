@@ -133,13 +133,14 @@ class HistoryManager:
         if self.cached_train_dataset is not None:
             weight = self.cached_train_dataset.get_weight(x=new_example, budget=newp_budget)
         else:
-            weight = torch.tensor(1)
+            weight = torch.tensor([1.0])
 
         last_sample = (new_example, newp_performance, newp_budget, modified_curve, weight)
         return last_sample
 
     def history_configurations(self, curve_size_mode) -> \
-        Tuple[NDArray[int], NDArray[np.float32], NDArray[np.float32], Optional[NDArray[np.float32]]]:
+        Tuple[NDArray[int], NDArray[np.float32], NDArray[np.float32],
+              Optional[NDArray[np.float32]], NDArray[np.float32]]:
         """
         Generate the configurations, labels, budgets and curves
         based on the history of evaluated configurations.
@@ -153,19 +154,24 @@ class HistoryManager:
         train_labels = []
         train_budgets = []
         train_curves = []
+        train_weights = []
         initial_empty_value = self.get_initial_empty_value()
 
         for hp_index in self.examples:
             budgets = self.examples[hp_index]
             performances = self.performances[hp_index]
 
-            for budget in budgets:
+            weights = budgets.astype(np.float32)
+            weights /= weights.sum()
+            weights *= weights.shape[0]
+            for i, budget in enumerate(budgets):
                 train_indices.append(hp_index)
                 train_budgets.append(budget)
                 train_labels.append(performances[budget - 1])
                 if self.use_learning_curve:
                     train_curve = performances[:budget - 1] if budget > 1 else [initial_empty_value]
                     train_curves.append(train_curve)
+                train_weights.append(weights[i])
 
         train_curves = self.get_processed_curves(curves=train_curves, curve_size_mode=curve_size_mode,
                                                  real_budgets=train_budgets)
@@ -173,8 +179,9 @@ class HistoryManager:
         train_indices = np.array(train_indices, dtype=int)
         train_budgets = np.array(train_budgets, dtype=np.float32)
         train_labels = np.array(train_labels, dtype=np.float32)
+        train_weights = np.array(train_weights, dtype=np.float32)
 
-        return train_indices, train_labels, train_budgets, train_curves
+        return train_indices, train_labels, train_budgets, train_curves, train_weights
 
     def get_train_dataset(self, curve_size_mode) -> TabularDataset:
         """This method is called to prepare the necessary training dataset
@@ -187,7 +194,8 @@ class HistoryManager:
         if not self.is_train_data_modified:
             return self.cached_train_dataset
 
-        hp_indices, train_labels, train_budgets, train_curves = self.history_configurations(curve_size_mode)
+        hp_indices, train_labels, train_budgets, train_curves, train_weights = \
+            self.history_configurations(curve_size_mode)
 
         if self.use_scaled_budgets:
             # scale budgets to [0, 1]
@@ -206,6 +214,7 @@ class HistoryManager:
         train_labels = torch.from_numpy(train_labels)
         train_budgets = torch.from_numpy(train_budgets)
         train_curves = torch.from_numpy(train_curves) if train_curves is not None else None
+        train_weights = torch.from_numpy(train_weights) if self.use_sample_weight_by_budget else None
 
         train_dataset = TabularDataset(
             X=train_examples,
@@ -213,7 +222,8 @@ class HistoryManager:
             budgets=train_budgets,
             curves=train_curves,
             use_sample_weights=self.use_sample_weights,
-            use_sample_weight_by_budget=self.use_sample_weight_by_budget
+            use_sample_weight_by_budget=self.use_sample_weight_by_budget,
+            weights=train_weights
         )
 
         self.cached_train_dataset = train_dataset

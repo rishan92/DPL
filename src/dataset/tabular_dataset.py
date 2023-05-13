@@ -4,7 +4,8 @@ from sklearn.utils import resample
 
 
 class TabularDataset(Dataset):
-    def __init__(self, X, budgets, curves=None, Y=None, use_sample_weights=False, use_sample_weight_by_budget=False):
+    def __init__(self, X, budgets, curves=None, Y=None, use_sample_weights=False, use_sample_weight_by_budget=False,
+                 weights=None):
         super().__init__()
         self.X = X
         self.Y = Y
@@ -17,19 +18,18 @@ class TabularDataset(Dataset):
         self.weights = None
         self.use_sample_weights = use_sample_weights
         self.use_sample_weight_by_budget = use_sample_weight_by_budget
-        self.dummy_weight = torch.tensor(1)
+        self.dummy_weight = torch.tensor([1.0])
         self.weight_factor = torch.tensor(1)
-        if use_sample_weights:
-            self.weights = torch.rand((self.X.shape[0],))
-            # self.weights = torch.randn((self.X.shape[0],)) * 0.1
-        if use_sample_weight_by_budget:
-            self.weights = self.budgets.clone()
-            self.weight_factor = self.X.shape[0] / self.weights.sum()
-            self.weights *= self.weight_factor
-            a = 0
-
-    def get_weight_factor(self):
-        return self.weight_factor
+        if weights is not None:
+            self.weights = weights
+        else:
+            if use_sample_weights:
+                self.weights = torch.rand((self.X.shape[0],))
+                # self.weights = torch.randn((self.X.shape[0],)) * 0.1
+            if use_sample_weight_by_budget:
+                self.weights = self.budgets.clone()
+                self.weight_factor = self.X.shape[0] / self.weights.sum()
+                self.weights *= self.weight_factor
 
     def get_weight(self, x, budget):
         x_index = (self.X == x).all(axis=1)
@@ -40,6 +40,7 @@ class TabularDataset(Dataset):
         index = index[0]
 
         weight = self.weights[index] if self.weights is not None else self.dummy_weight
+        # weight = weight.unsqueeze(0)
         return weight
 
     def reset_sample_weights(self):
@@ -78,7 +79,7 @@ class TabularDataset(Dataset):
         if self.use_sample_weights or self.use_sample_weight_by_budget:
             return self.X[idx], self.Y[idx], self.budgets[idx], self.curves[idx], self.weights[idx]
         else:
-            return self.X[idx], self.Y[idx], self.budgets[idx], self.curves[idx], self.dummy_weight
+            return self.X[idx], self.Y[idx], self.budgets[idx], self.curves[idx], self.dummy_weight[0]
 
     def get_subset(self, idx) -> "TabularDataset":
         subset = self[idx]
