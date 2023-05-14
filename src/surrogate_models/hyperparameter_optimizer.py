@@ -516,6 +516,11 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
 
         self.logger.debug(f"no_improvement_patience {self.no_improvement_patience}")
 
+        if gv.PLOT_ACQ and gv.IS_WANDB:
+            wandb.log({
+                "acq/is_train_from_scratch": int(self.train)
+            }, commit=False)
+
         if self.initial_random_index >= len(self.rand_init_conf_indices):
 
             if self.train:
