@@ -646,7 +646,7 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
             acq_mode=acq_mode,
         )
 
-        if gv.PLOT_ACQ:  # and gv.IS_WANDB:
+        if gv.PLOT_ACQ and gv.IS_WANDB:
             true_labels = self.benchmark_labels[hp_indices]
             mean_correlation, _ = spearmanr(mean_predictions, true_labels, nan_policy='raise')
             acq_correlation, _ = spearmanr(acq_func_values, true_labels, nan_policy='raise')

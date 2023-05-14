@@ -171,6 +171,7 @@ class Framework:
             self.pred_dist_path.mkdir(parents=True, exist_ok=True)
             delete_folder_content(self.pred_dist_path)
 
+        self.pred_trend_path = None
         if gv.PLOT_PRED_TREND:
             self.pred_trend_path = self.result_dir / "pred_trend" / self.dataset_name / str(self.seed)
             self.pred_trend_path.mkdir(parents=True, exist_ok=True)
