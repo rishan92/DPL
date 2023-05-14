@@ -147,7 +147,7 @@ class DyHPOModel(BasePytorchModule):
             'nr_patience_epochs': 10,
             'nr_epochs': 1000,
             'refine_nr_epochs': 50,
-            'feature_class_name': 'FeatureExtractorTargetSpaceDYHPO',
+            'feature_class_name': 'FeatureExtractorDYHPO',
             # 'FeatureExtractor',  #  'FeatureExtractorDYHPO',  # 'FeatureExtractorTargetSpaceDYHPO'
             'gp_class_name': 'GPRegressionPowerLawMeanModel',
             # 'GPRegressionPowerLawMeanModel',  #  'GPRegressionModel'
@@ -434,6 +434,7 @@ class DyHPOModel(BasePytorchModule):
                     crps_score = crps_score.mean()
 
                     best_values = np.ones_like(means)
+                    best_values[:] = np.mean(labels)
                     acq_func_values = acq(
                         best_values,
                         means,
