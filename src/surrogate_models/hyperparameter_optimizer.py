@@ -518,8 +518,8 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
 
         if gv.PLOT_ACQ and gv.IS_WANDB:
             wandb.log({
-                "acq/is_train_from_scratch": int(self.train)
-            }, commit=False)
+                "acq/training_from_scratch": 1.0 if self.train else 0.0
+            })
 
         if self.initial_random_index >= len(self.rand_init_conf_indices):
 
@@ -668,7 +668,6 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
                 "acq/mean_correlation": mean_correlation,
                 "acq/acq_correlation": acq_correlation,
                 "acq/crps": crps_score,
-                "acq/is_train_from_scratch": int(self.train),
                 "acq/std_coverage_1sigma": coverage_1std,
                 "acq/std_coverage_2sigma": coverage_2std,
                 "acq/std_coverage_3sigma": coverage_3std,

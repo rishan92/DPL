@@ -19,6 +19,8 @@ import torch.nn.functional as F
 from torch.utils.data import Subset
 import traceback
 import math
+from scipy.stats import spearmanr
+import properscoring as ps
 
 from src.models.deep_kernel_learning.base_feature_extractor import BaseFeatureExtractor
 from src.models.deep_kernel_learning.gp_regression_model import GPRegressionModel
@@ -31,6 +33,7 @@ from src.utils.utils import get_class, classproperty
 import global_variables as gv
 from src.utils.torch_lr_finder import LRFinder
 from src.data_loader.surrogate_data_loader import SurrogateDataLoader
+from src.utils.utils import acq
 
 
 class DyHPOModel(BasePytorchModule):
@@ -413,11 +416,33 @@ class DyHPOModel(BasePytorchModule):
                         target_normalization_std_inverse_fn=self.target_normalization_std_inverse_fn
                     )
                     means_tensor = torch.from_numpy(means).to(model_device)
-                    val_mae = F.l1_loss(means_tensor, val_dataset.Y, reduction='mean')
+                    labels = val_dataset.Y
+                    val_mae = F.l1_loss(means_tensor, labels, reduction='mean')
                     val_mae_value = val_mae.detach().to('cpu').item()
-                    difference = np.abs(means - val_dataset.Y.numpy())
-                    val_correlation_value = np.corrcoef(stds, difference)
+
+                    labels = labels.detach().numpy()
+
+                    abs_residuals = np.abs(means - labels)
+                    val_correlation_value = np.corrcoef(stds, abs_residuals)
                     val_correlation_value = val_correlation_value[0, 1]
+
+                    coverage_1std = np.mean(abs_residuals <= stds) - 0.68
+                    coverage_2std = np.mean(abs_residuals <= 2 * stds) - 0.95
+                    coverage_3std = np.mean(abs_residuals <= 3 * stds) - 0.997
+
+                    crps_score = ps.crps_gaussian(labels, mu=means, sig=stds)
+                    crps_score = crps_score.mean()
+
+                    best_values = np.ones_like(means)
+                    acq_func_values = acq(
+                        best_values,
+                        means,
+                        stds,
+                        acq_mode='ei',
+                    )
+                    mean_correlation, _ = spearmanr(means, labels, nan_policy='raise')
+                    acq_correlation, _ = spearmanr(acq_func_values, labels, nan_policy='raise')
+
                     self.train()
 
                 if is_nan_gradient and not is_lr_finder:
@@ -454,8 +479,14 @@ class DyHPOModel(BasePytorchModule):
                     wandb_data["surrogate/check_training/epoch"] = DyHPOModel._global_epoch
                     wandb_data["surrogate/check_training/train_loss"] = mae_value
                     wandb_data["surrogate/check_training/validation_loss"] = val_mae_value
+                    wandb_data["surrogate/check_training/validation_power_law_MAE"] = val_power_law_mae
+                    wandb_data["surrogate/check_training/mean_correlation"] = mean_correlation
+                    wandb_data["surrogate/check_training/acq_correlation"] = acq_correlation
+                    wandb_data["surrogate/check_training/validation_crps"] = crps_score
                     wandb_data["surrogate/check_training/validation_std_correlation"] = val_correlation_value
-                    wandb_data["surrogate/dyhpo/validation_power_law_MAE"] = val_power_law_mae
+                    wandb_data["surrogate/check_training/validation_std_coverage_1sigma"] = coverage_1std
+                    wandb_data["surrogate/check_training/validation_std_coverage_2sigma"] = coverage_2std
+                    wandb_data["surrogate/check_training/validation_std_coverage_3sigma"] = coverage_3std
                 if gv.PLOT_SUGGEST_LR or self.meta.use_suggested_learning_rate:
                     wandb_data["surrogate/dyhpo/suggested_lr"] = DyHPOModel._suggested_lr
 
