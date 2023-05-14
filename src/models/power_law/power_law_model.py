@@ -471,7 +471,7 @@ class PowerLawModel(BasePytorchModule, ABC):
                     stds = stds.detach().numpy()
                     labels = labels.detach().numpy()
 
-                    abs_residuals = torch.abs(means - labels)
+                    abs_residuals = np.abs(means - labels)
                     val_correlation_value = np.corrcoef(stds, abs_residuals)
                     val_correlation_value = val_correlation_value[0, 1]
 

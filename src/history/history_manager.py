@@ -530,24 +530,28 @@ class HistoryManager:
         return hp_indices, hp_budgets, real_budgets, hp_curves
 
     def all_configurations(self, curve_size_mode, benchmark: BaseBenchmark) -> \
-        Tuple[NDArray[int], NDArray[np.float32], NDArray[np.float32], Optional[NDArray[np.float32]], NDArray[bool]]:
+        Tuple[NDArray[int], NDArray[np.float32], NDArray[np.float32], Optional[NDArray[np.float32]], NDArray[bool],
+              NDArray[np.float32]]:
 
         train_indices = []
         train_labels = []
         train_budgets = []
         train_curves = []
         is_up_curve = []
+        best_labels = []
         initial_empty_value = self.get_initial_empty_value()
 
         budgets = range(1, self.max_benchmark_epochs + 1)
         for hp_index in range(0, self.hp_candidates.shape[0]):
             performances = benchmark.get_curve(hp_index, budget=self.max_benchmark_epochs)
             start_performance = performances[0]
+            best_performance = min(performances)
             for budget in budgets:
                 train_indices.append(hp_index)
                 train_budgets.append(budget)
                 train_labels.append(performances[budget - 1])
                 is_up_curve.append(performances[budget - 1] > start_performance)
+                best_labels.append(best_performance)
                 if self.use_learning_curve:
                     train_curve = performances[:budget - 1] if budget > 1 else [initial_empty_value]
                     train_curves.append(train_curve)
@@ -559,8 +563,9 @@ class HistoryManager:
         train_budgets = np.array(train_budgets, dtype=np.float32)
         train_labels = np.array(train_labels, dtype=np.float32)
         is_up_curve = np.array(is_up_curve, dtype=bool)
+        best_labels = np.array(best_labels, dtype=np.float32)
 
-        return train_indices, train_labels, train_budgets, train_curves, is_up_curve
+        return train_indices, train_labels, train_budgets, train_curves, is_up_curve, best_labels
 
     def get_check_train_validation_dataset(self, curve_size_mode, benchmark: BaseBenchmark,
                                            validation_configuration_ratio, validation_curve_ratio, validation_mode,
@@ -574,7 +579,7 @@ class HistoryManager:
                 and learning curves.
         """
 
-        all_hp_indices, all_labels, all_budgets, all_curves, all_is_up_curve = \
+        all_hp_indices, all_labels, all_budgets, all_curves, all_is_up_curve, all_best_labels = \
             self.all_configurations(curve_size_mode, benchmark=benchmark)
 
         self.max_curve_value = np.max(all_labels)
@@ -597,7 +602,7 @@ class HistoryManager:
 
         train_hp_index = ~val_hp_index
 
-        if validation_mode == "end":
+        if validation_mode == "end" or validation_mode == "best":
             val_budget_index = all_budgets == self.max_benchmark_epochs
             val_hp_index = np.logical_and(val_hp_index, val_budget_index)
 
@@ -635,7 +640,10 @@ class HistoryManager:
 
         # make validation dataset
         val_hp_indices = all_hp_indices[val_hp_index]
-        val_labels = all_labels[val_hp_index]
+        if validation_mode == "best":
+            val_labels = all_best_labels[val_hp_index]
+        else:
+            val_labels = all_labels[val_hp_index]
         val_budgets = all_budgets[val_hp_index]
         val_curves = all_curves[val_hp_index] if all_curves is not None else None
 

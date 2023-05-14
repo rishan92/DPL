@@ -101,6 +101,11 @@ class SyntheticBench(BaseBenchmark):
         data = data.iloc[:, 0].to_list()
         return data
 
+    def get_curve_best(self, hp_index: int) -> float:
+        curve = self.get_curve(hp_index, self.max_budget)
+        best_value = min(curve)
+        return best_value
+
     def get_performance(self, hp_index: int, budget: int) -> float:
         val_curve = self.get_benchmark_curve(config_id=hp_index)
         # val_curve = val_curve[1:]
