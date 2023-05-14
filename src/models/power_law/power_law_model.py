@@ -483,6 +483,7 @@ class PowerLawModel(BasePytorchModule, ABC):
                     crps_score = crps_score.mean()
 
                     best_values = np.ones_like(means)
+                    best_values[:] = np.mean(labels)
                     acq_func_values = acq(
                         best_values,
                         means,
