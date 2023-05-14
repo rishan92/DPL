@@ -48,6 +48,9 @@ class BaseBenchmark(ABC):
     def get_curve(self, hp_index: int, budget: int) -> List[float]:
         raise NotImplementedError
 
+    def get_curve_best(self, hp_index: int) -> float:
+        raise NotImplementedError
+
     @abstractmethod
     def get_incumbent_curve(self) -> List[float]:
         raise NotImplementedError

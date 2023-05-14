@@ -13,18 +13,24 @@ cp -R "$ROOT_PATH"/configurations "$job_directory/"
 ln -s "$ROOT_PATH"/lc_bench "$job_directory/"
 ln -s "$ROOT_PATH"/data "$job_directory/"
 ln -s "$ROOT_PATH"/cached "$job_directory/"
-ln -s "$ROOT_PATH"/wandb "$job_directory/"
+# ln -s "$ROOT_PATH"/wandb "$job_directory/"
 
-# stores WANDB_API_KEY 
+# stores WANDB_API_KEY
 secrets_file="$ROOT_PATH/bash_scripts/secrets.sh"
 if [ -e "$secrets_file" ]; then
 	chmod +x "$secrets_file"
     . "$secrets_file"        # execute the secrets.sh file
 fi
 
-export WANDB_MODE="offline"
-
 export benchmark=$1
+
+if [ "$benchmark" == "lcbench_mini" ]
+then
+  export WANDB_MODE="online"
+else
+  export WANDB_MODE="dryrun"
+fi
+echo "$WANDB_MODE"
 
 if [ "$benchmark" == "lcbench" ]
 then

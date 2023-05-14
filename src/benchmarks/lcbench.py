@@ -119,6 +119,11 @@ class LCBench(BaseBenchmark):
 
         return val_curve[0:budget]
 
+    def get_curve_best(self, hp_index: int) -> float:
+        curve = self.get_curve(hp_index, self.max_budget)
+        best_value = min(curve)
+        return best_value
+
     def get_incumbent_curve(self) -> List[float]:
 
         inc_curve = self.benchmark.query_best(

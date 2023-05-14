@@ -5,6 +5,9 @@ import shutil
 from pathlib import Path
 import torch
 import warnings
+import numpy as np
+from scipy.stats import norm
+
 import src.models.activation_functions
 
 
@@ -104,3 +107,36 @@ def get_inverse_function_class(act_func_name: str):
 
         inverse_class = get_class_from_packages([torch.nn, src.models.activation_functions], inverse_function)
     return inverse_class
+
+
+def acq(
+    best_values: np.ndarray,
+    mean_predictions: np.ndarray,
+    std_predictions: np.ndarray,
+    explore_factor: float = 0.25,
+    acq_mode: str = 'ei',
+) -> np.ndarray:
+    if acq_mode == 'ei':
+        difference = np.subtract(best_values, mean_predictions)
+
+        zero_std_indicator = np.zeros_like(std_predictions, dtype=bool)
+        zero_std_indicator[std_predictions == 0] = True
+        not_zero_std_indicator = np.invert(zero_std_indicator)
+        z = np.divide(difference, std_predictions, where=not_zero_std_indicator)
+        z[zero_std_indicator] = 0
+
+        acq_values = np.add(np.multiply(difference, norm.cdf(z)), np.multiply(std_predictions, norm.pdf(z)))
+    elif acq_mode == 'ucb':
+        # we are working with error rates so we multiply the mean with -1
+        acq_values = np.add(-1 * mean_predictions, explore_factor * std_predictions)
+    elif acq_mode == 'thompson':
+        acq_values = np.random.normal(mean_predictions, std_predictions)
+    elif acq_mode == 'exploit':
+        acq_values = mean_predictions
+    else:
+        raise NotImplementedError(
+            f'Acquisition function {acq_mode} has not been'
+            f'implemented',
+        )
+
+    return acq_values

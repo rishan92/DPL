@@ -13,12 +13,15 @@ from torch.nn.utils import clip_grad_norm_
 import warnings
 from loguru import logger
 import torch.nn.functional as F
+from scipy.stats import spearmanr
+import properscoring as ps
 
 from src.models.base.base_pytorch_module import BasePytorchModule
 import src.models.activation_functions
 from src.utils.utils import get_class_from_package, get_class_from_packages, get_inverse_function_class
 import global_variables as gv
 from src.utils.torch_lr_finder import LRFinder
+from src.utils.utils import acq
 
 
 class PowerLawModel(BasePytorchModule, ABC):
@@ -462,16 +465,44 @@ class PowerLawModel(BasePytorchModule, ABC):
                     means = PowerLawModel._validation_online['mean'][epoch, :]
                     stds = PowerLawModel._validation_online['std'][epoch, :]
                     stds = (stds / (self.max_instances - 1)) ** 0.5
-                    difference = torch.abs(means - labels)
-                    val_correlation_value = np.corrcoef(stds.detach().numpy(), difference.detach().numpy())
-                    val_correlation_value = val_correlation_value[0, 1]
                     normalized_val_loss = F.l1_loss(means, labels, reduction='mean')
+
+                    means = means.detach().numpy()
+                    stds = stds.detach().numpy()
+                    labels = labels.detach().numpy()
+
+                    abs_residuals = torch.abs(means - labels)
+                    val_correlation_value = np.corrcoef(stds, abs_residuals)
+                    val_correlation_value = val_correlation_value[0, 1]
+
+                    coverage_1std = np.mean(abs_residuals <= stds) - 0.68
+                    coverage_2std = np.mean(abs_residuals <= 2 * stds) - 0.95
+                    coverage_3std = np.mean(abs_residuals <= 3 * stds) - 0.997
+
+                    crps_score = ps.crps_gaussian(labels, mu=means, sig=stds)
+                    crps_score = crps_score.mean()
+
+                    best_values = np.ones_like(means)
+                    acq_func_values = acq(
+                        best_values,
+                        means,
+                        stds,
+                        acq_mode='ei',
+                    )
+                    mean_correlation, _ = spearmanr(means, labels, nan_policy='raise')
+                    acq_correlation, _ = spearmanr(acq_func_values, labels, nan_policy='raise')
 
                     wandb_data = {
                         f"surrogate/check_training/epoch": PowerLawModel._global_epoch[self.instance_id],
                         f"surrogate/check_training/train_loss": normalized_loss,
                         f"surrogate/check_training/validation_loss": normalized_val_loss,
-                        f"surrogate/check_training/validation_std_correlation": val_correlation_value
+                        f"surrogate/check_training/mean_correlation": mean_correlation,
+                        f"surrogate/check_training/acq_correlation": acq_correlation,
+                        f"surrogate/check_training/validation_crps": crps_score,
+                        f"surrogate/check_training/validation_std_correlation": val_correlation_value,
+                        f"surrogate/check_training/validation_std_coverage_1sigma": coverage_1std,
+                        f"surrogate/check_training/validation_std_coverage_2sigma": coverage_2std,
+                        f"surrogate/check_training/validation_std_coverage_3sigma": coverage_3std,
                     }
                     wandb.log(wandb_data)
 

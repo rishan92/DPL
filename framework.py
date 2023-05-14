@@ -171,6 +171,11 @@ class Framework:
             self.pred_dist_path.mkdir(parents=True, exist_ok=True)
             delete_folder_content(self.pred_dist_path)
 
+        if gv.PLOT_PRED_TREND:
+            self.pred_trend_path = self.result_dir / "pred_trend" / self.dataset_name / str(self.seed)
+            self.pred_trend_path.mkdir(parents=True, exist_ok=True)
+            delete_folder_content(self.pred_trend_path)
+
         self.hp_candidates: NDArray
         if self.surrogate_name not in disable_preprocessing:
             self.hp_candidates = self.preprocess(self.benchmark.get_hyperparameter_candidates())
@@ -192,6 +197,7 @@ class Framework:
                 max_value=self.max_value,
                 min_value=self.min_value,
                 benchmark=self.benchmark,
+                pred_trend_path=self.pred_trend_path
             )
         else:
             self.surrogate = Framework.surrogate_types[self.surrogate_name](

@@ -3,7 +3,6 @@ from copy import deepcopy
 import os
 import time
 from typing import List, Tuple, Dict, Optional, Any, Union, Type
-
 import pandas as pd
 from numpy.typing import NDArray
 from loguru import logger
@@ -31,6 +30,8 @@ from src.plot.utils import plot_line
 import src.models.activation_functions
 from src.utils.utils import get_class_from_package, get_class_from_packages, get_inverse_function_class, \
     numpy_to_torch_apply
+from scipy.stats import spearmanr
+import properscoring as ps
 
 
 class HyperparameterOptimizer(BaseHyperparameterOptimizer):
@@ -56,7 +57,8 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
         max_value: float = 100,
         min_value: float = 0,
         fill_value: str = 'zero',
-        benchmark=None
+        benchmark: BaseBenchmark = None,
+        pred_trend_path: Path = None
     ):
         """
         Args:
@@ -119,6 +121,7 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
         self.min_value = min_value
         self.backbone = backbone
         self.benchmark = benchmark
+        self.pred_trend_path = pred_trend_path
 
         self.pretrained_path = output_path / 'power_law' / f'checkpoint_{seed}.pth'
 
@@ -236,6 +239,12 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
         if inverse_torch_class:
             inverse_torch_fn = inverse_torch_class()
             self.model_output_normalization_inverse_fn = partial(numpy_to_torch_apply, torch_function=inverse_torch_fn)
+
+        if gv.PLOT_ACQ or gv.PLOT_PRED_TREND:
+            self.benchmark_labels = np.ones(shape=(self.hp_candidates.shape[0],))
+            for i in range(self.hp_candidates.shape[0]):
+                best_value = self.benchmark.get_curve_best(i)
+                self.benchmark_labels[i] = best_value
 
         if self.meta.check_model:
             self.check_training()
@@ -413,7 +422,8 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
                 real_budgets,
                 acq_mode=self.meta.acq_mode,
                 acq_best_value_mode=self.meta.acq_best_value_mode,
-                exploitation_mask=evaluated_mask
+                exploitation_mask=evaluated_mask,
+                hp_indices=hp_indices
             )
 
             """
@@ -492,7 +502,7 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
         if self.best_value_observed > best_curve_value:
             self.best_value_observed = best_curve_value
             self.no_improvement_patience = 0
-            self.logger.info(f'New Incumbent value found at iteration'
+            self.logger.info(f'New Incumbent value found '
                              f'{1 - best_curve_value if not self.minimization else best_curve_value}')
         else:
             self.no_improvement_patience += 1
@@ -597,7 +607,8 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
         budgets: NDArray[int] = None,
         acq_mode: str = 'ei',
         acq_best_value_mode: str = None,
-        exploitation_mask=None
+        exploitation_mask=None,
+        hp_indices=None
     ) -> int:
         """Return the hyperparameter with the highest acq function value.
 
@@ -634,6 +645,45 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
             mean_stds,
             acq_mode=acq_mode,
         )
+
+        if gv.PLOT_ACQ:  # and gv.IS_WANDB:
+            true_labels = self.benchmark_labels[hp_indices]
+            mean_correlation, _ = spearmanr(mean_predictions, true_labels, nan_policy='raise')
+            acq_correlation, _ = spearmanr(acq_func_values, true_labels, nan_policy='raise')
+
+            abs_residuals = np.abs(true_labels - mean_predictions)
+            coverage_1std = np.mean(abs_residuals <= mean_stds) - 0.68
+            coverage_2std = np.mean(abs_residuals <= 2 * mean_stds) - 0.95
+            coverage_3std = np.mean(abs_residuals <= 3 * mean_stds) - 0.997
+
+            crps_score = ps.crps_gaussian(true_labels, mu=mean_predictions, sig=mean_stds)
+            crps_score = crps_score.mean()
+
+            wandb.log({
+                "acq/mean_correlation": mean_correlation,
+                "acq/acq_correlation": acq_correlation,
+                "acq/crps": crps_score,
+                "acq/is_train_from_scratch": int(self.train),
+                "acq/std_coverage_1sigma": coverage_1std,
+                "acq/std_coverage_2sigma": coverage_2std,
+                "acq/std_coverage_3sigma": coverage_3std,
+                "acq/epoch": self.surrogate_budget,
+            })
+
+        if gv.PLOT_PRED_TREND:
+            true_labels = self.benchmark_labels[hp_indices]
+            plt.clf()
+
+            difference = mean_predictions - true_labels
+            g = sns.jointplot(x=difference, y=true_labels)
+            g.plot_joint(sns.kdeplot, color="r", zorder=0, levels=6)
+            g.plot_marginals(sns.rugplot, color="r", height=-.15, clip_on=False)
+
+            plt.tight_layout()
+            file_path = self.pred_trend_path / f"mean_distributions_surrogateBudget_{self.surrogate_budget}"
+            plt.savefig(file_path, dpi=200)
+
+            plt.close()
 
         if exploitation_mask is not None:
             acq_func_values[~exploitation_mask] = np.NINF
