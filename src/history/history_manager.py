@@ -235,7 +235,7 @@ class HistoryManager:
             min_weight = np.min(weights)
             if max_weight != min_weight:
                 weights = (weights - min_weight) / (max_weight - min_weight)
-            weights = np.exp(-1 * weights)
+            weights = np.abs(np.exp(-1 * weights) - np.exp(-1)) / (1 - np.exp(-1))
             # weights = 1 / (weights + 1e-1)
             weights *= weights.shape[0] / weights.sum()
 

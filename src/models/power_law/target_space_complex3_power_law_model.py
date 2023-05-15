@@ -55,7 +55,7 @@ class TargetSpaceComplex3PowerLawModel(PowerLawModel):
             'activate_early_stopping': False,
             'early_stopping_it': 0,
             'use_scaling_layer': False,
-            'scaling_layer_bias_values': [0.0, -0.4, 0.0]  # [0, 0, 1.17125493757],
+            'scaling_layer_bias_values': [0.0, -0.41, 0.0]  # [0, 0, 1.17125493757],
         }
         return hp
 
