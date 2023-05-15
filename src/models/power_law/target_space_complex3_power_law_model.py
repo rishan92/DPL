@@ -24,8 +24,8 @@ class TargetSpaceComplex3PowerLawModel(PowerLawModel):
             'use_learning_curve_mask': False,
             'use_suggested_learning_rate': False,
             'use_sample_weights': False,
-            'use_sample_weight_by_label': True,
-            'use_sample_weight_by_budget': True,
+            'use_sample_weight_by_label': False,
+            'use_sample_weight_by_budget': False,
             'sample_weight_by_budget_strategy': None,
             'weight_regularization_factor': 0,
             'alpha_beta_constraint_factor': 0,
@@ -38,8 +38,8 @@ class TargetSpaceComplex3PowerLawModel(PowerLawModel):
             'beta_act_func': 'BoundedReLU',
             'gamma_act_func': 'BoundedReLU',
             'output_act_func': None,
-            'alpha_beta_is_difference': True,
-            'use_gamma_constraint': True,
+            'alpha_beta_is_difference': 'full',
+            'use_gamma_constraint': 'half',
             'loss_function': 'L1Loss',
             'optimizer': 'Adam',
             'learning_rate_scheduler': None,
@@ -119,24 +119,52 @@ class TargetSpaceComplex3PowerLawModel(PowerLawModel):
         y1 = self.beta_act_func(y1)
         y2 = self.gamma_act_func(y2)
 
-        if hasattr(self.meta, 'alpha_beta_is_difference') and self.meta.alpha_beta_is_difference:
-            y2 = y1 * y2
-            # min_val = torch.min(y1, y2)
-            # max_val = torch.max(y1, y2)
-            # y1 = max_val
-            # y2 = min_val
+        if hasattr(self.meta, 'alpha_beta_is_difference') and self.meta.alpha_beta_is_difference is not None:
+            if self.meta.alpha_beta_is_difference == 'half':
+                y2 = y1 * y2
+            elif self.meta.alpha_beta_is_difference == 'full':
+                y2_prev = y2
+                y2 = torch.where(y2 <= y1, y1 * y2, y2)
+                y1 = torch.where(y2_prev > y1, y1 * y2_prev, y1)
+            else:
+                raise NotImplementedError
 
-        if hasattr(self.meta, 'use_gamma_constraint') and self.meta.use_gamma_constraint:
-            alphas = alphas * y2
-            # min_val = torch.min(y2, alphas)
-            # max_val = torch.max(y2, alphas)
-            # y2 = max_val
-            # alphas = min_val
+        if hasattr(self.meta, 'use_gamma_constraint') and self.meta.use_gamma_constraint is not None:
+            if self.meta.use_gamma_constraint == 'positive':
+                lm = torch.min(y1, y2)
+                # um = torch.max(y1, y2)
+                alphas = alphas * lm
+            elif self.meta.use_gamma_constraint == 'half':
+                lm = torch.min(y1, y2)
+                lb = -2
+                ub = 1
 
-        # if (alphas < 0).any():
-        #     print("neg alpha")
+                alphas = alphas * (ub - lb) + lb
+
+                m = ub
+                alphas = (alphas - lb) * (lm - lb) / (m - lb) + lb
+
+            elif self.meta.use_gamma_constraint == "full":
+                lm = torch.min(y1, y2)
+                um = torch.max(y1, y2)
+                lb = -2
+                ub = 3
+
+                alphas = alphas * (ub - lb) + lb
+
+                m = (y2 + y1) / 2
+                mask = alphas <= m
+
+                lower_transform = (alphas - lb) * (lm - lb) / (m - lb) + lb
+                upper_transform = (alphas - m) * (ub - um) / (ub - m) + um
+                alphas = torch.where(mask, lower_transform, upper_transform)
+            else:
+                raise NotImplementedError
 
         val = ((y2 - alphas) / (y1 - alphas + torch.tensor(1e-4))) + torch.tensor(1e-4)
+
+        if (val < 0).any():
+            print("val negative")
 
         abs_val = torch.abs(val)
         log_abs_val = torch.log(abs_val)
