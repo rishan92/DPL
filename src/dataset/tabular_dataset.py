@@ -48,7 +48,7 @@ class TabularDataset(Dataset):
             self.weights = torch.rand((self.X.shape[0],))
             # self.weights = torch.randn((self.X.shape[0],)) * 0.1
 
-    def resample_dataset(self, seed=None):
+    def resample_dataset(self, split=1.0, seed=None):
         if seed:
             self.set_seed(seed)
         data = [self.X, self.budgets]
@@ -59,7 +59,9 @@ class TabularDataset(Dataset):
         if self.weights is not None:
             data.append(self.weights)
 
-        boot_data = resample(*data)
+        n_samples = int(split * self.X.shape[0])
+        n_samples = max(1, n_samples)
+        boot_data = resample(*data, n_samples=n_samples)
 
         self.X = boot_data[0]
         self.budgets = boot_data[1]

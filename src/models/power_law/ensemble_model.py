@@ -64,9 +64,11 @@ class EnsembleModel(BasePytorchModule):
         assert train_dataloader is not None or val_dataloader is not None
         self.train_dataloader = train_dataloader if train_dataloader else None
         self.val_dataloader = val_dataloader if val_dataloader else None
+        resample_split = hasattr(self.meta, 'resample_split') and self.meta.resample_split
         for i in range(self.meta.ensemble_size):
             if train_dataloader:
-                model_train_dataloader = train_dataloader.make_dataloader(seed=self.model_seeds[i])
+                model_train_dataloader = train_dataloader.make_dataloader(seed=self.model_seeds[i],
+                                                                          resample_split=resample_split)
                 self.model_train_dataloaders[i] = model_train_dataloader
 
             if val_dataloader:
@@ -86,6 +88,7 @@ class EnsembleModel(BasePytorchModule):
             'exploration_exploitation_strategy': None,  # 'batch_norm',
             'flip_batch_norm': False,
             'use_resampling': False,
+            'resample_split': 1.0,
         }
         return hp
 

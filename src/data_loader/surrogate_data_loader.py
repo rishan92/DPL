@@ -45,7 +45,7 @@ class SurrogateDataLoader(DataLoader):
                 yield b[0].to(self.device), b[1].to(self.device), b[2].to(self.device), b[3].to(self.device), b[4].to(
                     self.device)
 
-    def make_dataloader(self, seed=0):
+    def make_dataloader(self, seed=0, resample_split=1.0):
         kwargs = copy.copy(self.kwargs)
         dataset = self.kwargs['dataset']
         if dataset.use_sample_weights:
@@ -59,7 +59,7 @@ class SurrogateDataLoader(DataLoader):
         # kwargs['shuffle'] = False
         if self.use_resampling:
             new_dataset = copy.copy(dataset)
-            new_dataset.resample_dataset(seed=seed)
+            new_dataset.resample_dataset(split=resample_split, seed=seed)
             kwargs['dataset'] = new_dataset
 
         instance = SurrogateDataLoader(seed=seed, dev=self.device,
