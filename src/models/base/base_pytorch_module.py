@@ -116,6 +116,13 @@ class BasePytorchModule(nn.Module, Meta, ABC):
         else:
             return None
 
+    @classproperty
+    def meta_use_sample_weight_by_label(cls):
+        if hasattr(cls.meta, 'use_sample_weight_by_label'):
+            return cls.meta.use_sample_weight_by_label
+        else:
+            return False
+
     def print_parameters(self):
         for name, param in self.named_parameters():
             print(f"{name}: {param}")

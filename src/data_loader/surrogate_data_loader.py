@@ -50,7 +50,7 @@ class SurrogateDataLoader(DataLoader):
         dataset = self.kwargs['dataset']
         if dataset.use_sample_weights:
             new_dataset = copy.copy(dataset)
-            new_dataset.reset_sample_weights()
+            new_dataset.reset_sample_weights(seed=seed)
             kwargs['dataset'] = new_dataset
 
         # weights = torch.rand((len(dataset),))
@@ -59,7 +59,7 @@ class SurrogateDataLoader(DataLoader):
         # kwargs['shuffle'] = False
         if self.use_resampling:
             new_dataset = copy.copy(dataset)
-            new_dataset.resample_dataset()
+            new_dataset.resample_dataset(seed=seed)
             kwargs['dataset'] = new_dataset
 
         instance = SurrogateDataLoader(seed=seed, dev=self.device,

@@ -1,6 +1,8 @@
 import torch
 from torch.utils.data import Dataset
 from sklearn.utils import resample
+import numpy as np
+import random
 
 
 class TabularDataset(Dataset):
@@ -26,10 +28,6 @@ class TabularDataset(Dataset):
             if use_sample_weights:
                 self.weights = torch.rand((self.X.shape[0],))
                 # self.weights = torch.randn((self.X.shape[0],)) * 0.1
-            if use_sample_weight_by_budget:
-                self.weights = self.budgets.clone()
-                self.weight_factor = self.X.shape[0] / self.weights.sum()
-                self.weights *= self.weight_factor
 
     def get_weight(self, x, budget):
         x_index = (self.X == x).all(axis=1)
@@ -43,12 +41,16 @@ class TabularDataset(Dataset):
         # weight = weight.unsqueeze(0)
         return weight
 
-    def reset_sample_weights(self):
+    def reset_sample_weights(self, seed=None):
         if self.use_sample_weights:
+            if seed:
+                self.set_seed(seed)
             self.weights = torch.rand((self.X.shape[0],))
             # self.weights = torch.randn((self.X.shape[0],)) * 0.1
 
-    def resample_dataset(self):
+    def resample_dataset(self, seed=None):
+        if seed:
+            self.set_seed(seed)
         data = [self.X, self.budgets]
         if self.Y is not None:
             data.append(self.Y)
@@ -76,7 +78,7 @@ class TabularDataset(Dataset):
         return self.X.size(0)
 
     def __getitem__(self, idx):
-        if self.use_sample_weights or self.use_sample_weight_by_budget:
+        if self.weights is not None:
             return self.X[idx], self.Y[idx], self.budgets[idx], self.curves[idx], self.weights[idx]
         else:
             return self.X[idx], self.Y[idx], self.budgets[idx], self.curves[idx], self.dummy_weight[0]
@@ -102,3 +104,10 @@ class TabularDataset(Dataset):
         if self.weights is not None:
             self.weights.to(device)
         self.dummy_weight.to(device)
+
+    @staticmethod
+    def set_seed(seed):
+        if seed is not None:
+            torch.manual_seed(seed)
+            np.random.seed(seed)
+            random.seed(seed)

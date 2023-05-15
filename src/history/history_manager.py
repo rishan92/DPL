@@ -23,7 +23,8 @@ class HistoryManager:
     def __init__(self, hp_candidates, max_benchmark_epochs, fantasize_step, use_learning_curve, use_learning_curve_mask,
                  fill_value='zero', use_target_normalization=False, use_scaled_budgets=True,
                  model_output_normalization=None, cnn_kernel_size=0, target_normalization_range=None,
-                 use_sample_weights=False, use_sample_weight_by_budget=False, sample_weight_by_budget_strategy=None):
+                 use_sample_weights=False, use_sample_weight_by_budget=False, sample_weight_by_budget_strategy=None,
+                 use_sample_weight_by_label=False):
         assert fill_value in ["zero", "last"], "Invalid fill value mode"
         # assert predict_mode in ["end_budget", "next_budget"], "Invalid predict mode"
         # assert curve_size_mode in ["fixed", "variable"], "Invalid curve size mode"
@@ -37,6 +38,7 @@ class HistoryManager:
         self.use_sample_weights = use_sample_weights
         self.use_sample_weight_by_budget = use_sample_weight_by_budget
         self.sample_weight_by_budget_strategy = sample_weight_by_budget_strategy
+        self.use_sample_weight_by_label = use_sample_weight_by_label
 
         self.use_target_normalization = use_target_normalization
         self.target_normalization_range = \
@@ -222,6 +224,26 @@ class HistoryManager:
         if self.model_output_normalization_fn:
             train_labels = self.model_output_normalization_fn(train_labels)
 
+        all_weights = np.ones_like(train_weights)
+
+        if self.use_sample_weight_by_budget:
+            all_weights = train_weights
+
+        if self.use_sample_weight_by_label:
+            weights = train_labels.copy()
+            max_weight = np.max(weights)
+            min_weight = np.min(weights)
+            if max_weight != min_weight:
+                weights = (weights - min_weight) / (max_weight - min_weight)
+            weights = np.exp(-1 * weights)
+            # weights = 1 / (weights + 1e-1)
+            weights *= weights.shape[0] / weights.sum()
+
+            all_weights = weights * all_weights
+            all_weights *= all_weights.shape[0] / all_weights.sum()
+
+        train_weights = all_weights
+
         # This creates a copy
         train_examples = self.hp_candidates[hp_indices]
 
@@ -229,7 +251,11 @@ class HistoryManager:
         train_labels = torch.from_numpy(train_labels)
         train_budgets = torch.from_numpy(train_budgets)
         train_curves = torch.from_numpy(train_curves) if train_curves is not None else None
-        train_weights = torch.from_numpy(train_weights) if self.use_sample_weight_by_budget else None
+
+        if self.use_sample_weight_by_budget or self.use_sample_weight_by_label:
+            train_weights = torch.from_numpy(train_weights)
+        else:
+            train_weights = None
 
         train_dataset = TabularDataset(
             X=train_examples,
