@@ -24,8 +24,8 @@ class TargetSpaceComplex3PowerLawModel(PowerLawModel):
             'use_learning_curve_mask': False,
             'use_suggested_learning_rate': False,
             'use_sample_weights': False,
-            'use_sample_weight_by_label': False,
-            'use_sample_weight_by_budget': False,
+            'use_sample_weight_by_label': True,
+            'use_sample_weight_by_budget': True,
             'sample_weight_by_budget_strategy': None,
             'weight_regularization_factor': 0,
             'alpha_beta_constraint_factor': 0,
@@ -34,9 +34,9 @@ class TargetSpaceComplex3PowerLawModel(PowerLawModel):
             'refine_learning_rate': 1e-3,
             'act_func': 'LeakyReLU',
             'last_act_func': 'Identity',
-            'alpha_act_func': 'Sigmoid',
-            'beta_act_func': 'Sigmoid',
-            'gamma_act_func': 'Sigmoid',
+            'alpha_act_func': 'BoundedReLU',
+            'beta_act_func': 'BoundedReLU',
+            'gamma_act_func': 'BoundedReLU',
             'output_act_func': None,
             'alpha_beta_is_difference': True,
             'use_gamma_constraint': True,
@@ -132,6 +132,9 @@ class TargetSpaceComplex3PowerLawModel(PowerLawModel):
             # max_val = torch.max(y2, alphas)
             # y2 = max_val
             # alphas = min_val
+
+        # if (alphas < 0).any():
+        #     print("neg alpha")
 
         val = ((y2 - alphas) / (y1 - alphas + torch.tensor(1e-4))) + torch.tensor(1e-4)
 

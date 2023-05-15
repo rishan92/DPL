@@ -14,3 +14,4 @@ from .inverse_offset_tanh import InverseOffsetTanh
 from .bounded_relu import BoundedReLU
 from .bounded_leaky_relu import BoundedLeakyReLU
 from .bounded_sigmoid import BoundedSigmoid
+from .bounded_sigmoid_relu import BoundedSReLU
