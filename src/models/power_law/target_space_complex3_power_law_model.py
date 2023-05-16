@@ -38,8 +38,9 @@ class TargetSpaceComplex3PowerLawModel(PowerLawModel):
             'beta_act_func': 'BoundedReLU',
             'gamma_act_func': 'BoundedReLU',
             'output_act_func': None,
-            'alpha_beta_is_difference': 'half',  # null "half"  "full"
-            'use_gamma_constraint': 'positive',  # null "positive"  "half"  "full"
+            'alpha_beta_is_difference': None,  # null "half"  "full"
+            'use_gamma_constraint': 'half',  # null "positive"  "half"  "full" "full_flip"
+            'use_gamma_positive': False,
             'loss_function': 'L1Loss',
             'optimizer': 'Adam',
             'learning_rate_scheduler': None,
@@ -142,7 +143,6 @@ class TargetSpaceComplex3PowerLawModel(PowerLawModel):
 
                 m = ub
                 alphas = (alphas - lb) * (lm - lb) / (m - lb) + lb
-
             elif self.meta.use_gamma_constraint == "full":
                 lm = torch.min(y2, y1)
                 um = torch.max(y1, y2)
@@ -171,21 +171,26 @@ class TargetSpaceComplex3PowerLawModel(PowerLawModel):
                 lower_transform = (alphas - lb) * (lm - lb) / (m - lb) + lb
                 upper_transform = (alphas - m) * (ub - um) / (ub - m) + um
                 alphas = torch.where(mask, lower_transform, upper_transform)
+
+                # flip
+                a_lower = (lb + lm) / 2
+                a_upper = (um + ub) / 2
+                alphas = torch.where(mask, 2 * a_lower - alphas, 2 * a_upper - alphas)
             else:
                 raise NotImplementedError
 
         val = ((y2 - alphas) / (y1 - alphas + torch.tensor(1e-4))) + torch.tensor(1e-4)
 
-        if (val < -0.01).any():
-            print("val negative")
-            neg_val_index = val < -0.01
-            neg_val = val[neg_val_index]
-            neg_alpha = alphas[neg_val_index]
-            neg_y1 = y1[neg_val_index]
-            neg_y2 = y2[neg_val_index]
-
-            for i in range(neg_val.shape[0]):
-                print(f"neg_val={neg_val[i]} neg_alpha={neg_alpha[i]} neg_y1={neg_y1[i]} neg_y2={neg_y2[i]}")
+        # if (val < -0.01).any():
+        #     print("val negative")
+        #     neg_val_index = val < -0.01
+        #     neg_val = val[neg_val_index]
+        #     neg_alpha = alphas[neg_val_index]
+        #     neg_y1 = y1[neg_val_index]
+        #     neg_y2 = y2[neg_val_index]
+        #
+        #     for i in range(neg_val.shape[0]):
+        #         print(f"neg_val={neg_val[i]} neg_alpha={neg_alpha[i]} neg_y1={neg_y1[i]} neg_y2={neg_y2[i]}")
 
         abs_val = torch.abs(val)
         log_abs_val = torch.log(abs_val)
@@ -196,6 +201,9 @@ class TargetSpaceComplex3PowerLawModel(PowerLawModel):
         # log_val = torch.complex(log_abs_val, angle)
 
         gammas = log_abs_val / torch.log(torch.tensor(1 / 51))
+
+        if hasattr(self.meta, 'use_gamma_positive') and self.meta.use_gamma_positive:
+            gammas = torch.abs(gammas)
 
         betas = y2 - alphas
 
