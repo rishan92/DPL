@@ -39,7 +39,7 @@ class TargetSpaceComplex3PowerLawModel(PowerLawModel):
             'gamma_act_func': 'BoundedReLU',
             'output_act_func': None,
             'alpha_beta_is_difference': 'half',  # null "half"  "full"
-            'use_gamma_constraint': 'half',  # null "positive"  "half"  "full"
+            'use_gamma_constraint': 'positive',  # null "positive"  "half"  "full"
             'loss_function': 'L1Loss',
             'optimizer': 'Adam',
             'learning_rate_scheduler': None,
@@ -132,11 +132,10 @@ class TargetSpaceComplex3PowerLawModel(PowerLawModel):
         if hasattr(self.meta, 'use_gamma_constraint') and self.meta.use_gamma_constraint is not None:
             if self.meta.use_gamma_constraint == 'positive':
                 lm = torch.min(y2, y1)
-                # um = torch.max(y1, y2)
                 alphas = alphas * lm
             elif self.meta.use_gamma_constraint == 'half':
                 lm = torch.min(y2, y1)
-                lb = -2
+                lb = -1
                 ub = 1
 
                 alphas = alphas * (ub - lb) + lb
@@ -147,8 +146,22 @@ class TargetSpaceComplex3PowerLawModel(PowerLawModel):
             elif self.meta.use_gamma_constraint == "full":
                 lm = torch.min(y2, y1)
                 um = torch.max(y1, y2)
-                lb = -2
-                ub = 3
+                lb = -1
+                ub = 2
+
+                alphas = alphas * (ub - lb) + lb
+
+                m = (y2 + y1) / 2
+                mask = alphas <= m
+
+                lower_transform = (alphas - lb) * (lm - lb) / (m - lb) + lb
+                upper_transform = (alphas - m) * (ub - um) / (ub - m) + um
+                alphas = torch.where(mask, lower_transform, upper_transform)
+            elif self.meta.use_gamma_constraint == "full_flip":
+                lm = torch.min(y2, y1)
+                um = torch.max(y1, y2)
+                lb = -1
+                ub = 2
 
                 alphas = alphas * (ub - lb) + lb
 
