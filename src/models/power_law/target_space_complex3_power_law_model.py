@@ -38,8 +38,8 @@ class TargetSpaceComplex3PowerLawModel(PowerLawModel):
             'beta_act_func': 'BoundedReLU',
             'gamma_act_func': 'BoundedReLU',
             'output_act_func': None,
-            'alpha_beta_is_difference': 'full',
-            'use_gamma_constraint': 'half',
+            'alpha_beta_is_difference': 'half',  # null "half"  "full"
+            'use_gamma_constraint': 'half',  # null "positive"  "half"  "full"
             'loss_function': 'L1Loss',
             'optimizer': 'Adam',
             'learning_rate_scheduler': None,
@@ -131,11 +131,11 @@ class TargetSpaceComplex3PowerLawModel(PowerLawModel):
 
         if hasattr(self.meta, 'use_gamma_constraint') and self.meta.use_gamma_constraint is not None:
             if self.meta.use_gamma_constraint == 'positive':
-                lm = torch.min(y1, y2)
+                lm = torch.min(y2, y1)
                 # um = torch.max(y1, y2)
                 alphas = alphas * lm
             elif self.meta.use_gamma_constraint == 'half':
-                lm = torch.min(y1, y2)
+                lm = torch.min(y2, y1)
                 lb = -2
                 ub = 1
 
@@ -145,7 +145,7 @@ class TargetSpaceComplex3PowerLawModel(PowerLawModel):
                 alphas = (alphas - lb) * (lm - lb) / (m - lb) + lb
 
             elif self.meta.use_gamma_constraint == "full":
-                lm = torch.min(y1, y2)
+                lm = torch.min(y2, y1)
                 um = torch.max(y1, y2)
                 lb = -2
                 ub = 3
@@ -163,8 +163,16 @@ class TargetSpaceComplex3PowerLawModel(PowerLawModel):
 
         val = ((y2 - alphas) / (y1 - alphas + torch.tensor(1e-4))) + torch.tensor(1e-4)
 
-        if (val < 0).any():
+        if (val < -0.01).any():
             print("val negative")
+            neg_val_index = val < -0.01
+            neg_val = val[neg_val_index]
+            neg_alpha = alphas[neg_val_index]
+            neg_y1 = y1[neg_val_index]
+            neg_y2 = y2[neg_val_index]
+
+            for i in range(neg_val.shape[0]):
+                print(f"neg_val={neg_val[i]} neg_alpha={neg_alpha[i]} neg_y1={neg_y1[i]} neg_y2={neg_y2[i]}")
 
         abs_val = torch.abs(val)
         log_abs_val = torch.log(abs_val)
