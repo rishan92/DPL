@@ -39,7 +39,7 @@ class TargetSpaceComplex3PowerLawModel(PowerLawModel):
             'gamma_act_func': 'BoundedReLU',
             'output_act_func': None,
             'alpha_beta_is_difference': None,  # null "half"  "full"
-            'use_gamma_constraint': 'half',  # null "positive"  "half"  "full" "full_flip"
+            'use_gamma_constraint': 'flip2',  # null "positive"  "half"  "full" "full_flip" "flip"
             'use_gamma_positive': False,
             'loss_function': 'L1Loss',
             'optimizer': 'Adam',
@@ -176,6 +176,10 @@ class TargetSpaceComplex3PowerLawModel(PowerLawModel):
                 a_lower = (lb + lm) / 2
                 a_upper = (um + ub) / 2
                 alphas = torch.where(mask, 2 * a_lower - alphas, 2 * a_upper - alphas)
+            elif self.meta.use_gamma_constraint == 'flip':
+                alphas = torch.where(y2 <= y1, alphas * y2, y2 + alphas * (1 - y2))
+            elif self.meta.use_gamma_constraint == 'flip2':
+                alphas = torch.where(y2 <= y1, alphas * y2, y2 + (1 - alphas) * (1 - y2))
             else:
                 raise NotImplementedError
 
