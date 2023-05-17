@@ -80,15 +80,20 @@ class HistoryManager:
         initial_empty_value = self.get_mean_initial_value() if self.fill_value == 'last' else 0
         return initial_empty_value
 
-    def add(self, hp_index: int, b: int, hp_curve: List[float]):
+    def add(self, hp_index: int, b: int, hp_curve: float):
         self.examples[hp_index] = np.arange(1, b + 1)
-        self.performances[hp_index] = hp_curve
+        if hp_index in self.performances:
+            self.performances[hp_index].append(hp_curve)
+        else:
+            self.performances[hp_index] = [hp_curve]
 
         initial_empty_value = self.get_initial_empty_value()
 
-        self.last_point = (hp_index, b, hp_curve[b - 1], hp_curve[0:b - 1] if b > 1 else [initial_empty_value])
+        cur_curve = self.performances[hp_index]
 
-        max_curve = np.max(hp_curve)
+        self.last_point = (hp_index, b, cur_curve[b - 1], cur_curve[0:b - 1] if b > 1 else [initial_empty_value])
+
+        max_curve = np.max(cur_curve)
         self.max_curve_value = max(self.max_curve_value, max_curve)
         # self.max_curve_value = 10
 

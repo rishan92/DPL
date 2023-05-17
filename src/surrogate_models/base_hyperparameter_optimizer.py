@@ -10,7 +10,7 @@ class BaseHyperparameterOptimizer(Meta, ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def observe(self, hp_index: int, budget: int, hp_curve: List[float]):
+    def observe(self, hp_index: int, budget: int, hp_curve: float):
         raise NotImplementedError
 
     @classmethod

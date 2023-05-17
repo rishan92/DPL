@@ -469,7 +469,7 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
 
         return suggested_hp_index, budget
 
-    def observe(self, hp_index: int, budget: int, hp_curve: List[float]):
+    def observe(self, hp_index: int, budget: int, hp_curve: float):
         """Receive information regarding the performance of a hyperparameter
         configuration that was suggested.
 
@@ -483,39 +483,33 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
         """
         self.surrogate_budget += 1
 
-        for index, curve_element in enumerate(hp_curve):
-            if np.isnan(curve_element):
-                self.diverged_configs.add(hp_index)
-                # only use the non-nan part of the curve and the corresponding
-                # budget to still have the information in the network
-                hp_curve = hp_curve[0:index + 1]
-                budget = index
-                break
-
-        if not self.minimization:
-            hp_curve = self.max_value - np.array(hp_curve)
-            hp_curve = hp_curve.tolist()
-
-        best_curve_value = min(hp_curve)
-
-        self.history_manager.add(hp_index, budget, hp_curve)
-
-        if self.best_value_observed > best_curve_value:
-            self.best_value_observed = best_curve_value
-            self.no_improvement_patience = 0
-            self.logger.info(f'New Incumbent value found '
-                             f'{1 - best_curve_value if not self.minimization else best_curve_value}')
+        if np.isnan(hp_curve):
+            self.diverged_configs.add(hp_index)
+            hp_curve = None
         else:
-            self.no_improvement_patience += 1
-            if self.no_improvement_patience >= self.no_improvement_threshold:
-                self.train = True
-                self.no_improvement_patience = 0
-                self.logger.info(
-                    'No improvement in the incumbent value threshold reached, '
-                    'restarting training from scratch'
-                )
+            if not self.minimization:
+                hp_curve = self.max_value - hp_curve
 
-        self.logger.debug(f"no_improvement_patience {self.no_improvement_patience}")
+            best_curve_value = hp_curve
+
+            self.history_manager.add(hp_index, budget, hp_curve)
+
+            if self.best_value_observed > best_curve_value:
+                self.best_value_observed = best_curve_value
+                self.no_improvement_patience = 0
+                self.logger.info(f'New Incumbent value found '
+                                 f'{1 - best_curve_value if not self.minimization else best_curve_value}')
+            else:
+                self.no_improvement_patience += 1
+                if self.no_improvement_patience >= self.no_improvement_threshold:
+                    self.train = True
+                    self.no_improvement_patience = 0
+                    self.logger.info(
+                        'No improvement in the incumbent value threshold reached, '
+                        'restarting training from scratch'
+                    )
+
+            self.logger.debug(f"no_improvement_patience {self.no_improvement_patience}")
 
         if gv.PLOT_ACQ and gv.IS_WANDB:
             wandb.log({

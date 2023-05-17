@@ -261,7 +261,7 @@ class Framework:
                     output_dir=self.pred_dist_path
                 )
 
-            hp_curve = self.benchmark.get_curve(hp_index, budget)
+            hp_curve = self.benchmark.get_performance(hp_index, budget)
             self.surrogate.observe(hp_index, budget, hp_curve)
             time_duration = time.time() - start_time
 
@@ -275,43 +275,43 @@ class Framework:
 
             step_time_duration = time_duration / budget_cost
 
-            for epoch in range(previous_budget + 1, budget + 1):
-                epoch_performance = float(hp_curve[epoch - 1])
-                if self.benchmark.minimization_metric:
-                    if best_value > epoch_performance:
-                        best_value = epoch_performance
-                else:
-                    if best_value < epoch_performance:
-                        best_value = epoch_performance
+            epoch = int(budget)
+            epoch_performance = hp_curve
+            if self.benchmark.minimization_metric:
+                if best_value > epoch_performance:
+                    best_value = epoch_performance
+            else:
+                if best_value < epoch_performance:
+                    best_value = epoch_performance
 
-                self.surrogate_budget += 1
+            self.surrogate_budget += 1
 
-                if self.benchmark.minimization_metric:
-                    regret = best_value - incumbent_value
-                else:
-                    regret = incumbent_value - best_value
+            if self.benchmark.minimization_metric:
+                regret = best_value - incumbent_value
+            else:
+                regret = incumbent_value - best_value
 
-                self.log_info(
-                    int(hp_index),
-                    epoch_performance,
-                    epoch,
-                    best_value,
-                    step_time_duration,
-                )
-                metrics = {
-                    'hpo/hp': int(hp_index),
-                    'hpo/scores': epoch_performance,
-                    'hpo/epochs': epoch,
-                    'hpo/curve': best_value,
-                    'hpo/overhead': step_time_duration,
-                    'hpo/surrogate_budget': self.surrogate_budget,
-                    'hpo/regret': regret,
-                }
-                wandb.log(metrics)
+            self.log_info(
+                int(hp_index),
+                epoch_performance,
+                epoch,
+                best_value,
+                step_time_duration,
+            )
+            metrics = {
+                'hpo/hp': int(hp_index),
+                'hpo/scores': epoch_performance,
+                'hpo/epochs': epoch,
+                'hpo/curve': best_value,
+                'hpo/overhead': step_time_duration,
+                'hpo/surrogate_budget': self.surrogate_budget,
+                'hpo/regret': regret,
+            }
+            wandb.log(metrics)
 
-                if self.surrogate_budget >= self.total_budget or self.surrogate_budget >= self.benchmark.size():
-                    self.finish()
-                    return
+            if self.surrogate_budget >= self.total_budget or self.surrogate_budget >= self.benchmark.size():
+                self.finish()
+                return
 
         self.finish()
 
