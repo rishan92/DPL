@@ -12,7 +12,7 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import FunctionTransformer, OneHotEncoder
 import wandb
 import hashlib
-from typing import List, Tuple, Dict, Optional, Any, Type
+from typing import List, Tuple, Dict, Optional, Any, Type, Union
 from loguru import logger
 from pathlib import Path
 
@@ -21,6 +21,7 @@ from src.benchmarks.lcbench import LCBench
 from src.benchmarks.taskset import TaskSet
 # from benchmarks.hyperbo import PD1
 from src.benchmarks.synthetic import SyntheticBench
+from src.benchmarks.yahpo import YAHPOGym
 from src.surrogate_models.hyperparameter_optimizer import HyperparameterOptimizer
 from src.surrogate_models.asha import AHBOptimizer
 from src.surrogate_models.dehb.interface import DEHBOptimizer
@@ -51,6 +52,7 @@ class Framework:
         'lcbench_mini': LCBench,
         # 'pd1': PD1,
         'synthetic': SyntheticBench,
+        'yahpo': YAHPOGym,
     }
 
     def __init__(
@@ -79,17 +81,17 @@ class Framework:
         self.verbose: bool = args.verbose
         self.project_dir: Path = Path(args.project_dir)
 
-        benchmark_extension: Path
-        if self.benchmark_name == 'lcbench':
-            benchmark_extension = Path('lc_bench', 'results', 'data_2k.json')
-        elif self.benchmark_name == 'lcbench_mini':
-            benchmark_extension = Path('lc_bench', 'results', 'lcbench_airlines.json')
-        elif self.benchmark_name == 'taskset':
-            benchmark_extension = Path('data', 'taskset')
-        elif self.benchmark_name == 'pd1':
-            benchmark_extension = Path('pd1')
-        elif self.benchmark_name == 'synthetic':
-            benchmark_extension = Path('synthetic')
+        benchmark_extensions: Dict[str, Path] = {
+            'lcbench': Path('lc_bench', 'results', 'data_2k.json'),
+            'lcbench_mini': Path('lc_bench', 'results', 'lcbench_airlines.json'),
+            'taskset': Path('data', 'taskset'),
+            'pd1': Path('pd1'),
+            'synthetic': Path('synthetic'),
+            'yahpo': Path('yahpo_data'),
+        }
+
+        if self.benchmark_name in benchmark_extensions:
+            benchmark_extension = benchmark_extensions[self.benchmark_name]
         else:
             raise ValueError(f'Benchmark {self.benchmark_name} not supported')
 
@@ -159,7 +161,8 @@ class Framework:
         print(f"group_name {group_name}")
         logger.success(f"group_name {group_name}")
 
-        self.incumbent_hp_index = self.benchmark.get_incumbent_config_id()
+        # self.incumbent_hp_index = self.benchmark.get_incumbent_config_id()
+        self.incumbent_hp_index = 0
         self.pred_curves_path = None
         if gv.PLOT_PRED_CURVES:
             self.pred_curves_path = self.result_dir / "pred_curves" / self.dataset_name / str(self.seed)
@@ -312,7 +315,7 @@ class Framework:
 
         self.finish()
 
-    def preprocess(self, hp_candidates: NDArray) -> NDArray:
+    def preprocess(self, hp_candidates: Union[NDArray, pd.DataFrame]) -> NDArray:
         """Preprocess the hyperparameter candidates.
 
         Performs min-max standardization for the numerical attributes and
@@ -362,8 +365,7 @@ class Framework:
                 (
                     'cat',
                     OneHotEncoder(
-                        categories=[self.hp_names] * hp_candidates.shape[1],
-                        sparse=False,
+                        sparse_output=False,
                     ),
                     categorical_columns,
                 )
@@ -380,15 +382,15 @@ class Framework:
 
         preprocessed_candidates = preprocessor.fit_transform(hp_candidates_pd)
 
-        # log preprocessing will push numerical columns to the right
-        # so a mapping has to happen for the feature_types_pre
-        new_column_map = []
-        for name in hp_candidates_pd.columns:
-            for new_name in preprocessed_candidates.columns:
-                if name in new_name:
-                    new_column_map.append(new_name)
-
-        preprocessed_candidates = preprocessed_candidates[new_column_map]
+        # # log preprocessing will push numerical columns to the right
+        # # so a mapping has to happen for the feature_types_pre
+        # new_column_map = []
+        # for name in hp_candidates_pd.columns:
+        #     for new_name in preprocessed_candidates.columns:
+        #         if name in new_name:
+        #             new_column_map.append(new_name)
+        #
+        # preprocessed_candidates = preprocessed_candidates[new_column_map]
         preprocessed_candidates = preprocessed_candidates.to_numpy()
 
         return preprocessed_candidates

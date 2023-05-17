@@ -22,9 +22,6 @@ class BaseBenchmark(ABC):
         self.min_value = None
         self.categorical_indicator = None
 
-    def _load_benchmark(self):
-        raise NotImplementedError('Please implement the load_benchmark method')
-
     def load_dataset_names(self):
         raise NotImplementedError('Please implement the load_dataset_names method')
 
