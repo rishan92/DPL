@@ -420,11 +420,12 @@ class PowerLawModel(BasePytorchModule, ABC):
             if not is_lr_finder:
                 PowerLawModel._global_epoch[self.instance_id] += 1
 
-            if self.meta.learning_rate_scheduler != "ReduceLROnPlateau":
-                if self.lr_scheduler and self.meta.learning_rate_scheduler != "ReduceLROnPlateau" and self.optimizer._step_count > 0:
-                    self.lr_scheduler.step()
-            else:
-                self.lr_scheduler.step(normalized_loss)
+            if self.lr_scheduler:
+                if self.meta.learning_rate_scheduler != "ReduceLROnPlateau":
+                    if self.optimizer._step_count > 0:
+                        self.lr_scheduler.step()
+                else:
+                    self.lr_scheduler.step(normalized_loss)
 
             if val_dataloader:
                 if self.instance_id == 0 and epoch == 0:
