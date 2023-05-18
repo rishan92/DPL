@@ -43,8 +43,8 @@ class TargetSpaceComplex3PowerLawModel(PowerLawModel):
             'use_gamma_positive': False,
             'loss_function': 'L1Loss',
             'optimizer': 'Adam',
-            'learning_rate_scheduler': None,
-            # 'CosineAnnealingLR' 'LambdaLR' 'OneCycleLR' 'ExponentialLR'
+            'learning_rate_scheduler': 'ReduceLROnPlateau',
+            # 'CosineAnnealingLR' 'LambdaLR' 'OneCycleLR' 'ExponentialLR' "ReduceLROnPlateau"
             'learning_rate_scheduler_args': {
                 'total_iters_factor': 1.0,
                 'eta_min': 1e-6,

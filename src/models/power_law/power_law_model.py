@@ -420,8 +420,11 @@ class PowerLawModel(BasePytorchModule, ABC):
             if not is_lr_finder:
                 PowerLawModel._global_epoch[self.instance_id] += 1
 
-            if self.lr_scheduler and self.optimizer._step_count > 0:
-                self.lr_scheduler.step()
+            if self.meta.learning_rate_scheduler != "ReduceLROnPlateau":
+                if self.lr_scheduler and self.meta.learning_rate_scheduler != "ReduceLROnPlateau" and self.optimizer._step_count > 0:
+                    self.lr_scheduler.step()
+            else:
+                self.lr_scheduler.step(normalized_loss)
 
             if val_dataloader:
                 if self.instance_id == 0 and epoch == 0:
@@ -433,6 +436,8 @@ class PowerLawModel(BasePytorchModule, ABC):
 
             if is_nan_gradient and not is_lr_finder:
                 PowerLawModel._nan_gradients += 1
+
+            # print(f"lr {self.optimizer.param_groups[0]['lr']}")
 
             if self.instance_id == 0 and not is_lr_finder:
                 current_lr = self.optimizer.param_groups[0]['lr']
