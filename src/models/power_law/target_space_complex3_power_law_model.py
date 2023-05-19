@@ -30,6 +30,7 @@ class TargetSpaceComplex3PowerLawModel(PowerLawModel):
             'weight_regularization_factor': 0,
             'alpha_beta_constraint_factor': 0,
             'gamma_constraint_factor': 0,
+            'target_space_constraint_factor': 0,
             'learning_rate': 1e-3,
             'refine_learning_rate': 1e-3,
             'act_func': 'LeakyReLU',
@@ -39,19 +40,21 @@ class TargetSpaceComplex3PowerLawModel(PowerLawModel):
             'gamma_act_func': 'BoundedReLU',
             'output_act_func': None,
             'alpha_beta_is_difference': None,  # null "half"  "full"
-            'use_gamma_constraint': 'flip2',  # null "positive"  "half"  "full" "full_flip" "flip"
+            'use_gamma_constraint': None,  # null "positive"  "half"  "full" "full_flip" "flip"
             'use_gamma_positive': False,
+            'use_complex': False,
             'loss_function': 'L1Loss',
             'optimizer': 'Adam',
-            'learning_rate_scheduler': 'ReduceLROnPlateau',
+            'learning_rate_scheduler': None,
             # 'CosineAnnealingLR' 'LambdaLR' 'OneCycleLR' 'ExponentialLR' "ReduceLROnPlateau"
             'learning_rate_scheduler_args': {
                 'total_iters_factor': 1.0,
-                'eta_min': 1e-6,
+                'eta_min': 1e-3,
+                'refine_eta_min': 1e-3,
                 'max_lr': 1e-4,
                 'refine_max_lr': 1e-3,
-                'exp_min': 1e-6,
-                'refine_exp_min': 1e-6,
+                'exp_min': 1e-3,
+                'refine_exp_min': 1e-3,
             },
             'activate_early_stopping': False,
             'early_stopping_it': 0,
@@ -82,14 +85,16 @@ class TargetSpaceComplex3PowerLawModel(PowerLawModel):
             if hasattr(self.meta, 'dropout_rate') and self.meta.dropout_rate != 0:
                 layers.append(nn.Dropout(self.meta.dropout_rate))
 
-        last_layer = nn.Linear(self.meta.nr_units, 3)
+        output_units = 3
+
+        last_layer = nn.Linear(self.meta.nr_units, output_units)
         layers.append(last_layer)
 
         if hasattr(self.meta, "use_scaling_layer") and self.meta.use_scaling_layer:
             bias_values = None
             if hasattr(self.meta, "scaling_layer_bias_values") and self.meta.scaling_layer_bias_values:
                 bias_values = self.meta.scaling_layer_bias_values
-            scaling_layer = ScalingLayer(in_features=3, bias_values=bias_values)
+            scaling_layer = ScalingLayer(in_features=output_units, bias_values=bias_values)
             layers.append(scaling_layer)
 
         net = torch.nn.Sequential(*layers)
@@ -130,8 +135,12 @@ class TargetSpaceComplex3PowerLawModel(PowerLawModel):
             else:
                 raise NotImplementedError
 
-        if hasattr(self.meta, 'use_gamma_constraint') and self.meta.use_gamma_constraint is not None:
-            if self.meta.use_gamma_constraint == 'positive':
+        if hasattr(self.meta, 'use_gamma_constraint'):
+            if self.meta.use_gamma_constraint is None:
+                lb = 0
+                ub = 1
+                alphas = alphas * (ub - lb) + lb
+            elif self.meta.use_gamma_constraint == 'positive':
                 lm = torch.min(y2, y1)
                 alphas = alphas * lm
             elif self.meta.use_gamma_constraint == 'half':
@@ -199,10 +208,10 @@ class TargetSpaceComplex3PowerLawModel(PowerLawModel):
         abs_val = torch.abs(val)
         log_abs_val = torch.log(abs_val)
 
-        # # Calculate the angle (imaginary part)
-        # angle = torch.atan2(torch.tensor(0.0), val)
-        #
-        # log_val = torch.complex(log_abs_val, angle)
+        if self.meta.use_complex:
+            # Calculate the angle (imaginary part)
+            angle = torch.atan2(torch.tensor(0.0), val)
+            log_abs_val = torch.complex(log_abs_val, angle)
 
         gammas = log_abs_val / torch.log(torch.tensor(1 / 51))
 
@@ -221,7 +230,22 @@ class TargetSpaceComplex3PowerLawModel(PowerLawModel):
                 )
             ),
         )
-        # output = output_complex.real
+        # if (output.imag != 0).any():
+        #     print(output[output.imag != 0])
+
+        if self.meta.use_complex and not self.training:
+            # output2 = torch.add(
+            #     alphas.detach(),
+            #     torch.mul(
+            #         betas.detach(),
+            #         torch.pow(
+            #             predict_budgets,
+            #             torch.mul(gammas.real.detach(), -1)
+            #         )
+            #     ),
+            # )
+
+            output = output.real
         if self.output_act_func and self.training:
             output = self.output_act_func(output)
 
@@ -230,6 +254,8 @@ class TargetSpaceComplex3PowerLawModel(PowerLawModel):
             'beta': betas,
             'gamma': gammas,
             'pl_output': output,
+            'y1': y1,
+            'y2': y2,
         }
 
         return output, info

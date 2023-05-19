@@ -78,7 +78,7 @@ class EnsembleModel(BasePytorchModule):
     @staticmethod
     def get_default_meta():
         hp = {
-            'model_class_name': 'TargetSpaceComplex3PowerLawModel',
+            'model_class_name': 'ConditionedPowerLawModel',
             # 'ConditionedPowerLawModel', # 'ComplexPowerLawModel',  # 'TargetSpaceComplex3PowerLawModel',
             'ensemble_size': 5,
             'nr_epochs': 250,
@@ -148,7 +148,7 @@ class EnsembleModel(BasePytorchModule):
         if val_dataset:
             val_dataloader = SurrogateDataLoader(
                 dataset=val_dataset, batch_size=512, shuffle=False, seed=self.seed, dev=model_device,
-                should_weight_last_sample=should_weight_last_sample, last_sample=last_sample,
+                should_weight_last_sample=False, last_sample=last_sample,
                 # drop_last=train_dataset.X.shape[0] > batch_size and train_dataset.X.shape[0] % batch_size < 2
             )
 

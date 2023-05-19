@@ -147,6 +147,10 @@ class PowerLawModel(BasePytorchModule, ABC):
         if hasattr(self.meta, 'output_constraint_factor') and self.meta.output_constraint_factor != 0:
             self.output_constraint_factor = self.meta.output_constraint_factor
 
+        self.target_space_constraint_factor = 0
+        if hasattr(self.meta, 'target_space_constraint_factor') and self.meta.target_space_constraint_factor != 0:
+            self.target_space_constraint_factor = self.meta.target_space_constraint_factor
+
         self.hook_handle = None
 
         self.clip_gradients_value = None
@@ -205,8 +209,13 @@ class PowerLawModel(BasePytorchModule, ABC):
             lr_scheduler_class = get_class_from_package(torch.optim.lr_scheduler, self.meta.learning_rate_scheduler)
             args = {}
             if hasattr(self.meta, 'learning_rate_scheduler_args') and self.meta.learning_rate_scheduler_args:
-                args = self.meta.learning_rate_scheduler_args
+                args = deepcopy(self.meta.learning_rate_scheduler_args)
 
+            use_lr_sceduler = True
+            if is_refine and hasattr(self.meta, 'refine_learning_rate') and self.meta.refine_learning_rate:
+                learning_rate = self.meta.refine_learning_rate
+            else:
+                learning_rate = self.meta.learning_rate
             epochs = kwargs['epochs']
             if "total_iters_factor" in args:
                 args["total_iters"] = epochs * args["total_iters_factor"]
@@ -220,15 +229,27 @@ class PowerLawModel(BasePytorchModule, ABC):
             args["total_steps"] = epochs
             args["lr_lambda"] = lambda step: 1 - step / args["total_iters"]
             args["gamma"] = math.exp(math.log(args["exp_min"] / self.meta.learning_rate) / args["total_iters"])
+
             if is_refine and 'refine_max_lr' in args and args["refine_max_lr"]:
                 args["max_lr"] = args["refine_max_lr"]
             if is_refine and 'refine_exp_min' in args and args["refine_exp_min"]:
+                args["exp_min"] = args["refine_exp_min"]
                 args["gamma"] = math.exp(
                     math.log(args["refine_exp_min"] / self.meta.refine_learning_rate) / args["total_iters"])
+            if is_refine and 'refine_eta_min' in args and args["refine_eta_min"]:
+                args["eta_min"] = args["refine_eta_min"]
+
+            if self.meta.learning_rate_scheduler == "ExponentialLR":
+                use_lr_sceduler = learning_rate != args["exp_min"]
+            elif self.meta.learning_rate_scheduler == "CosineAnnealingLR":
+                use_lr_sceduler = learning_rate != args["eta_min"]
+            elif self.meta.learning_rate_scheduler == "OneCycleLR":
+                use_lr_sceduler = learning_rate != args["max_lr"]
 
             arg_names = inspect.getfullargspec(lr_scheduler_class.__init__).args
             relevant_args = {k: v for k, v in args.items() if k in arg_names}
-            self.lr_scheduler = lr_scheduler_class(self.optimizer, **relevant_args)
+            if use_lr_sceduler:
+                self.lr_scheduler = lr_scheduler_class(self.optimizer, **relevant_args)
 
     def train_epoch(self, max_batches=None):
         running_loss = 0
@@ -289,6 +310,18 @@ class PowerLawModel(BasePytorchModule, ABC):
                 else:
                     output_constraint_loss = torch.tensor(0.0, requires_grad=True)
 
+                if self.target_space_constraint_factor != 0:
+                    y1: torch.Tensor = predict_info['y1']
+                    y2: torch.Tensor = predict_info['y2']
+                    alpha: torch.Tensor = predict_info['alpha']
+                    # mask = (y1 >= y2) & ((alpha <= y2) | (alpha >= y1)) | (y1 < y2) & ((alpha <= y1) | (alpha >= y2))
+                    mask = (y1 >= y2) & (alpha <= y2) | (y1 <= y2) & (alpha >= y2)
+                    target_space_constraint_loss = \
+                        torch.where(mask, torch.tensor(0.0), torch.abs(alpha - ((y1 + y2) / 2)))
+                    target_space_constraint_loss = target_space_constraint_loss.mean()
+                else:
+                    target_space_constraint_loss = torch.tensor(0.0, requires_grad=True)
+
                 # if self.meta.use_sample_weights:
                 #     batch_labels = batch_labels + batch_noise
 
@@ -304,7 +337,8 @@ class PowerLawModel(BasePytorchModule, ABC):
                 loss = criterion_loss + self.regularization_factor * l1_norm + \
                        self.alpha_beta_constraint_factor * alpha_beta_constraint_loss + \
                        self.gamma_constraint_factor * gamma_constraint_loss + \
-                       self.output_constraint_factor * output_constraint_loss
+                       self.output_constraint_factor * output_constraint_loss + \
+                       self.target_space_constraint_factor * target_space_constraint_loss
 
                 loss.backward()
 

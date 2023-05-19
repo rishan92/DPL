@@ -33,6 +33,8 @@ from src.utils.utils import get_class_from_package, get_class_from_packages, get
 from scipy.stats import spearmanr
 import properscoring as ps
 
+warnings.filterwarnings('ignore')
+
 
 class HyperparameterOptimizer(BaseHyperparameterOptimizer):
     model_types = {
@@ -449,20 +451,18 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
 
             if gv.PLOT_PRED_CURVES and predict_infos is not None:
                 if self.prediction_params_pd is None:
+                    info_names = list(predict_infos.keys())
                     column_indexes = pd.MultiIndex.from_product([
                         hp_indices,
-                        ['alpha', 'beta', 'gamma', 'pl_output']
+                        info_names
                     ], names=['hp_index', 'parameter_type'])
                     self.prediction_params_pd = pd.DataFrame(
                         index=np.arange(1, self.total_budget),
                         columns=column_indexes
                     )
 
-                self.prediction_params_pd.loc[self.iterations_counter, (hp_indices, 'alpha')] = predict_infos['alpha']
-                self.prediction_params_pd.loc[self.iterations_counter, (hp_indices, 'beta')] = predict_infos['beta']
-                self.prediction_params_pd.loc[self.iterations_counter, (hp_indices, 'gamma')] = predict_infos['gamma']
-                self.prediction_params_pd.loc[self.iterations_counter, (hp_indices, 'pl_output')] = predict_infos[
-                    'pl_output']
+                for k, v in predict_infos.items():
+                    self.prediction_params_pd.loc[self.iterations_counter, (hp_indices, k)] = v
 
         suggest_time_end = time.time()
         self.suggest_time_duration = suggest_time_end - suggest_time_start
