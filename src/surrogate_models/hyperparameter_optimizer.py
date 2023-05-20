@@ -17,6 +17,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from pathlib import Path
 import warnings
+import math
 
 from src.benchmarks.base_benchmark import BaseBenchmark
 from src.dataset.tabular_dataset import TabularDataset
@@ -266,6 +267,9 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
                 'target_normalization_range': [0.2, 0.8],
                 'use_scaled_budgets': True,
                 'use_exploitation_sampling': False,
+                'reset_refine_optimizer': True,
+                'acq_explore_factor': 0,
+                'acq_explore_strategy': 'constant',  # 'linear' 'exponential' 'cosine_annealing'
             }
         elif model_class == DyHPOModel:
             hp = {
@@ -279,6 +283,9 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
                 'target_normalization_range': [0.2, 0.8],
                 'use_scaled_budgets': True,
                 'use_exploitation_sampling': False,
+                'reset_refine_optimizer': True,
+                'acq_explore_factor': 0,
+                'acq_explore_strategy': 'constant',
             }
         else:
             raise NotImplementedError(f"{model_class=}")
@@ -329,7 +336,7 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
             return_state, _ = self.model.train_loop(
                 train_dataset=train_dataset,
                 should_refine=should_refine,
-                reset_optimizer=True,
+                reset_optimizer=self.meta.reset_refine_optimizer,
                 last_sample=last_sample
             )
         else:
@@ -419,6 +426,24 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
                         all_hp_indices = np.array(hp_indices)
                         evaluated_mask = np.isin(all_hp_indices, evaluated_indices)
 
+            acq_explore_factor = 0
+            if hasattr(self.meta, 'acq_explore_factor') and \
+                self.meta.acq_explore_factor is not None and self.meta.acq_explore_factor != 0:
+                acq_explore_factor = self.meta.acq_explore_factor
+                if hasattr(self.meta, 'acq_explore_strategy') and \
+                    self.meta.acq_explore_strategy is not None and self.meta.acq_explore_strategy != 'constant':
+                    if self.meta.acq_explore_strategy == 'linear':
+                        acq_explore_factor = self.meta.acq_explore_factor * (
+                            1 - self.surrogate_budget / self.total_budget)
+                    elif self.meta.acq_explore_strategy == 'exponential':
+                        gamma = math.exp(math.log(1e-6 / self.meta.acq_explore_factor) / self.total_budget)
+                        acq_explore_factor = math.pow(gamma, self.surrogate_budget)
+                    elif self.meta.acq_explore_strategy == 'cosine_annealing':
+                        acq_explore_factor = 0.5 * self.meta.acq_explore_factor * (
+                            1 + math.cos(self.surrogate_budget * math.pi / self.total_budget))
+                    else:
+                        raise NotImplementedError
+
             best_prediction_index = self.find_suggested_config(
                 mean_predictions,
                 std_predictions,
@@ -426,7 +451,8 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
                 acq_mode=self.meta.acq_mode,
                 acq_best_value_mode=self.meta.acq_best_value_mode,
                 exploitation_mask=evaluated_mask,
-                hp_indices=hp_indices
+                hp_indices=hp_indices,
+                acq_explore_factor=acq_explore_factor
             )
 
             """
@@ -576,7 +602,7 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
             The values of the acquisition function for every configuration.
         """
         if acq_mode == 'ei':
-            difference = np.subtract(best_values, mean_predictions)
+            difference = best_values - mean_predictions - explore_factor
 
             zero_std_indicator = np.zeros_like(std_predictions, dtype=bool)
             zero_std_indicator[std_predictions == 0] = True
@@ -608,7 +634,8 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
         acq_mode: str = 'ei',
         acq_best_value_mode: str = None,
         exploitation_mask=None,
-        hp_indices=None
+        hp_indices=None,
+        acq_explore_factor=0,
     ) -> int:
         """Return the hyperparameter with the highest acq function value.
 
@@ -644,6 +671,7 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
             mean_predictions,
             mean_stds,
             acq_mode=acq_mode,
+            explore_factor=acq_explore_factor,
         )
 
         if gv.PLOT_ACQ and gv.IS_WANDB:

@@ -40,7 +40,7 @@ class TargetSpaceComplex3PowerLawModel(PowerLawModel):
             'gamma_act_func': 'BoundedReLU',
             'output_act_func': None,
             'alpha_beta_is_difference': None,  # null "half"  "full"
-            'use_gamma_constraint': None,  # null "positive"  "half"  "full" "full_flip" "flip"
+            'use_gamma_constraint': "flip2",  # null "positive"  "half"  "full" "full_flip" "flip"
             'use_gamma_positive': False,
             'use_complex': False,
             'loss_function': 'L1Loss',
@@ -49,7 +49,7 @@ class TargetSpaceComplex3PowerLawModel(PowerLawModel):
             # 'CosineAnnealingLR' 'LambdaLR' 'OneCycleLR' 'ExponentialLR' "ReduceLROnPlateau"
             'learning_rate_scheduler_args': {
                 'total_iters_factor': 1.0,
-                'eta_min': 1e-3,
+                'eta_min': 1e-4,
                 'refine_eta_min': 1e-3,
                 'max_lr': 1e-4,
                 'refine_max_lr': 1e-3,
