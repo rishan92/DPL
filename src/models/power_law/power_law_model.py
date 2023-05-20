@@ -250,6 +250,8 @@ class PowerLawModel(BasePytorchModule, ABC):
             relevant_args = {k: v for k, v in args.items() if k in arg_names}
             if use_lr_sceduler:
                 self.lr_scheduler = lr_scheduler_class(self.optimizer, **relevant_args)
+            else:
+                self.lr_scheduler = None
 
     def train_epoch(self, max_batches=None):
         running_loss = 0
