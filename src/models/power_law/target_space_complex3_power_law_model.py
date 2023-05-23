@@ -246,6 +246,7 @@ class TargetSpaceComplex3PowerLawModel(PowerLawModel):
             # )
 
             output = output.real
+
         if self.output_act_func and self.training:
             output = self.output_act_func(output)
 

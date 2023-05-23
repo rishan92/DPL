@@ -68,12 +68,14 @@ class FeatureExtractorTargetSpaceDYHPO(BaseFeatureExtractor):
             'use_learning_curve_mask': False,
             'act_func': 'LeakyReLU',
             'last_act_func': 'Identity',
-            'alpha_act_func': 'Sigmoid',
-            'beta_act_func': 'Sigmoid',
-            'gamma_act_func': 'Sigmoid',
+            'alpha_act_func': 'BoundedReLU',
+            'beta_act_func': 'BoundedReLU',
+            'gamma_act_func': 'BoundedReLU',
             'output_act_func': None,
-            'alpha_beta_is_difference': True,
-            'use_gamma_constraint': True,
+            'alpha_beta_is_difference': None,  # null "half"  "full"
+            'use_gamma_constraint': "flip2",  # null "positive"  "half"  "full" "full_flip" "flip"
+            'use_gamma_positive': False,
+            'use_complex': False,
             'use_scaling_layer': False,
             'scaling_layer_bias_values': [0, 0, math.log(0.01) / math.log(1 / 51)]  # [0, 0, 1.17125493757],
         }
@@ -181,23 +183,87 @@ class FeatureExtractorTargetSpaceDYHPO(BaseFeatureExtractor):
         y1 = self.beta_act_func(y1)
         y2 = self.gamma_act_func(y2)
 
-        if hasattr(self.meta, 'alpha_beta_is_difference') and self.meta.alpha_beta_is_difference:
-            y2 = y1 * y2
+        if hasattr(self.meta, 'alpha_beta_is_difference') and self.meta.alpha_beta_is_difference is not None:
+            if self.meta.alpha_beta_is_difference == 'half':
+                y2 = y1 * y2
+            elif self.meta.alpha_beta_is_difference == 'full':
+                y2_prev = y2
+                y2 = torch.where(y2 <= y1, y1 * y2, y2)
+                y1 = torch.where(y2_prev > y1, y1 * y2_prev, y1)
+            else:
+                raise NotImplementedError
 
-        if hasattr(self.meta, 'use_gamma_constraint') and self.meta.use_gamma_constraint:
-            alphas = alphas * y2
+        if hasattr(self.meta, 'use_gamma_constraint'):
+            if self.meta.use_gamma_constraint is None:
+                lb = 0
+                ub = 1
+                alphas = alphas * (ub - lb) + lb
+            elif self.meta.use_gamma_constraint == 'positive':
+                lm = torch.min(y2, y1)
+                alphas = alphas * lm
+            elif self.meta.use_gamma_constraint == 'half':
+                lm = torch.min(y2, y1)
+                lb = -1
+                ub = 1
+
+                alphas = alphas * (ub - lb) + lb
+
+                m = ub
+                alphas = (alphas - lb) * (lm - lb) / (m - lb) + lb
+            elif self.meta.use_gamma_constraint == "full":
+                lm = torch.min(y2, y1)
+                um = torch.max(y1, y2)
+                lb = -1
+                ub = 2
+
+                alphas = alphas * (ub - lb) + lb
+
+                m = (y2 + y1) / 2
+                mask = alphas <= m
+
+                lower_transform = (alphas - lb) * (lm - lb) / (m - lb) + lb
+                upper_transform = (alphas - m) * (ub - um) / (ub - m) + um
+                alphas = torch.where(mask, lower_transform, upper_transform)
+            elif self.meta.use_gamma_constraint == "full_flip":
+                lm = torch.min(y2, y1)
+                um = torch.max(y1, y2)
+                lb = -1
+                ub = 2
+
+                alphas = alphas * (ub - lb) + lb
+
+                m = (y2 + y1) / 2
+                mask = alphas <= m
+
+                lower_transform = (alphas - lb) * (lm - lb) / (m - lb) + lb
+                upper_transform = (alphas - m) * (ub - um) / (ub - m) + um
+                alphas = torch.where(mask, lower_transform, upper_transform)
+
+                # flip
+                a_lower = (lb + lm) / 2
+                a_upper = (um + ub) / 2
+                alphas = torch.where(mask, 2 * a_lower - alphas, 2 * a_upper - alphas)
+            elif self.meta.use_gamma_constraint == 'flip':
+                alphas = torch.where(y2 <= y1, alphas * y2, y2 + alphas * (1 - y2))
+            elif self.meta.use_gamma_constraint == 'flip2':
+                alphas = torch.where(y2 <= y1, alphas * y2, y2 + (1 - alphas) * (1 - y2))
+            else:
+                raise NotImplementedError
 
         val = ((y2 - alphas) / (y1 - alphas + torch.tensor(1e-4))) + torch.tensor(1e-4)
 
         abs_val = torch.abs(val)
         log_abs_val = torch.log(abs_val)
 
-        # # Calculate the angle (imaginary part)
-        # angle = torch.atan2(torch.tensor(0.0), val)
-        #
-        # log_val = torch.complex(log_abs_val, angle)
+        if self.meta.use_complex:
+            # Calculate the angle (imaginary part)
+            angle = torch.atan2(torch.tensor(0.0), val)
+            log_abs_val = torch.complex(log_abs_val, angle)
 
         gammas = log_abs_val / torch.log(torch.tensor(1 / 51))
+
+        if hasattr(self.meta, 'use_gamma_positive') and self.meta.use_gamma_positive:
+            gammas = torch.abs(gammas)
 
         betas = y2 - alphas
 
@@ -211,18 +277,19 @@ class FeatureExtractorTargetSpaceDYHPO(BaseFeatureExtractor):
                 )
             ),
         )
-        # output = output_complex.real
+        if self.meta.use_complex and not self.training:
+            # output2 = torch.add(
+            #     alphas.detach(),
+            #     torch.mul(
+            #         betas.detach(),
+            #         torch.pow(
+            #             predict_budgets,
+            #             torch.mul(gammas.real.detach(), -1)
+            #         )
+            #     ),
+            # )
+            output = output.real
 
-        # output_r = torch.add(
-        #     alphas,
-        #     torch.mul(
-        #         betas,
-        #         torch.pow(
-        #             budgets,
-        #             torch.mul(gammas.real, -1)
-        #         )
-        #     ),
-        # )
         if self.output_act_func:
             output = self.output_act_func(output)
 
@@ -231,6 +298,8 @@ class FeatureExtractorTargetSpaceDYHPO(BaseFeatureExtractor):
             'beta': betas,
             'gamma': gammas,
             'pl_output': output,
+            'y1': y1,
+            'y2': y2,
         }
 
         alphas = torch.unsqueeze(alphas, dim=1)

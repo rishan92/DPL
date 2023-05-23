@@ -132,6 +132,18 @@ class DyHPOModel(BasePytorchModule):
         if hasattr(self.meta, 'alpha_beta_constraint_factor') and self.meta.alpha_beta_constraint_factor != 0:
             self.alpha_beta_constraint_factor = self.meta.alpha_beta_constraint_factor
 
+        self.gamma_constraint_factor = 0
+        if hasattr(self.meta, 'gamma_constraint_factor') and self.meta.gamma_constraint_factor != 0:
+            self.gamma_constraint_factor = self.meta.gamma_constraint_factor
+
+        self.output_constraint_factor = 0
+        if hasattr(self.meta, 'output_constraint_factor') and self.meta.output_constraint_factor != 0:
+            self.output_constraint_factor = self.meta.output_constraint_factor
+
+        self.target_space_constraint_factor = 0
+        if hasattr(self.meta, 'target_space_constraint_factor') and self.meta.target_space_constraint_factor != 0:
+            self.target_space_constraint_factor = self.meta.target_space_constraint_factor
+
         self.l1_loss_factor = 0
         self.l1_loss = torch.nn.L1Loss()
         if hasattr(self.meta, 'l1_loss_factor') and self.meta.l1_loss_factor != 0:
@@ -149,27 +161,30 @@ class DyHPOModel(BasePytorchModule):
             'refine_nr_epochs': 50,
             'feature_class_name': 'FeatureExtractorDYHPO',
             # 'FeatureExtractor',  #  'FeatureExtractorDYHPO',  # 'FeatureExtractorTargetSpaceDYHPO'
-            'gp_class_name': 'GPRegressionPowerLawMeanModel',
+            'gp_class_name': 'GPRegressionModel',
             # 'GPRegressionPowerLawMeanModel',  #  'GPRegressionModel'
             'likelihood_class_name': 'GaussianLikelihood',
             'mll_loss_function': 'ExactMarginalLogLikelihood',
-            'learning_rate': 1.5e-3,
+            'learning_rate': 1e-3,
             'refine_learning_rate': 1e-3,
             'power_law_loss_function': 'MSELoss',
-            'power_law_loss_factor': 0,
+            'power_law_loss_factor': 0.5,
             'l1_loss_factor': 0,
             'weight_regularization_factor': 0,
             'alpha_beta_constraint_factor': 0,
+            'gamma_constraint_factor': 0,
+            'output_constraint_factor': 0,
+            'target_space_constraint_factor': 0,
             'noise_lower_bound': 1e-4,  # 1e-4,  #
             'noise_upper_bound': 1e-3,  # 1e-3,  #
-            'use_seperate_lengthscales': True,
+            'use_seperate_lengthscales': False,
             'optimize_likelihood': False,
             'use_scale_to_bounds': False,
             'use_suggested_learning_rate': False,
-            'use_weight_by_budget': True,
+            'use_weight_by_budget': False,
             'optimizer': 'Adam',
             'reset_on_divergence': False,
-            'learning_rate_scheduler': 'ExponentialLR',
+            'learning_rate_scheduler': None,
             # 'CosineAnnealingLR' 'LambdaLR' 'OneCycleLR' 'ExponentialLR'
             'learning_rate_scheduler_args': {
                 'total_iters_factor': 1.0,
@@ -357,6 +372,36 @@ class DyHPOModel(BasePytorchModule):
             else:
                 alpha_beta_constraint_loss = torch.tensor(0.0, requires_grad=True)
 
+            if self.gamma_constraint_factor != 0:
+                gamma = predict_info['gamma']
+                gamma_upper_bound = \
+                    torch.log((1 - predict_info['alpha'] - torch.tensor(1e-4)) / (
+                        predict_info['beta'] + torch.tensor(1e-4))) / torch.log(torch.tensor(51))
+                lower_loss = torch.clamp(-1 * gamma, min=0)
+                upper_loss = torch.clamp(gamma - gamma_upper_bound, min=0)
+                gamma_constraint_loss = torch.mean(lower_loss + upper_loss)
+            else:
+                gamma_constraint_loss = torch.tensor(0.0, requires_grad=True)
+
+            if self.output_constraint_factor != 0:
+                lower_loss = torch.clamp(-1 * outputs, min=0)
+                upper_loss = torch.clamp(outputs - 1, min=0)
+                output_constraint_loss = torch.mean(lower_loss + upper_loss)
+            else:
+                output_constraint_loss = torch.tensor(0.0, requires_grad=True)
+
+            if self.target_space_constraint_factor != 0:
+                y1: torch.Tensor = predict_info['y1']
+                y2: torch.Tensor = predict_info['y2']
+                alpha: torch.Tensor = predict_info['alpha']
+                # mask = (y1 >= y2) & ((alpha <= y2) | (alpha >= y1)) | (y1 < y2) & ((alpha <= y1) | (alpha >= y2))
+                mask = (y1 >= y2) & (alpha <= y2) | (y1 <= y2) & (alpha >= y2)
+                target_space_constraint_loss = \
+                    torch.where(mask, torch.tensor(0.0), torch.abs(alpha - ((y1 + y2) / 2)))
+                target_space_constraint_loss = target_space_constraint_loss.mean()
+            else:
+                target_space_constraint_loss = torch.tensor(0.0, requires_grad=True)
+
             try:
                 # Calc loss and backprop derivatives
                 mll_loss = -self.mll_criterion(output, self.model.train_targets)
@@ -368,12 +413,16 @@ class DyHPOModel(BasePytorchModule):
 
                 l1_loss = torch.tensor(0.0, requires_grad=True)
                 if self.l1_loss_factor != 0:
-                    l1_loss = self.l1_loss(mean_prediction, self.model.train_targets)
+                    l1_loss = self.l1_loss(power_law_output, self.model.train_targets)
 
-                loss = mll_loss + self.meta.power_law_loss_factor * power_law_loss + \
+                loss = mll_loss + \
+                       self.meta.power_law_loss_factor * power_law_loss + \
                        self.regularization_factor * l1_norm + \
                        self.alpha_beta_constraint_factor * alpha_beta_constraint_loss + \
-                       self.l1_loss_factor * l1_loss
+                       self.l1_loss_factor * l1_loss + \
+                       self.gamma_constraint_factor * gamma_constraint_loss + \
+                       self.output_constraint_factor * output_constraint_loss + \
+                       self.target_space_constraint_factor * target_space_constraint_loss
 
                 mae = gpytorch.metrics.mean_absolute_error(prediction, self.model.train_targets)
                 power_law_mae = gpytorch.metrics.mean_absolute_error(prediction, power_law_output.detach())

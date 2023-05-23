@@ -275,10 +275,10 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
             hp = {
                 'fraction_random_configs': 0.1,
                 'initial_full_training_trials': 10,
-                'predict_mode': 'end_budget',  # 'end_budget',  #
+                'predict_mode': 'next_budget',  # 'end_budget',  #
                 'curve_size_mode': 'variable',  # 'fixed',
                 'acq_mode': 'ei',
-                'acq_best_value_mode': 'normal',  # 'normal',  #    mf - multi-fidelity, normal, None
+                'acq_best_value_mode': 'mf',  # 'normal',  #    mf - multi-fidelity, normal, None
                 'use_target_normalization': False,
                 'target_normalization_range': [0.2, 0.8],
                 'use_scaled_budgets': True,

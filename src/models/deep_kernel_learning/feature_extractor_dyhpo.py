@@ -63,7 +63,7 @@ class FeatureExtractorDYHPO(BaseFeatureExtractor):
             'cnn_kernel_size': 3,
             'cnn_nr_layers': 1,
             'dropout_rate': 0,
-            'use_batch_norm': True,
+            'use_batch_norm': False,
             'use_learning_curve': False,
             'use_learning_curve_mask': False,
             'act_func': 'LeakyReLU',

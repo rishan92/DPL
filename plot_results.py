@@ -86,8 +86,8 @@ def main():
     dataset_files_path = Path("./bash_scripts")
 
     method_names = ['power_law', 'dyhpo', 'dehb', 'random']
-    method_names = ['power_law_benchmark', 'power_law_complex6', 'power_law_complex5', 'dyhpo_benchmark', 'dehb',
-                    'random']
+    method_names = ['power_law_benchmark', 'power_law_clipsig_abc', 'power_law_flip2_refine_lr',
+                    'dyhpo_benchmark', 'dehb', 'random']
     benchmark_names = ['taskset', 'lcbench']
     benchmark_names = ['lcbench']
     dataset_names = None

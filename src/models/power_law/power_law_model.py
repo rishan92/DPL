@@ -336,7 +336,8 @@ class PowerLawModel(BasePytorchModule, ABC):
                 elif self.meta.use_sample_weight_by_budget or self.meta.use_sample_weight_by_label:
                     criterion_loss = (criterion_loss * batch_weights).mean()
 
-                loss = criterion_loss + self.regularization_factor * l1_norm + \
+                loss = criterion_loss + \
+                       self.regularization_factor * l1_norm + \
                        self.alpha_beta_constraint_factor * alpha_beta_constraint_loss + \
                        self.gamma_constraint_factor * gamma_constraint_loss + \
                        self.output_constraint_factor * output_constraint_loss + \
