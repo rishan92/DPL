@@ -31,7 +31,7 @@ class FeatureExtractor(BaseFeatureExtractor):
         #
         # if self.meta.use_learning_curve:
         #     self.cnn_net = self.get_cnn_net()
-
+        self.set_seed(seed=seed)
         self.fc1 = nn.Linear(self.nr_initial_features, self.meta.nr_units[0])
         self.bn1 = nn.BatchNorm1d(self.meta.nr_units[0])
         for i in range(1, self.meta.nr_layers - 1):

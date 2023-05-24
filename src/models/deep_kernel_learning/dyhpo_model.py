@@ -77,7 +77,7 @@ class DyHPOModel(BasePytorchModule):
         self.power_law_criterion_class = get_class_from_packages([torch.nn, src.models.deep_kernel_learning],
                                                                  self.meta.power_law_loss_function)
 
-        self.feature_extractor: BaseFeatureExtractor = self.feature_extractor_class(nr_features=nr_features)
+        self.feature_extractor: BaseFeatureExtractor = self.feature_extractor_class(nr_features=nr_features, seed=seed)
         self.feature_output_size = self.get_feature_extractor_output_size(nr_features=nr_features)
 
         self.early_stopping_patience = self.meta.nr_patience_epochs
@@ -144,10 +144,19 @@ class DyHPOModel(BasePytorchModule):
         if hasattr(self.meta, 'target_space_constraint_factor') and self.meta.target_space_constraint_factor != 0:
             self.target_space_constraint_factor = self.meta.target_space_constraint_factor
 
-        self.l1_loss_factor = 0
         self.l1_loss = torch.nn.L1Loss()
+
+        self.l1_loss_factor = 0
         if hasattr(self.meta, 'l1_loss_factor') and self.meta.l1_loss_factor != 0:
             self.l1_loss_factor = self.meta.l1_loss_factor
+
+        self.power_law_l1_loss_factor = 0
+        if hasattr(self.meta, 'power_law_l1_loss_factor') and self.meta.power_law_l1_loss_factor != 0:
+            self.power_law_l1_loss_factor = self.meta.power_law_l1_loss_factor
+
+        self.mll_loss_factor = 1
+        if hasattr(self.meta, 'mll_loss_factor'):
+            self.mll_loss_factor = self.meta.mll_loss_factor
 
         if gv.IS_WANDB and gv.PLOT_GRADIENTS:
             wandb.watch([self.feature_extractor, self.model, self.likelihood], log='all', idx=0, log_freq=10)
@@ -168,15 +177,17 @@ class DyHPOModel(BasePytorchModule):
             'learning_rate': 1e-3,
             'refine_learning_rate': 1e-3,
             'power_law_loss_function': 'MSELoss',
-            'power_law_loss_factor': 0.5,
+            'power_law_loss_factor': 0,
             'l1_loss_factor': 0,
+            'power_law_l1_loss_factor': 0,
+            'mll_loss_factor': 1,
             'weight_regularization_factor': 0,
             'alpha_beta_constraint_factor': 0,
             'gamma_constraint_factor': 0,
             'output_constraint_factor': 0,
             'target_space_constraint_factor': 0,
-            'noise_lower_bound': 1e-4,  # 1e-4,  #
-            'noise_upper_bound': 1e-3,  # 1e-3,  #
+            'noise_lower_bound': None,  # 1e-4,  #
+            'noise_upper_bound': None,  # 1e-3,  #
             'use_seperate_lengthscales': False,
             'optimize_likelihood': False,
             'use_scale_to_bounds': False,
@@ -344,6 +355,7 @@ class DyHPOModel(BasePytorchModule):
             return None, None
 
         for epoch_nr in range(0, nr_epochs):
+            check_seed_torch = torch.random.get_rng_state().sum()
             if not is_lr_finder:
                 DyHPOModel._global_epoch += 1
             is_nan_gradient = False
@@ -383,13 +395,6 @@ class DyHPOModel(BasePytorchModule):
             else:
                 gamma_constraint_loss = torch.tensor(0.0, requires_grad=True)
 
-            if self.output_constraint_factor != 0:
-                lower_loss = torch.clamp(-1 * outputs, min=0)
-                upper_loss = torch.clamp(outputs - 1, min=0)
-                output_constraint_loss = torch.mean(lower_loss + upper_loss)
-            else:
-                output_constraint_loss = torch.tensor(0.0, requires_grad=True)
-
             if self.target_space_constraint_factor != 0:
                 y1: torch.Tensor = predict_info['y1']
                 y2: torch.Tensor = predict_info['y2']
@@ -411,26 +416,42 @@ class DyHPOModel(BasePytorchModule):
                 mean_prediction = prediction.mean
                 power_law_loss = self.power_law_criterion(mean_prediction, power_law_output)
 
-                l1_loss = torch.tensor(0.0, requires_grad=True)
-                if self.l1_loss_factor != 0:
-                    l1_loss = self.l1_loss(power_law_output, self.model.train_targets)
+                if self.power_law_l1_loss_factor != 0:
+                    power_law_l1_loss = self.l1_loss(power_law_output, self.model.train_targets)
+                else:
+                    power_law_l1_loss = torch.tensor(0.0, requires_grad=True)
 
-                loss = mll_loss + \
+                if self.l1_loss_factor != 0:
+                    l1_loss = self.l1_loss(mean_prediction, self.model.train_targets)
+                else:
+                    l1_loss = torch.tensor(0.0, requires_grad=True)
+
+                if self.output_constraint_factor != 0:
+                    lower_loss = torch.clamp(-1 * power_law_output, min=0)
+                    upper_loss = torch.clamp(power_law_output - 1, min=0)
+                    output_constraint_loss = torch.mean(lower_loss + upper_loss)
+                else:
+                    output_constraint_loss = torch.tensor(0.0, requires_grad=True)
+
+                loss = self.mll_loss_factor * mll_loss + \
                        self.meta.power_law_loss_factor * power_law_loss + \
                        self.regularization_factor * l1_norm + \
                        self.alpha_beta_constraint_factor * alpha_beta_constraint_loss + \
                        self.l1_loss_factor * l1_loss + \
+                       self.power_law_l1_loss_factor * power_law_l1_loss + \
                        self.gamma_constraint_factor * gamma_constraint_loss + \
                        self.output_constraint_factor * output_constraint_loss + \
                        self.target_space_constraint_factor * target_space_constraint_loss
 
                 mae = gpytorch.metrics.mean_absolute_error(prediction, self.model.train_targets)
+                mse = gpytorch.metrics.mean_squared_error(prediction, self.model.train_targets)
                 power_law_mae = gpytorch.metrics.mean_absolute_error(prediction, power_law_output.detach())
 
                 mll_loss_value = mll_loss.detach().to('cpu').item()
                 power_law_loss_value = power_law_loss.detach().to('cpu').item()
                 loss_value = loss.detach().to('cpu').item()
                 mae_value = mae.detach().to('cpu').item()
+                mse_value = mse.detach().to('cpu').item()
                 power_law_mae_value = power_law_mae.detach().to('cpu').item()
                 lengthscale_value = self.model.covar_module.base_kernel.lengthscale[0, 0].detach().to('cpu').item()
                 noise_value = self.model.likelihood.noise.detach().to('cpu').item()
@@ -502,7 +523,7 @@ class DyHPOModel(BasePytorchModule):
                     continue
 
                 self.logger.debug(
-                    f'Epoch {epoch_nr} - MAE {mae_value}, '
+                    f'Epoch {epoch_nr} - MSE {mse_value}, '
                     f'Loss: {loss_value}, '
                     f'lengthscale: {lengthscale_value}, '
                     f'noise: {noise_value}, '

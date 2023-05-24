@@ -382,6 +382,7 @@ class Framework:
 
         preprocessed_candidates = preprocessor.fit_transform(hp_candidates_pd)
 
+        # # This is only required to reproduce the results of original DPL or DyHPO.
         # # log preprocessing will push numerical columns to the right
         # # so a mapping has to happen for the feature_types_pre
         # new_column_map = []
@@ -389,8 +390,8 @@ class Framework:
         #     for new_name in preprocessed_candidates.columns:
         #         if name in new_name:
         #             new_column_map.append(new_name)
-        #
         # preprocessed_candidates = preprocessed_candidates[new_column_map]
+
         preprocessed_candidates = preprocessed_candidates.to_numpy()
 
         return preprocessed_candidates
