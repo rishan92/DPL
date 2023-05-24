@@ -25,8 +25,8 @@ class PD1(BaseBenchmark):
         self.validation_error_rate = self.blackbox[dataset_name].objectives_evaluations[:, :, :, 0]
         self.validation_error_rate = np.mean(self.validation_error_rate, axis=1)
 
-        self.max_value = 0.0
-        self.min_value = 1.0
+        self.max_value = 1.0
+        self.min_value = 0.0
 
         self.eta = eta
         self.number_of_brackets = number_of_brackets
@@ -96,6 +96,11 @@ class PD1(BaseBenchmark):
         val_curve = self.validation_error_rate[hp_index, 0:budget]
         return val_curve.tolist()
 
+    def get_curve_best(self, hp_index: int) -> float:
+        curve = self.get_curve(hp_index, self.max_budget)
+        best_value = min(curve)
+        return best_value
+
     def get_incumbent_curve(self):
 
         best_value = np.inf
@@ -109,6 +114,25 @@ class PD1(BaseBenchmark):
                 best_index = index
 
         return self.validation_error_rate[best_index]
+
+    def get_incumbent_config_id(self) -> int:
+        best_value = np.inf
+        best_index = -1
+        for index in range(0, self.validation_error_rate.shape[0]):
+            val_error_curve = self.validation_error_rate[index, :]
+            best_performance = min(val_error_curve)
+
+            if best_performance < best_value:
+                best_value = best_performance
+                best_index = index
+
+        return best_index
+
+    def get_best_performance(self):
+        incumbent_curve = self.get_incumbent_curve()
+        best_value = min(incumbent_curve)
+
+        return best_value
 
     def get_gap_performance(self):
 

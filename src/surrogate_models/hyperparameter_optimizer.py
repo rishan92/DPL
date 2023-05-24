@@ -249,7 +249,8 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
             for i in range(self.hp_candidates.shape[0]):
                 best_value = self.benchmark.get_curve_best(i)
                 self.benchmark_labels[i] = best_value
-
+            if not self.minimization:
+                self.benchmark_labels = self.max_value - self.benchmark_labels
         if self.meta.check_model:
             self.check_training()
 
