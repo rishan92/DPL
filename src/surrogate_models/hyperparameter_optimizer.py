@@ -264,7 +264,7 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
                 'curve_size_mode': 'fixed',
                 'acq_mode': 'ei',
                 'acq_best_value_mode': 'normal',
-                'use_target_normalization': False,
+                'use_target_normalization': True,
                 'target_normalization_range': [0.2, 0.8],
                 'use_scaled_budgets': True,
                 'use_exploitation_sampling': False,
@@ -386,11 +386,11 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
         #     if predict_infos is not None and 'pl_output' in predict_infos:
         #         predict_infos['pl_output'] = self.model_output_normalization_inverse_fn(predict_infos['pl_output'])
 
-        # if self.meta.use_target_normalization:
-        #     mean_predictions = self.target_normalization_inverse_fn(mean_predictions)
-        #     std_predictions = self.target_normalization_std_inverse_fn(std_predictions)
-        #     if predict_infos is not None and 'pl_output' in predict_infos:
-        #         predict_infos['pl_output'] = self.target_normalization_inverse_fn(predict_infos['pl_output'])
+        if self.meta.use_target_normalization:
+            mean_predictions = self.target_normalization_inverse_fn(mean_predictions)
+            std_predictions = self.target_normalization_std_inverse_fn(std_predictions)
+            if predict_infos is not None and 'pl_output' in predict_infos:
+                predict_infos['pl_output'] = self.target_normalization_inverse_fn(predict_infos['pl_output'])
 
         return mean_predictions, std_predictions, hp_indices, real_budgets, predict_infos
 
