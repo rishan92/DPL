@@ -80,12 +80,12 @@ class HistoryManager:
         initial_empty_value = self.get_mean_initial_value() if self.fill_value == 'last' else 0
         return initial_empty_value
 
-    def add(self, hp_index: int, b: int, hp_curve: float):
+    def add(self, hp_index: int, b: int, hp_curve: List):
         self.examples[hp_index] = np.arange(1, b + 1)
         if hp_index in self.performances:
-            self.performances[hp_index].append(hp_curve)
+            self.performances[hp_index].extend(hp_curve)
         else:
-            self.performances[hp_index] = [hp_curve]
+            self.performances[hp_index] = hp_curve
 
         initial_empty_value = self.get_initial_empty_value()
 
@@ -102,7 +102,8 @@ class HistoryManager:
 
     def get_evaluated_budgets(self, suggested_hp_index):
         if suggested_hp_index in self.examples:
-            return self.examples[suggested_hp_index]
+            eval_budgets = self.examples[suggested_hp_index]
+            return eval_budgets.tolist()
         else:
             return []
 

@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import List, Union
+from typing import List, Union, Dict
 from pathlib import Path
 
 import numpy as np
@@ -21,6 +21,7 @@ class BaseBenchmark(ABC):
         self.max_value = None
         self.min_value = None
         self.categorical_indicator = None
+        self.objective_performance_info = {}
 
     def load_dataset_names(self):
         raise NotImplementedError('Please implement the load_dataset_names method')
@@ -58,3 +59,14 @@ class BaseBenchmark(ABC):
 
     def size(self) -> int:
         return self.nr_hyperparameters * self.max_budget
+
+    def get_objective_function_performance(self, hp_index: int, budget: Union[int, Dict]) -> List:
+        performances = self.get_curve(hp_index=hp_index, budget=budget)
+        first_index = 0
+        if hp_index in self.objective_performance_info:
+            first_index = self.objective_performance_info[hp_index]
+
+        self.objective_performance_info[hp_index] = budget
+
+        performance = performances[first_index:]
+        return performance

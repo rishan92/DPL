@@ -85,11 +85,10 @@ def main():
     project_folder = Path(".")
     dataset_files_path = Path("./bash_scripts")
 
-    method_names = ['power_law', 'dyhpo', 'dehb', 'random']
-    method_names = ['power_law_benchmark', 'power_law_clipsig_abc', 'power_law_flip2_refine_lr',
-                    'dyhpo_benchmark', 'dehb', 'random']
+    method_names = ['power_law', 'dyhpo', 'random']
+    method_names = ['power_law', 'dyhpo']
     benchmark_names = ['taskset', 'lcbench']
-    benchmark_names = ['lcbench']
+    benchmark_names = ['pd1']
     dataset_names = None
     # dataset_names = ['FixedTextRNNClassification_imdb_patch32_GRU64_avg_bs128',
     #                  'FixedTextRNNClassification_imdb_patch32_GRU128_bs128']

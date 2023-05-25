@@ -166,3 +166,7 @@ class PD1(BaseBenchmark):
         idx = non_nan_idx & non_diverging_idx
 
         return idx
+
+    def set_dataset_name(self, dataset_name: str):
+        new_taskset_instance = PD1(str(self.path_to_json_file), dataset_name=dataset_name)
+        return new_taskset_instance
