@@ -576,6 +576,9 @@ class HistoryManager:
         budgets = range(1, self.max_benchmark_epochs + 1)
         for hp_index in range(0, self.hp_candidates.shape[0]):
             performances = benchmark.get_curve(hp_index, budget=self.max_benchmark_epochs)
+            if not benchmark.minimization_metric:
+                performances = benchmark.max_value - np.array(performances)
+                performances = performances.tolist()
             start_performance = performances[0]
             best_performance = min(performances)
             for budget in budgets:
