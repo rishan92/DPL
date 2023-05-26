@@ -224,6 +224,7 @@ class FeatureExtractorDYHPO(BaseFeatureExtractor):
         betas = torch.unsqueeze(betas, dim=1)
         gammas = torch.unsqueeze(gammas, dim=1)
         output = torch.unsqueeze(output, dim=1)
+        budgets = torch.unsqueeze(budgets, dim=1)
 
         if self.meta.use_budget:
             x = cat((alphas, betas, gammas, budgets, output), dim=1)
