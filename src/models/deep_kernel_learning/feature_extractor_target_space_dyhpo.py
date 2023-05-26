@@ -72,6 +72,8 @@ class FeatureExtractorTargetSpaceDYHPO(BaseFeatureExtractor):
             'beta_act_func': 'BoundedReLU',
             'gamma_act_func': 'BoundedReLU',
             'output_act_func': None,
+            'use_representation_units': False,
+            'use_budget': False,
             'alpha_beta_is_difference': None,  # null "half"  "full"
             'use_gamma_constraint': "flip2",  # null "positive"  "half"  "full" "full_flip" "flip"
             'use_gamma_positive': False,
@@ -160,13 +162,17 @@ class FeatureExtractorTargetSpaceDYHPO(BaseFeatureExtractor):
             if hasattr(self.meta, 'dropout_rate') and self.meta.dropout_rate != 0:
                 layers.append(nn.Dropout(self.meta.dropout_rate))
 
-        layers.append(nn.Linear(self.meta.nr_units[-1], 3))
+        output_units = 3
+        if self.use_representation_units:
+            output_units += self.use_representation_units
+
+        layers.append(nn.Linear(self.meta.nr_units[-1], output_units))
 
         if hasattr(self.meta, "use_scaling_layer") and self.meta.use_scaling_layer:
             bias_values = None
             if hasattr(self.meta, "scaling_layer_bias_values") and self.meta.scaling_layer_bias_values:
                 bias_values = self.meta.scaling_layer_bias_values
-            scaling_layer = ScalingLayer(in_features=3, bias_values=bias_values)
+            scaling_layer = ScalingLayer(in_features=output_units, bias_values=bias_values)
             layers.append(scaling_layer)
 
         net = torch.nn.Sequential(*layers)
@@ -178,6 +184,8 @@ class FeatureExtractorTargetSpaceDYHPO(BaseFeatureExtractor):
         alphas = x[:, 0]
         y1 = x[:, 1]
         y2 = x[:, 2]
+        if self.use_representation_units:
+            representation = x[:, 3:]
 
         alphas = self.alpha_act_func(alphas)
         y1 = self.beta_act_func(y1)
@@ -306,7 +314,14 @@ class FeatureExtractorTargetSpaceDYHPO(BaseFeatureExtractor):
         betas = torch.unsqueeze(betas, dim=1)
         gammas = torch.unsqueeze(gammas, dim=1)
         output = torch.unsqueeze(output, dim=1)
+        budgets = torch.unsqueeze(budgets, dim=1)
 
-        x = cat((alphas, betas, gammas, output), dim=1)
+        if self.meta.use_budget:
+            x = cat((alphas, betas, gammas, budgets, output), dim=1)
+        else:
+            x = cat((alphas, betas, gammas, output), dim=1)
+
+        if self.use_representation_units:
+            x = cat((representation, x), dim=1)
 
         return x, info

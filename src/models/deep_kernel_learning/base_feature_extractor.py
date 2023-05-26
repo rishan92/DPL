@@ -60,6 +60,13 @@ class BaseFeatureExtractor(BasePytorchModule, ABC):
             output_act_inverse_class = get_inverse_function_class(self.meta.output_act_func)
             self.output_act_inverse_func = output_act_inverse_class() if output_act_inverse_class else None
 
+        self.use_representation_units = 0
+        if hasattr(self.meta, 'use_representation_units') and self.meta.use_representation_units:
+            if self.meta.use_representation_units == True:
+                self.use_representation_units = self.nr_features
+            else:
+                self.use_representation_units = self.meta.use_representation_units
+
         # set nr_units as a List
         self.meta.nr_units = self.get_layer_units()
 

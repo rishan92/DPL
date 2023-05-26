@@ -58,12 +58,12 @@ class FeatureExtractorDYHPO(BaseFeatureExtractor):
     def get_default_meta():
         hp = {
             'nr_layers': 2,
-            'nr_units': [64, 128],
+            'nr_units': [128, 128],
             'cnn_nr_channels': 4,
             'cnn_kernel_size': 3,
             'cnn_nr_layers': 1,
             'dropout_rate': 0,
-            'use_batch_norm': True,
+            'use_batch_norm': False,
             'use_learning_curve': False,
             'use_learning_curve_mask': False,
             'act_func': 'LeakyReLU',
@@ -72,6 +72,8 @@ class FeatureExtractorDYHPO(BaseFeatureExtractor):
             'beta_act_func': 'GELU',
             'gamma_act_func': 'GELU',
             'output_act_func': None,
+            'use_representation_units': False,
+            'use_budget': False,
             'alpha_beta_is_difference': False,
             'use_gamma_constraint': False,
             'use_scaling_layer': False,
@@ -158,13 +160,17 @@ class FeatureExtractorDYHPO(BaseFeatureExtractor):
             if hasattr(self.meta, 'dropout_rate') and self.meta.dropout_rate != 0:
                 layers.append(nn.Dropout(self.meta.dropout_rate))
 
-        layers.append(nn.Linear(self.meta.nr_units[-1], 3))
+        output_units = 3
+        if self.use_representation_units:
+            output_units += self.use_representation_units
+
+        layers.append(nn.Linear(self.meta.nr_units[-1], output_units))
 
         if hasattr(self.meta, "use_scaling_layer") and self.meta.use_scaling_layer:
             bias_values = None
             if hasattr(self.meta, "scaling_layer_bias_values") and self.meta.scaling_layer_bias_values:
                 bias_values = self.meta.scaling_layer_bias_values
-            scaling_layer = ScalingLayer(in_features=3, bias_values=bias_values)
+            scaling_layer = ScalingLayer(in_features=output_units, bias_values=bias_values)
             layers.append(self.act_func)
             layers.append(scaling_layer)
 
@@ -177,6 +183,8 @@ class FeatureExtractorDYHPO(BaseFeatureExtractor):
         alphas = x[:, 0]
         betas = x[:, 1]
         gammas = x[:, 2]
+        if self.use_representation_units:
+            representation = x[:, 3:]
 
         alphas = self.alpha_act_func(alphas)
         betas = self.beta_act_func(betas)
@@ -217,6 +225,12 @@ class FeatureExtractorDYHPO(BaseFeatureExtractor):
         gammas = torch.unsqueeze(gammas, dim=1)
         output = torch.unsqueeze(output, dim=1)
 
-        x = cat((alphas, betas, gammas, output), dim=1)
+        if self.meta.use_budget:
+            x = cat((alphas, betas, gammas, budgets, output), dim=1)
+        else:
+            x = cat((alphas, betas, gammas, output), dim=1)
+
+        if self.use_representation_units:
+            x = cat((representation, x), dim=1)
 
         return x, info
