@@ -432,10 +432,10 @@ class DyHPOModel(BasePytorchModule):
                     output_constraint_loss = torch.mean(lower_loss + upper_loss)
                 else:
                     output_constraint_loss = torch.tensor(0.0, requires_grad=True)
-                diff_m = torch.sum(torch.abs(y_train - self.model.train_targets))
-                stds = prediction.stddev
-                diff = torch.abs(mean_prediction - y_train)
-                print(epoch_nr, stds[-1], diff[-1], stds, diff)
+                # diff_m = torch.sum(torch.abs(y_train - self.model.train_targets))
+                # stds = prediction.stddev
+                # diff = torch.abs(mean_prediction - y_train)
+                # print(epoch_nr, stds[-1], diff[-1], stds, diff)
                 loss = self.mll_loss_factor * mll_loss + \
                        self.meta.power_law_loss_factor * power_law_loss + \
                        self.regularization_factor * l1_norm + \

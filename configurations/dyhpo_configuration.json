@@ -77,6 +77,8 @@
             "beta_act_func": "GELU",
             "gamma_act_func": "GELU",
             "output_act_func": null,
+            "use_representation_units": false,
+            "use_budget": false,
             "alpha_beta_is_difference": false,
             "use_gamma_constraint": false,
             "use_scaling_layer": false,
