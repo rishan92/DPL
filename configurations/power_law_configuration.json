@@ -37,7 +37,7 @@
             "use_learning_curve_mask": false,
             "use_suggested_learning_rate": false,
             "use_sample_weights": false,
-            "use_sample_weight_by_budget": true,
+            "use_sample_weight_by_budget": false,
             "weight_regularization_factor": 0,
             "alpha_beta_constraint_factor": 0,
             "gamma_constraint_factor": 0,

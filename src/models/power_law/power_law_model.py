@@ -373,6 +373,8 @@ class PowerLawModel(BasePytorchModule, ABC):
 
     def validation_epoch(self, epoch):
         self.eval()
+        if hasattr(self.meta, 'use_mc_dropout') and self.meta.use_mc_dropout:
+            self.enable_dropout()
         running_loss = 0
         predict_infos = []
         iteration = 0
