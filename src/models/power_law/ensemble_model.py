@@ -60,6 +60,8 @@ class EnsembleModel(BasePytorchModule):
 
         EnsembleModel._instantiated_count += 1
 
+        self.num_mc_dropout = self.meta_num_mc_dropout
+
     def set_dataloader(self, train_dataloader=None, val_dataloader=None):
         assert train_dataloader is not None or val_dataloader is not None
         self.train_dataloader = train_dataloader if train_dataloader else None
@@ -109,9 +111,10 @@ class EnsembleModel(BasePytorchModule):
         predict_infos = []
 
         for model in self.models:
-            predictions, predict_info = model.predict(test_data)
-            all_predictions.append(predictions.detach().cpu().numpy())
-            predict_infos.append(predict_info)
+            for i in range(self.num_mc_dropout):
+                predictions, predict_info = model.predict(test_data)
+                all_predictions.append(predictions.detach().cpu().numpy())
+                predict_infos.append(predict_info)
 
         mean_predictions = np.mean(all_predictions, axis=0)
         std_predictions = np.std(all_predictions, axis=0)
@@ -223,6 +226,11 @@ class EnsembleModel(BasePytorchModule):
     def meta_use_sample_weight_by_label(cls):
         model_class = get_class("src/models/power_law", cls.meta.model_class_name)
         return model_class.meta_use_sample_weight_by_label
+
+    @classproperty
+    def meta_num_mc_dropout(cls):
+        model_class = get_class("src/models/power_law", cls.meta.model_class_name)
+        return model_class.meta_num_mc_dropout
 
     @property
     def has_batchnorm_layers(self):

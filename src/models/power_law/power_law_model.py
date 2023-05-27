@@ -160,6 +160,11 @@ class PowerLawModel(BasePytorchModule, ABC):
         PowerLawModel._validation_online['mean'] = []
         PowerLawModel._validation_online['std'] = []
 
+        self.num_mc_dropout = 1
+        if hasattr(self.meta, 'use_mc_dropout') and self.meta.use_mc_dropout and \
+            hasattr(self.meta, 'num_mc_dropout') and self.meta.num_mc_dropout:
+            self.num_mc_dropout = self.meta.num_mc_dropout
+
         self.post_init()
 
     def post_init(self):
@@ -390,39 +395,41 @@ class PowerLawModel(BasePytorchModule, ABC):
                 if self.has_batchnorm_layers and nr_examples_batch == 1:
                     continue
 
-                outputs, predict_info = self((batch_examples, batch_budgets, batch_curves))
-                # if outputs.is_complex():
-                #     imag_loss_factor = 1
-                #     imag_loss = torch.abs(outputs.imag).mean()
-                #     loss = self.criterion(outputs.real, batch_labels) + imag_loss_factor * imag_loss
-                # else:
-                #     loss = self.criterion(outputs, batch_labels)
-                predict_infos.append(predict_info)
+                for i in range(self.num_mc_dropout):
+                    outputs, predict_info = self((batch_examples, batch_budgets, batch_curves))
+                    # if outputs.is_complex():
+                    #     imag_loss_factor = 1
+                    #     imag_loss = torch.abs(outputs.imag).mean()
+                    #     loss = self.criterion(outputs.real, batch_labels) + imag_loss_factor * imag_loss
+                    # else:
+                    #     loss = self.criterion(outputs, batch_labels)
+                    predict_infos.append(predict_info)
 
-                if self.target_normalization_inverse_fn:
-                    outputs = self.target_normalization_inverse_fn(outputs)
+                    if self.target_normalization_inverse_fn:
+                        outputs = self.target_normalization_inverse_fn(outputs)
 
-                loss = F.l1_loss(outputs, batch_labels, reduction='sum')
+                    loss = F.l1_loss(outputs, batch_labels, reduction='sum')
 
-                running_loss += loss.item()
+                    running_loss += loss.item()
 
-                new_value = outputs.detach()
-                start_index = iteration * batch_size
-                end_index = iteration * batch_size + nr_examples_batch
-                if self.instance_id == 0:
-                    PowerLawModel._validation_online['mean'][epoch, start_index:end_index] = new_value
-                else:
-                    delta = new_value - PowerLawModel._validation_online['mean'][epoch, start_index:end_index]
-                    PowerLawModel._validation_online['mean'][epoch, start_index:end_index] += delta / (
-                        self.instance_id + 1)
-                    delta2 = new_value - PowerLawModel._validation_online['mean'][epoch, start_index:end_index]
-                    PowerLawModel._validation_online['std'][epoch, start_index:end_index] += delta * delta2
+                    new_value = outputs.detach()
+                    start_index = iteration * batch_size
+                    end_index = iteration * batch_size + nr_examples_batch
+                    if self.instance_id == 0 and i == 0:
+                        PowerLawModel._validation_online['mean'][epoch, start_index:end_index] = new_value
+                    else:
+                        delta = new_value - PowerLawModel._validation_online['mean'][epoch, start_index:end_index]
+                        PowerLawModel._validation_online['mean'][epoch, start_index:end_index] += delta / (
+                            self.instance_id * self.num_mc_dropout + i + 1)
+                        delta2 = new_value - PowerLawModel._validation_online['mean'][epoch, start_index:end_index]
+                        PowerLawModel._validation_online['std'][epoch, start_index:end_index] += delta * delta2
 
                 iteration += 1
             except StopIteration:
                 self.val_dataloader_it = iter(self.val_dataloader)
                 break
         normalized_loss = running_loss / len(self.val_dataloader.dataset)
+        normalized_loss = normalized_loss / self.num_mc_dropout
 
         return normalized_loss
 
@@ -468,9 +475,10 @@ class PowerLawModel(BasePytorchModule, ABC):
 
             if val_dataloader:
                 if self.instance_id == 0 and epoch == 0:
-                    PowerLawModel._validation_online['mean'] = torch.zeros(
-                        (nr_epochs, len(self.val_dataloader.dataset)))
-                    PowerLawModel._validation_online['std'] = torch.zeros((nr_epochs, len(self.val_dataloader.dataset)))
+                    PowerLawModel._validation_online['mean'] = \
+                        torch.zeros((nr_epochs, len(self.val_dataloader.dataset)))
+                    PowerLawModel._validation_online['std'] = \
+                        torch.zeros((nr_epochs, len(self.val_dataloader.dataset)))
                 normalized_val_loss = self.validation_epoch(epoch)
                 self.train()
 
@@ -499,7 +507,7 @@ class PowerLawModel(BasePytorchModule, ABC):
                     labels = val_dataloader.dataset.Y
                     means = PowerLawModel._validation_online['mean'][epoch, :]
                     stds = PowerLawModel._validation_online['std'][epoch, :]
-                    stds = (stds / (self.max_instances - 1)) ** 0.5
+                    stds = (stds / (self.max_instances * self.num_mc_dropout - 1)) ** 0.5
                     normalized_val_loss = F.l1_loss(means, labels, reduction='mean')
 
                     means = means.detach().numpy()

@@ -123,6 +123,13 @@ class BasePytorchModule(nn.Module, Meta, ABC):
         else:
             return False
 
+    @classproperty
+    def meta_num_mc_dropout(cls):
+        if hasattr(cls.meta, 'num_mc_dropout'):
+            return cls.meta.num_mc_dropout
+        else:
+            return False
+
     def print_parameters(self):
         for name, param in self.named_parameters():
             print(f"{name}: {param}")
