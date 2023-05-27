@@ -564,8 +564,16 @@ class PowerLawModel(BasePytorchModule, ABC):
 
         return return_state, normalized_loss
 
+    def enable_dropout(self):
+        """Function to enable dropout layers during test-time"""
+        for m in self.modules():
+            if isinstance(m, nn.Dropout):
+                m.train()
+
     def predict(self, test_data):
         self.eval()
+        if hasattr(self.meta, 'use_mc_dropout') and self.meta.use_mc_dropout:
+            self.enable_dropout()
         predictions, predict_infos = self((test_data.X, test_data.budgets, test_data.curves))
         # if predictions.is_complex():
         #     predictions = predictions.real

@@ -19,6 +19,7 @@ class ConditionedPowerLawModel(PowerLawModel):
             'nr_cnn_layers': 2,
             'dropout_rate': 0,
             'use_batch_norm': False,
+            'use_mc_dropout': False,
             'use_learning_curve': False,
             'use_learning_curve_mask': False,
             'use_suggested_learning_rate': False,
