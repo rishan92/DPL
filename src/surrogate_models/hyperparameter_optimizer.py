@@ -30,7 +30,7 @@ from src.surrogate_models.base_hyperparameter_optimizer import BaseHyperparamete
 from src.plot.utils import plot_line
 import src.models.activation_functions
 from src.utils.utils import get_class_from_package, get_class_from_packages, get_inverse_function_class, \
-    numpy_to_torch_apply
+    numpy_to_torch_apply, weighted_spearman
 from scipy.stats import spearmanr
 import properscoring as ps
 
@@ -291,7 +291,7 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
         else:
             raise NotImplementedError(f"{model_class=}")
 
-        hp["check_model"] = True
+        hp["check_model"] = False
         hp["check_model_predict_mode"] = 'best'  # 'end'
         hp["validation_configuration_ratio"] = 0.95
         hp['validation_curve_ratio'] = 0.98
@@ -686,6 +686,9 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
             mean_correlation, _ = spearmanr(mean_predictions, true_labels, nan_policy='raise')
             acq_correlation, _ = spearmanr(acq_func_values, true_labels, nan_policy='raise')
 
+            w_mean_correlation = weighted_spearman(y_pred=mean_predictions, y_true=true_labels)
+            w_acq_correlation = weighted_spearman(y_pred=acq_func_values, y_true=true_labels)
+
             abs_residuals = np.abs(true_labels - mean_predictions)
             coverage_1std = np.mean(abs_residuals <= mean_stds) - 0.68
             coverage_2std = np.mean(abs_residuals <= 2 * mean_stds) - 0.95
@@ -697,6 +700,8 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
             wandb.log({
                 "acq/mean_correlation": mean_correlation,
                 "acq/acq_correlation": acq_correlation,
+                "acq/weighted_mean_correlation": w_mean_correlation,
+                "acq/weighted_acq_correlation": w_acq_correlation,
                 "acq/crps": crps_score,
                 "acq/std_coverage_1sigma": coverage_1std,
                 "acq/std_coverage_2sigma": coverage_2std,

@@ -7,6 +7,7 @@ import torch
 import warnings
 import numpy as np
 from scipy.stats import norm
+from scipy import stats
 
 import src.models.activation_functions
 
@@ -140,3 +141,27 @@ def acq(
         )
 
     return acq_values
+
+
+def weighted_spearman(y_true, y_pred):
+    # calculate the rank of y_true and y_pred
+    y_true_rank = stats.rankdata(y_true)
+    y_pred_rank = stats.rankdata(y_pred)
+
+    # calculate the weights for each sample
+    max_label = np.max(y_true)
+    content = max_label - y_true
+    weights = content / content.sum()
+
+    # calculate the deviations from the mean rank
+    y_true_dev = y_true_rank - np.mean(y_true_rank)
+    y_pred_dev = y_pred_rank - np.mean(y_pred_rank)
+
+    # calculate the covariance and variances taking the weights into account
+    cov = np.sum(weights * y_true_dev * y_pred_dev)
+    var_true = np.sum(weights * y_true_dev ** 2)
+    var_pred = np.sum(weights * y_pred_dev ** 2)
+
+    # calculate the weighted Spearman's correlation
+    corr = cov / np.sqrt(var_true * var_pred)
+    return corr

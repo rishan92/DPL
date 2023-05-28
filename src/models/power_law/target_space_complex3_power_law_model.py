@@ -26,7 +26,7 @@ class TargetSpaceComplex3PowerLawModel(PowerLawModel):
             'use_learning_curve_mask': False,
             'use_suggested_learning_rate': False,
             'use_sample_weights': False,
-            'use_sample_weight_by_label': True,
+            'use_sample_weight_by_label': False,
             'use_sample_weight_by_budget': False,
             'sample_weight_by_budget_strategy': None,
             'weight_regularization_factor': 0,

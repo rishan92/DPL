@@ -18,7 +18,8 @@ import properscoring as ps
 
 from src.models.base.base_pytorch_module import BasePytorchModule
 import src.models.activation_functions
-from src.utils.utils import get_class_from_package, get_class_from_packages, get_inverse_function_class
+from src.utils.utils import get_class_from_package, get_class_from_packages, get_inverse_function_class, \
+    weighted_spearman
 import global_variables as gv
 from src.utils.torch_lr_finder import LRFinder
 from src.utils.utils import acq
@@ -536,12 +537,17 @@ class PowerLawModel(BasePytorchModule, ABC):
                     mean_correlation, _ = spearmanr(means, labels, nan_policy='raise')
                     acq_correlation, _ = spearmanr(acq_func_values, labels, nan_policy='raise')
 
+                    w_mean_correlation = weighted_spearman(y_pred=means, y_true=labels)
+                    w_acq_correlation = weighted_spearman(y_pred=acq_func_values, y_true=labels)
+
                     wandb_data = {
                         f"surrogate/check_training/epoch": PowerLawModel._global_epoch[self.instance_id],
                         f"surrogate/check_training/train_loss": normalized_loss,
                         f"surrogate/check_training/validation_loss": normalized_val_loss,
                         f"surrogate/check_training/mean_correlation": mean_correlation,
                         f"surrogate/check_training/acq_correlation": acq_correlation,
+                        f"surrogate/check_training/weighted_mean_correlation": w_mean_correlation,
+                        f"surrogate/check_training/weighted_acq_correlation": w_acq_correlation,
                         f"surrogate/check_training/validation_crps": crps_score,
                         f"surrogate/check_training/validation_std_correlation": val_correlation_value,
                         f"surrogate/check_training/validation_std_coverage_1sigma": coverage_1std,
