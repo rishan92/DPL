@@ -24,7 +24,7 @@ fi
 
 export benchmark=$1
 
-if [ "$benchmark" == "lcbench_mini" ]
+if [[ "$benchmark" == "lcbench_mini" || "$benchmark" == "pd1_mini" ]]
 then
   export WANDB_MODE="online"
 else
@@ -44,6 +44,10 @@ then
 elif [ "$benchmark" == "nasbench201" ]
 then
   file="$ROOT_PATH/bash_scripts/nasbench_dataset_names.txt"
+elif [ "$benchmark" == "pd1_mini" ]
+then
+  file="$ROOT_PATH/bash_scripts/pd1_mini_dataset_names.txt"
+  export benchmark="pd1"
 else
   file="$ROOT_PATH/bash_scripts/pd1_dataset_names.txt"
 fi
