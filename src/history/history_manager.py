@@ -614,12 +614,6 @@ class HistoryManager:
                 and learning curves.
         """
 
-        all_hp_indices, all_labels, all_budgets, all_curves, all_is_up_curve, all_best_labels = \
-            self.all_configurations(curve_size_mode, benchmark=benchmark)
-
-        self.max_curve_value = np.max(all_labels)
-        target_normalization_value = self.set_target_normalization_value()
-
         indices = np.arange(self.hp_candidates.shape[0])
         np.random.seed(seed)
         val_indices = np.random.choice(indices,
@@ -630,6 +624,12 @@ class HistoryManager:
 
         budgets = np.arange(1, self.max_benchmark_epochs + 1)
         val_budgets_indices = budgets[int(self.max_benchmark_epochs * (1 - validation_curve_ratio)) + 1:]
+
+        all_hp_indices, all_labels, all_budgets, all_curves, all_is_up_curve, all_best_labels = \
+            self.all_configurations(curve_size_mode, benchmark=benchmark)
+
+        self.max_curve_value = np.max(all_labels)
+        target_normalization_value = self.set_target_normalization_value()
 
         val_hp_index = np.isin(all_hp_indices, val_indices)
         val_budget_index = np.isin(all_budgets, val_budgets_indices)
@@ -648,6 +648,11 @@ class HistoryManager:
         val_hp_index = np.logical_and(val_hp_index, all_is_down_curve)
         # c = val_hp_index.sum()
 
+        # first_label_index = all_budgets == 1
+        # first_label = all_labels[first_label_index]
+        # last_label_index = all_budgets == self.max_benchmark_epochs
+        # last_label = all_best_labels[last_label_index]
+
         if self.use_scaled_budgets:
             # scale budgets to [0, 1]
             all_budgets = all_budgets / self.max_benchmark_epochs
@@ -664,6 +669,43 @@ class HistoryManager:
         train_labels = transformed_all_labels[train_hp_index]
         train_budgets = all_budgets[train_hp_index]
         train_curves = all_curves[train_hp_index] if all_curves is not None else None
+
+        # train_mu = np.mean(train_labels)
+        # train_std = np.std(train_labels)
+        # train_labels = (train_labels - train_mu) / train_std
+
+        # import seaborn as sns
+        # sns.histplot(data=train_labels, kde=True, bins=100)
+        # plt.show()
+        # first_label = (first_label - train_mu) / train_std
+        # last_label = (last_label - train_mu) / train_std
+        # plt.scatter(x=first_label, y=last_label)
+        # plt.show()
+
+        all_weights = np.ones_like(train_labels)
+
+        # if self.use_sample_weight_by_budget:
+        #     all_weights = train_weights
+
+        if self.use_sample_weight_by_label:
+            weights = train_labels.copy()
+            max_weight = np.max(weights)
+            min_weight = np.min(weights)
+            if max_weight != min_weight:
+                weights = (weights - min_weight) / (max_weight - min_weight)
+            weights = np.abs(np.exp(-1 * weights) - np.exp(-1)) / (1 - np.exp(-1))
+            # weights = 1 / (weights + 1e-1)
+            weights *= weights.shape[0] / weights.sum()
+
+            all_weights = weights * all_weights
+            all_weights *= all_weights.shape[0] / all_weights.sum()
+
+        train_weights = all_weights
+
+        if self.use_sample_weight_by_label:  # or self.use_sample_weight_by_budget:
+            train_weights = torch.from_numpy(train_weights)
+        else:
+            train_weights = None
 
         # This creates a copy
         train_examples = self.hp_candidates[train_hp_indices]
@@ -682,6 +724,10 @@ class HistoryManager:
         val_budgets = all_budgets[val_hp_index]
         val_curves = all_curves[val_hp_index] if all_curves is not None else None
 
+        # val_labels = (val_labels - train_mu) / train_std
+        # sns.histplot(data=val_labels, kde=True, bins=100)
+        # plt.show()
+
         val_examples = self.hp_candidates[val_hp_indices]
 
         val_examples = torch.from_numpy(val_examples)
@@ -695,7 +741,8 @@ class HistoryManager:
             budgets=train_budgets,
             curves=train_curves,
             use_sample_weights=self.use_sample_weights,
-            use_sample_weight_by_budget=self.use_sample_weight_by_budget
+            use_sample_weight_by_budget=self.use_sample_weight_by_budget,
+            weights=train_weights
         )
 
         val_dataset = TabularDataset(

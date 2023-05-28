@@ -293,8 +293,8 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
 
         hp["check_model"] = True
         hp["check_model_predict_mode"] = 'best'  # 'end'
-        hp["validation_configuration_ratio"] = 0.9
-        hp['validation_curve_ratio'] = 0.9
+        hp["validation_configuration_ratio"] = 0.95
+        hp['validation_curve_ratio'] = 0.98
 
         return hp
 
