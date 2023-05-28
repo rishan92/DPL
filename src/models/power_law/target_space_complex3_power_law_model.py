@@ -33,6 +33,7 @@ class TargetSpaceComplex3PowerLawModel(PowerLawModel):
             'alpha_beta_constraint_factor': 0,
             'gamma_constraint_factor': 0,
             'target_space_constraint_factor': 0,
+            'y_constraint_factor': 0.1,
             'learning_rate': 1e-3,
             'refine_learning_rate': 1e-3,
             'act_func': 'LeakyReLU',
@@ -61,7 +62,7 @@ class TargetSpaceComplex3PowerLawModel(PowerLawModel):
             'activate_early_stopping': False,
             'early_stopping_it': 0,
             'use_scaling_layer': False,
-            'scaling_layer_bias_values': [0.0, -0.41, 0.0]  # [0, 0, 1.17125493757],
+            'scaling_layer_bias_values': [0.0, -0.42, 0.0]  # [0, 0, 1.17125493757],
         }
         return hp
 

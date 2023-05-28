@@ -152,6 +152,10 @@ class PowerLawModel(BasePytorchModule, ABC):
         if hasattr(self.meta, 'target_space_constraint_factor') and self.meta.target_space_constraint_factor != 0:
             self.target_space_constraint_factor = self.meta.target_space_constraint_factor
 
+        self.y_constraint_factor = 0
+        if hasattr(self.meta, 'y_constraint_factor') and self.meta.y_constraint_factor != 0:
+            self.y_constraint_factor = self.meta.y_constraint_factor
+
         self.hook_handle = None
 
         self.clip_gradients_value = None
@@ -283,7 +287,7 @@ class PowerLawModel(BasePytorchModule, ABC):
                 # else:
                 #     loss = self.criterion(outputs, batch_labels)
 
-                l1_norm = torch.tensor(0.0, requires_grad=True)
+                zero_tensor = torch.tensor(0.0, requires_grad=True)
                 if self.regularization_factor != 0:
                     num_params = 0
                     for param in self.parameters():
@@ -291,6 +295,8 @@ class PowerLawModel(BasePytorchModule, ABC):
                         num_params += param.numel()
                     l1_norm = l1_norm / num_params
                     l1_norm = torch.max(torch.tensor(1), l1_norm) - 1
+                else:
+                    l1_norm = zero_tensor
 
                 if self.alpha_beta_constraint_factor != 0:
                     alpha_plus_beta = predict_info['alpha'] + predict_info['beta']
@@ -298,7 +304,7 @@ class PowerLawModel(BasePytorchModule, ABC):
                     upper_loss = torch.clamp(alpha_plus_beta - 1, min=0)
                     alpha_beta_constraint_loss = torch.mean(lower_loss + upper_loss)
                 else:
-                    alpha_beta_constraint_loss = torch.tensor(0.0, requires_grad=True)
+                    alpha_beta_constraint_loss = zero_tensor
 
                 if self.gamma_constraint_factor != 0:
                     gamma = predict_info['gamma']
@@ -309,14 +315,14 @@ class PowerLawModel(BasePytorchModule, ABC):
                     upper_loss = torch.clamp(gamma - gamma_upper_bound, min=0)
                     gamma_constraint_loss = torch.mean(lower_loss + upper_loss)
                 else:
-                    gamma_constraint_loss = torch.tensor(0.0, requires_grad=True)
+                    gamma_constraint_loss = zero_tensor
 
                 if self.output_constraint_factor != 0:
                     lower_loss = torch.clamp(-1 * outputs, min=0)
                     upper_loss = torch.clamp(outputs - 1, min=0)
                     output_constraint_loss = torch.mean(lower_loss + upper_loss)
                 else:
-                    output_constraint_loss = torch.tensor(0.0, requires_grad=True)
+                    output_constraint_loss = zero_tensor
 
                 if self.target_space_constraint_factor != 0:
                     y1: torch.Tensor = predict_info['y1']
@@ -328,7 +334,18 @@ class PowerLawModel(BasePytorchModule, ABC):
                         torch.where(mask, torch.tensor(0.0), torch.abs(alpha - ((y1 + y2) / 2)))
                     target_space_constraint_loss = target_space_constraint_loss.mean()
                 else:
-                    target_space_constraint_loss = torch.tensor(0.0, requires_grad=True)
+                    target_space_constraint_loss = zero_tensor
+
+                if self.y_constraint_factor != 0:
+                    y1: torch.Tensor = predict_info['y1']
+                    y2: torch.Tensor = predict_info['y2']
+                    y_constraint_loss = torch.mean(torch.abs(y1 - y2))
+                    # y_constraint_loss = torch.abs(y1 - y2)
+                    # y_constraint_weights = 1 - batch_budgets
+                    # y_constraint_weights = y_constraint_weights * nr_examples_batch / y_constraint_weights.sum()
+                    # y_constraint_loss = torch.mean(y_constraint_weights * y_constraint_loss)
+                else:
+                    y_constraint_loss = zero_tensor
 
                 # if self.meta.use_sample_weights:
                 #     batch_labels = batch_labels + batch_noise
@@ -347,7 +364,8 @@ class PowerLawModel(BasePytorchModule, ABC):
                        self.alpha_beta_constraint_factor * alpha_beta_constraint_loss + \
                        self.gamma_constraint_factor * gamma_constraint_loss + \
                        self.output_constraint_factor * output_constraint_loss + \
-                       self.target_space_constraint_factor * target_space_constraint_loss
+                       self.target_space_constraint_factor * target_space_constraint_loss + \
+                       self.y_constraint_factor * y_constraint_loss
 
                 loss.backward()
 
