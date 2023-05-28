@@ -26,6 +26,7 @@ from src.surrogate_models.hyperparameter_optimizer import HyperparameterOptimize
 from src.surrogate_models.asha import AHBOptimizer
 from src.surrogate_models.dehb.interface import DEHBOptimizer
 from src.surrogate_models.random_search import RandomOptimizer
+from src.surrogate_models.many_fidelity_hyperparameter_optimizer import MFHyperparameterOptimizer
 import global_variables as gv
 import subprocess
 from src.utils.utils import delete_folder_content
@@ -111,6 +112,7 @@ class Framework:
         self.surrogate_budget = 0
 
         self.categorical_indicator: List[bool] = self.benchmark.categorical_indicator
+        self.categories = self.benchmark.categories
         self.log_indicator: List[bool] = self.benchmark.log_indicator
         self.hp_names: List[str] = self.benchmark.hp_names
         self.info_dict: Dict[str, Any] = dict()
@@ -186,9 +188,10 @@ class Framework:
         else:
             self.hp_candidates = self.benchmark.get_hyperparameter_candidates()
 
+        surrogate_class = Framework.surrogate_types[self.surrogate_name]
         if self.surrogate_name == 'power_law' or self.surrogate_name == 'dyhpo':
-            self.surrogate = Framework.surrogate_types[self.surrogate_name](
-                self.hp_candidates,
+            self.surrogate = surrogate_class(
+                hp_candidates=self.hp_candidates,
                 surrogate_name=self.surrogate_name,
                 seed=seed,
                 max_benchmark_epochs=self.benchmark.max_budget,
@@ -204,7 +207,7 @@ class Framework:
                 pred_trend_path=self.pred_trend_path
             )
         else:
-            self.surrogate = Framework.surrogate_types[self.surrogate_name](
+            self.surrogate = surrogate_class(
                 hyperparameter_candidates=self.hp_candidates,
                 param_space=self.benchmark.param_space,
                 min_budget=self.benchmark.min_budget,
@@ -239,7 +242,11 @@ class Framework:
             hp_index, budget = self.surrogate.suggest()
 
             if gv.PLOT_PRED_CURVES and (
-                budget == 5 or budget == 10 or budget == 20 or budget == 40 or self.benchmark_name == 'synthetic'):  # or self.benchmark_name == 'lcbench_mini'):
+                budget == 5 or budget == 10 or budget == 20 or budget == 40 or
+                self.benchmark_name == 'synthetic'
+                # or self.benchmark_name == 'yahpo'
+                # or self.benchmark_name == 'lcbench_mini'
+            ):
                 self.surrogate.plot_pred_curve(
                     hp_index=hp_index,
                     benchmark=self.benchmark,
@@ -342,10 +349,16 @@ class Framework:
             if category_indicator
         ]
 
+        categories = "auto"
+        if self.categories is not None and len(categorical_columns) != 0:
+            categories = [
+                self.categories[col_index] for col_index, category_indicator in enumerate(self.categorical_indicator)
+                if category_indicator
+            ]
+
         general_transformers = []
 
         if len(numerical_columns) > 0:
-
             if self.log_indicator is not None and any(self.log_indicator):
                 log_columns = [col_index for col_index, log_indicator in enumerate(self.log_indicator) if log_indicator]
                 log_transformer = FunctionTransformer(np.log)
@@ -367,6 +380,8 @@ class Framework:
                     'cat',
                     OneHotEncoder(
                         sparse_output=False,
+                        categories=categories,
+                        handle_unknown='ignore'
                     ),
                     categorical_columns,
                 )
@@ -382,6 +397,7 @@ class Framework:
         hp_candidates_pd = pd.DataFrame(hp_candidates, columns=self.hp_names)
 
         preprocessed_candidates = preprocessor.fit_transform(hp_candidates_pd)
+        preprocessed_candidates.fillna(0, inplace=True)
 
         # # This is only required to reproduce the results of original DPL or DyHPO.
         # # log preprocessing will push numerical columns to the right

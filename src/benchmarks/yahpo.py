@@ -12,7 +12,7 @@ from ConfigSpace.hyperparameters import FloatHyperparameter, IntegerHyperparamet
 
 
 class YAHPOGym(BaseBenchmark):
-    nr_hyperparameters = 2000
+    nr_hyperparameters = 100
 
     # Declaring the search space for LCBench
     param_space = None
@@ -55,9 +55,9 @@ class YAHPOGym(BaseBenchmark):
         local_config.init_config()
         local_config.set_data_path(path_to_json_files)
 
-        self.scenario_name = "lcbench"
+        # self.scenario_name = "lcbench"
         # self.scenario_name = "taskset"
-        # self.scenario_name = "rbv2_svm"
+        self.scenario_name = "rbv2_svm"
         self.dataset_name = dataset_name
         self.categorical_indicator = None
         self.max_value = 1.0
@@ -72,6 +72,7 @@ class YAHPOGym(BaseBenchmark):
 
     def _load_benchmark(self):
         bench: BenchmarkSet = benchmark_set.BenchmarkSet(scenario=self.scenario_name)
+        # print(bench.instances)
         bench.set_instance(self.dataset_name)
 
         config_space = bench.get_opt_space(drop_fidelity_params=True)
@@ -105,6 +106,7 @@ class YAHPOGym(BaseBenchmark):
             YAHPOGym.fidelity_curve_points[k] = np.arange(v[0], max_budget + interval, interval)
 
         self.categorical_indicator = [v[2] == 'str' for v in YAHPOGym.param_space.values()]
+        self.categories = [v[4] for v in YAHPOGym.param_space.values()]
         YAHPOGym.log_indicator = [v[3] for v in YAHPOGym.param_space.values()]
 
         self.generated_config = self.generate_hyperparameter_candidates(bench)
@@ -126,6 +128,7 @@ class YAHPOGym(BaseBenchmark):
                     hp_type = 'int'
                 elif isinstance(value, str):
                     hp_type = 'str'
+                    categories = [value]
                 else:
                     raise NotImplementedError
                 lower = upper = value
@@ -159,14 +162,14 @@ class YAHPOGym(BaseBenchmark):
             YAHPOGym.nr_hyperparameters)
 
         hp_configs = []
-
         for i in range(YAHPOGym.nr_hyperparameters):
             config = []
             for hp_name in YAHPOGym.hp_names:
                 if hp_name in configs[i]:
-                    config.append(configs[i][hp_name])
+                    value = configs[i][hp_name]
+                    config.append(value)
                 else:
-                    config.append(YAHPOGym.param_space[hp_name][5])
+                    config.append(np.nan)
 
             hp_configs.append(config)
 
@@ -211,7 +214,7 @@ class YAHPOGym(BaseBenchmark):
 
         return metric
 
-    def get_curve(self, hp_index: int, budget: Union[int, Dict]) -> List[float]:
+    def get_curve(self, hp_index: int, budget: Union[int, Dict], prev_budget: Union[int, Dict] = None) -> List[float]:
         config = self.generated_config.iloc[hp_index, :]
         config_dict = {k: v for k, v in zip(YAHPOGym.hp_names, config)}
 
@@ -237,7 +240,7 @@ class YAHPOGym(BaseBenchmark):
 
     def get_curve_best(self, hp_index: int) -> float:
         curve = self.get_curve(hp_index=hp_index, budget=YAHPOGym.max_budgets)
-        best_value = min(curve)
+        best_value = max(curve)
         return best_value
 
     def get_incumbent_curve(self) -> List[float]:

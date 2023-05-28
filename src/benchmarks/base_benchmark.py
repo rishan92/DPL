@@ -22,6 +22,7 @@ class BaseBenchmark(ABC):
         self.min_value = None
         self.categorical_indicator = None
         self.objective_performance_info = {}
+        self.categories = None
 
     def load_dataset_names(self):
         raise NotImplementedError('Please implement the load_dataset_names method')
@@ -43,7 +44,7 @@ class BaseBenchmark(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def get_curve(self, hp_index: int, budget: int) -> List[float]:
+    def get_curve(self, hp_index: int, budget: int, prev_budget: Union[int, Dict] = None) -> List[float]:
         raise NotImplementedError
 
     def get_curve_best(self, hp_index: int) -> float:
