@@ -335,7 +335,7 @@ class PowerLawModel(BasePytorchModule, ABC):
                 else:
                     target_space_constraint_loss = zero_tensor
 
-                if self.meta.use_y_constraint_weights:
+                if hasattr(self.meta, 'use_y_constraint_weights') and self.meta.use_y_constraint_weights:
                     if self.meta.use_sample_weight_by_budget or self.meta.use_sample_weight_by_label or self.meta.use_sample_weights:
                         y_constraint_weight = batch_weights[:, 1]
                         batch_weights = batch_weights[:, 0]
@@ -346,7 +346,7 @@ class PowerLawModel(BasePytorchModule, ABC):
                     y1: torch.Tensor = predict_info['y1']
                     y2: torch.Tensor = predict_info['y2']
                     y_constraint_loss = torch.abs(y1 - y2)
-                    if self.meta.use_y_constraint_weights:
+                    if hasattr(self.meta, 'use_y_constraint_weights') and self.meta.use_y_constraint_weights:
                         y_constraint_loss = y_constraint_weight * y_constraint_loss
                     y_constraint_loss = torch.mean(y_constraint_loss)
                     # y_constraint_loss = torch.abs(y1 - y2)
