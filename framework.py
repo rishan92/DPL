@@ -26,7 +26,7 @@ from src.surrogate_models.hyperparameter_optimizer import HyperparameterOptimize
 from src.surrogate_models.asha import AHBOptimizer
 from src.surrogate_models.dehb.interface import DEHBOptimizer
 from src.surrogate_models.random_search import RandomOptimizer
-from src.surrogate_models.many_fidelity_hyperparameter_optimizer import MFHyperparameterOptimizer
+# from src.surrogate_models.many_fidelity_hyperparameter_optimizer import MFHyperparameterOptimizer
 import global_variables as gv
 import subprocess
 from src.utils.utils import delete_folder_content
