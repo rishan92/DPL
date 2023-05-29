@@ -552,10 +552,14 @@ class PowerLawModel(BasePytorchModule, ABC):
                         acq_mode='ei',
                     )
                     mean_correlation, _ = spearmanr(means, labels, nan_policy='raise')
-                    acq_correlation, _ = spearmanr(acq_func_values, labels, nan_policy='raise')
+                    acq_correlation, _ = spearmanr(acq_func_values, -1 * labels, nan_policy='raise')
 
                     w_mean_correlation = weighted_spearman(y_pred=means, y_true=labels)
-                    w_acq_correlation = weighted_spearman(y_pred=acq_func_values, y_true=labels)
+                    w_acq_correlation = weighted_spearman(y_pred=acq_func_values, y_true=-1 * labels)
+
+                    min_label = np.min(labels)
+                    mean_regret = labels[np.argmin(means)] - min_label
+                    acq_regret = labels[np.argmax(acq_func_values)] - min_label
 
                     wandb_data = {
                         f"surrogate/check_training/epoch": PowerLawModel._global_epoch[self.instance_id],
@@ -565,6 +569,8 @@ class PowerLawModel(BasePytorchModule, ABC):
                         f"surrogate/check_training/acq_correlation": acq_correlation,
                         f"surrogate/check_training/weighted_mean_correlation": w_mean_correlation,
                         f"surrogate/check_training/weighted_acq_correlation": w_acq_correlation,
+                        f"surrogate/check_training/mean_regret": mean_regret,
+                        f"surrogate/check_training/acq_regret": acq_regret,
                         f"surrogate/check_training/validation_crps": crps_score,
                         f"surrogate/check_training/validation_std_correlation": val_correlation_value,
                         f"surrogate/check_training/validation_std_coverage_1sigma": coverage_1std,

@@ -684,10 +684,14 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
         if gv.PLOT_ACQ and gv.IS_WANDB:
             true_labels = self.benchmark_labels[hp_indices]
             mean_correlation, _ = spearmanr(mean_predictions, true_labels, nan_policy='raise')
-            acq_correlation, _ = spearmanr(acq_func_values, true_labels, nan_policy='raise')
+            acq_correlation, _ = spearmanr(acq_func_values, -1 * true_labels, nan_policy='raise')
 
             w_mean_correlation = weighted_spearman(y_pred=mean_predictions, y_true=true_labels)
-            w_acq_correlation = weighted_spearman(y_pred=acq_func_values, y_true=true_labels)
+            w_acq_correlation = weighted_spearman(y_pred=acq_func_values, y_true=-1 * true_labels)
+
+            min_label = np.min(true_labels)
+            mean_regret = true_labels[np.argmin(mean_predictions)] - min_label
+            acq_regret = true_labels[np.argmax(acq_func_values)] - min_label
 
             abs_residuals = np.abs(true_labels - mean_predictions)
             coverage_1std = np.mean(abs_residuals <= mean_stds) - 0.68
@@ -702,6 +706,8 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
                 "acq/acq_correlation": acq_correlation,
                 "acq/weighted_mean_correlation": w_mean_correlation,
                 "acq/weighted_acq_correlation": w_acq_correlation,
+                "acq/mean_regret": mean_regret,
+                "acq/acq_regret": acq_regret,
                 "acq/crps": crps_score,
                 "acq/std_coverage_1sigma": coverage_1std,
                 "acq/std_coverage_2sigma": coverage_2std,
