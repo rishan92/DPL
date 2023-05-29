@@ -662,18 +662,14 @@ class HistoryManager:
 
         if check_model_train_mode == "exp":
             upper_budget = int(self.max_benchmark_epochs * (1 - validation_curve_ratio)) + 1
-            upper_budget = 2
             weights = 1.0 / budgets
             # weights /= np.sum(weights)
             weights[:upper_budget] = weights[:upper_budget] * validation_curve_prob / np.sum(weights[:upper_budget])
             weights[upper_budget:] = weights[upper_budget:] * (1 - validation_curve_prob) / np.sum(
                 weights[upper_budget:])
             selected_budgets = np.random.choice(budgets, size=int(self.hp_candidates.shape[0]), p=weights)
-            train_budget_index = np.zeros_like(all_budgets, dtype=bool)
-            for i in range(all_hp_indices.shape[0]):
-                hp_index = all_hp_indices[i]
-                if all_budgets[i] <= selected_budgets[hp_index]:
-                    train_budget_index[i] = True
+            all_selected_budgets = selected_budgets[all_hp_indices]
+            train_budget_index = all_budgets <= all_selected_budgets
         else:
             train_budget_index = np.isin(all_budgets, train_budgets_indices)
 
@@ -769,7 +765,7 @@ class HistoryManager:
             else:
                 train_weights = y_constraint_weights
 
-        if self.use_sample_weight_by_label:  # or self.use_sample_weight_by_budget:
+        if self.use_sample_weight_by_label or self.use_y_constraint_weights:  # or self.use_sample_weight_by_budget:
             train_weights = torch.from_numpy(train_weights)
         else:
             train_weights = None

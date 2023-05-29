@@ -34,7 +34,7 @@ class TargetSpaceComplex3PowerLawModel(PowerLawModel):
             'gamma_constraint_factor': 0,
             'target_space_constraint_factor': 0,
             'y_constraint_factor': 0.1,
-            'use_y_constraint_weights': 10,
+            'use_y_constraint_weights': 1,
             'learning_rate': 1e-3,
             'refine_learning_rate': 1e-3,
             'act_func': 'LeakyReLU',
