@@ -24,7 +24,7 @@ class HistoryManager:
                  fill_value='zero', use_target_normalization=False, use_scaled_budgets=True,
                  model_output_normalization=None, cnn_kernel_size=0, target_normalization_range=None,
                  use_sample_weights=False, use_sample_weight_by_budget=False, sample_weight_by_budget_strategy=None,
-                 use_sample_weight_by_label=False):
+                 use_sample_weight_by_label=False, use_y_constraint_weights=False):
         assert fill_value in ["zero", "last"], "Invalid fill value mode"
         # assert predict_mode in ["end_budget", "next_budget"], "Invalid predict mode"
         # assert curve_size_mode in ["fixed", "variable"], "Invalid curve size mode"
@@ -39,6 +39,7 @@ class HistoryManager:
         self.use_sample_weight_by_budget = use_sample_weight_by_budget
         self.sample_weight_by_budget_strategy = sample_weight_by_budget_strategy
         self.use_sample_weight_by_label = use_sample_weight_by_label
+        self.use_y_constraint_weights = use_y_constraint_weights
 
         self.use_target_normalization = use_target_normalization
         self.target_normalization_range = \
@@ -150,7 +151,7 @@ class HistoryManager:
 
     def history_configurations(self, curve_size_mode) -> \
         Tuple[NDArray[int], NDArray[np.float32], NDArray[np.float32],
-              Optional[NDArray[np.float32]], NDArray[np.float32]]:
+              Optional[NDArray[np.float32]], NDArray[np.float32], NDArray[np.float32]]:
         """
         Generate the configurations, labels, budgets and curves
         based on the history of evaluated configurations.
@@ -165,6 +166,7 @@ class HistoryManager:
         train_budgets = []
         train_curves = []
         train_weights = []
+        train_max_budget = []
         initial_empty_value = self.get_initial_empty_value()
 
         if self.sample_weight_by_budget_strategy is not None:
@@ -195,6 +197,7 @@ class HistoryManager:
                     train_curve = performances[:budget - 1] if budget > 1 else [initial_empty_value]
                     train_curves.append(train_curve)
                 train_weights.append(weights[i])
+                train_max_budget.append(budgets[-1])
 
         train_curves = self.get_processed_curves(curves=train_curves, curve_size_mode=curve_size_mode,
                                                  real_budgets=train_budgets)
@@ -203,8 +206,9 @@ class HistoryManager:
         train_budgets = np.array(train_budgets, dtype=np.float32)
         train_labels = np.array(train_labels, dtype=np.float32)
         train_weights = np.array(train_weights, dtype=np.float32)
+        train_max_budget = np.array(train_max_budget, dtype=np.float32)
 
-        return train_indices, train_labels, train_budgets, train_curves, train_weights
+        return train_indices, train_labels, train_budgets, train_curves, train_weights, train_max_budget
 
     def get_train_dataset(self, curve_size_mode) -> TabularDataset:
         """This method is called to prepare the necessary training dataset
@@ -217,7 +221,7 @@ class HistoryManager:
         if not self.is_train_data_modified:
             return self.cached_train_dataset
 
-        hp_indices, train_labels, train_budgets, train_curves, train_weights = \
+        hp_indices, train_labels, train_budgets, train_curves, train_weights, train_max_budget = \
             self.history_configurations(curve_size_mode)
 
         if self.use_scaled_budgets:
@@ -236,12 +240,15 @@ class HistoryManager:
             all_weights = train_weights
 
         if self.use_sample_weight_by_label:
+            power = 1
+            if isinstance(self.use_sample_weight_by_label, int):
+                power = self.use_sample_weight_by_label
             weights = train_labels.copy()
             max_weight = np.max(weights)
             min_weight = np.min(weights)
             if max_weight != min_weight:
                 weights = (weights - min_weight) / (max_weight - min_weight)
-            weights = np.abs(np.exp(-1 * weights) - np.exp(-1)) / (1 - np.exp(-1))
+            weights = np.abs(np.exp(-power * weights) - np.exp(-power)) / (1 - np.exp(-power))
             # weights = 1 / (weights + 1e-1)
             weights *= weights.shape[0] / weights.sum()
 
@@ -249,6 +256,22 @@ class HistoryManager:
             all_weights *= all_weights.shape[0] / all_weights.sum()
 
         train_weights = all_weights
+
+        if self.use_y_constraint_weights:
+            if isinstance(self.use_y_constraint_weights, int):
+                power = self.use_y_constraint_weights
+                y_constraint_weights = train_max_budget / self.max_benchmark_epochs
+                y_constraint_weights = np.abs(np.exp(-power * y_constraint_weights) - np.exp(-power)) / (
+                    1 - np.exp(-power))
+            else:
+                y_constraint_weights = 1 - train_max_budget / self.max_benchmark_epochs
+
+            if self.use_sample_weight_by_budget or self.use_sample_weight_by_label:
+                train_weights = np.expand_dims(train_weights, axis=1)
+                y_constraint_weights = np.expand_dims(y_constraint_weights, axis=1)
+                train_weights = np.concatenate([train_weights, y_constraint_weights], axis=1)
+            else:
+                train_weights = y_constraint_weights
 
         # This creates a copy
         train_examples = self.hp_candidates[hp_indices]
@@ -258,7 +281,7 @@ class HistoryManager:
         train_budgets = torch.from_numpy(train_budgets)
         train_curves = torch.from_numpy(train_curves) if train_curves is not None else None
 
-        if self.use_sample_weight_by_budget or self.use_sample_weight_by_label:
+        if self.use_sample_weight_by_budget or self.use_sample_weight_by_label or self.use_y_constraint_weights:
             train_weights = torch.from_numpy(train_weights)
         else:
             train_weights = None
@@ -571,6 +594,7 @@ class HistoryManager:
         train_curves = []
         is_up_curve = []
         best_labels = []
+        train_max_budget = []
         initial_empty_value = self.get_initial_empty_value()
 
         budgets = range(1, self.max_benchmark_epochs + 1)
@@ -587,6 +611,7 @@ class HistoryManager:
                 train_labels.append(performances[budget - 1])
                 is_up_curve.append(performances[budget - 1] > start_performance)
                 best_labels.append(best_performance)
+                train_max_budget.append(budgets[-1])
                 if self.use_learning_curve:
                     train_curve = performances[:budget - 1] if budget > 1 else [initial_empty_value]
                     train_curves.append(train_curve)
@@ -599,12 +624,13 @@ class HistoryManager:
         train_labels = np.array(train_labels, dtype=np.float32)
         is_up_curve = np.array(is_up_curve, dtype=bool)
         best_labels = np.array(best_labels, dtype=np.float32)
+        train_max_budget = np.array(train_max_budget, dtype=np.float32)
 
         return train_indices, train_labels, train_budgets, train_curves, is_up_curve, best_labels
 
     def get_check_train_validation_dataset(self, curve_size_mode, benchmark: BaseBenchmark,
                                            validation_configuration_ratio, validation_curve_ratio, validation_mode,
-                                           seed) -> (
+                                           check_model_train_mode, validation_curve_prob, seed) -> (
         TabularDataset, TabularDataset):
         """This method is called to prepare the necessary training dataset
         for training a model.
@@ -616,13 +642,14 @@ class HistoryManager:
 
         indices = np.arange(self.hp_candidates.shape[0])
         np.random.seed(seed)
-        val_indices = np.random.choice(indices,
-                                       size=int(self.hp_candidates.shape[0] * validation_configuration_ratio) + 1,
-                                       replace=False)
-        if len(val_indices) == self.hp_candidates.shape[0]:
-            val_indices = []
+        train_indices = np.random.choice(indices,
+                                         size=int(self.hp_candidates.shape[0] * (1 - validation_configuration_ratio)),
+                                         replace=False)
+        if len(train_indices) == self.hp_candidates.shape[0]:
+            train_indices = []
 
         budgets = np.arange(1, self.max_benchmark_epochs + 1)
+        train_budgets_indices = budgets[:int(self.max_benchmark_epochs * (1 - validation_curve_ratio)) + 1]
         val_budgets_indices = budgets[int(self.max_benchmark_epochs * (1 - validation_curve_ratio)) + 1:]
 
         all_hp_indices, all_labels, all_budgets, all_curves, all_is_up_curve, all_best_labels = \
@@ -631,11 +658,28 @@ class HistoryManager:
         self.max_curve_value = np.max(all_labels)
         target_normalization_value = self.set_target_normalization_value()
 
-        val_hp_index = np.isin(all_hp_indices, val_indices)
-        val_budget_index = np.isin(all_budgets, val_budgets_indices)
-        val_hp_index = np.logical_or(val_hp_index, val_budget_index)
+        train_hp_index = np.isin(all_hp_indices, train_indices)
 
-        train_hp_index = ~val_hp_index
+        if check_model_train_mode == "exp":
+            upper_budget = int(self.max_benchmark_epochs * (1 - validation_curve_ratio)) + 1
+            upper_budget = 2
+            weights = 1.0 / budgets
+            # weights /= np.sum(weights)
+            weights[:upper_budget] = weights[:upper_budget] * validation_curve_prob / np.sum(weights[:upper_budget])
+            weights[upper_budget:] = weights[upper_budget:] * (1 - validation_curve_prob) / np.sum(
+                weights[upper_budget:])
+            selected_budgets = np.random.choice(budgets, size=int(self.hp_candidates.shape[0]), p=weights)
+            train_budget_index = np.zeros_like(all_budgets, dtype=bool)
+            for i in range(all_hp_indices.shape[0]):
+                hp_index = all_hp_indices[i]
+                if all_budgets[i] <= selected_budgets[hp_index]:
+                    train_budget_index[i] = True
+        else:
+            train_budget_index = np.isin(all_budgets, train_budgets_indices)
+
+        train_hp_index = np.logical_and(train_hp_index, train_budget_index)
+
+        val_hp_index = np.isin(all_budgets, val_budgets_indices)
 
         if validation_mode == "end" or validation_mode == "best":
             val_budget_index = all_budgets == self.max_benchmark_epochs
@@ -670,6 +714,10 @@ class HistoryManager:
         train_budgets = all_budgets[train_hp_index]
         train_curves = all_curves[train_hp_index] if all_curves is not None else None
 
+        max_dict = {i: np.max(train_budgets[train_hp_indices == i]) for i in np.unique(train_hp_indices)}
+        train_max_budget = [max_dict[i] for i in train_hp_indices]
+        train_max_budget = np.array(train_max_budget)
+
         # train_mu = np.mean(train_labels)
         # train_std = np.std(train_labels)
         # train_labels = (train_labels - train_mu) / train_std
@@ -688,12 +736,15 @@ class HistoryManager:
         #     all_weights = train_weights
 
         if self.use_sample_weight_by_label:
+            power = 1
+            if isinstance(self.use_sample_weight_by_label, int):
+                power = self.use_sample_weight_by_label
             weights = train_labels.copy()
             max_weight = np.max(weights)
             min_weight = np.min(weights)
             if max_weight != min_weight:
                 weights = (weights - min_weight) / (max_weight - min_weight)
-            weights = np.abs(np.exp(-1 * weights) - np.exp(-1)) / (1 - np.exp(-1))
+            weights = np.abs(np.exp(-power * weights) - np.exp(-power)) / (1 - np.exp(-power))
             # weights = 1 / (weights + 1e-1)
             weights *= weights.shape[0] / weights.sum()
 
@@ -701,6 +752,22 @@ class HistoryManager:
             all_weights *= all_weights.shape[0] / all_weights.sum()
 
         train_weights = all_weights
+
+        if self.use_y_constraint_weights:
+            if isinstance(self.use_y_constraint_weights, int):
+                power = self.use_y_constraint_weights
+                y_constraint_weights = train_max_budget
+                y_constraint_weights = np.abs(np.exp(-power * y_constraint_weights) - np.exp(-power)) / (
+                    1 - np.exp(-power))
+            else:
+                y_constraint_weights = 1 - train_max_budget
+
+            if self.use_sample_weight_by_budget or self.use_sample_weight_by_label:
+                train_weights = np.expand_dims(train_weights, axis=1)
+                y_constraint_weights = np.expand_dims(y_constraint_weights, axis=1)
+                train_weights = np.concatenate([train_weights, y_constraint_weights], axis=1)
+            else:
+                train_weights = y_constraint_weights
 
         if self.use_sample_weight_by_label:  # or self.use_sample_weight_by_budget:
             train_weights = torch.from_numpy(train_weights)

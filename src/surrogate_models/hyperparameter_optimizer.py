@@ -230,6 +230,7 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
             use_sample_weight_by_budget=self.model_class.meta_use_sample_weight_by_budget,
             sample_weight_by_budget_strategy=self.model_class.meta_sample_weight_by_budget_strategy,
             use_sample_weight_by_label=self.model_class.meta_use_sample_weight_by_label,
+            use_y_constraint_weights=self.model_class.meta_use_y_constraint_weights,
         )
 
         self.real_curve_targets_map_pd: Optional[pd.DataFrame] = None
@@ -293,8 +294,10 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
 
         hp["check_model"] = False
         hp["check_model_predict_mode"] = 'best'  # 'end'
+        hp["check_model_train_mode"] = 'exp'
         hp["validation_configuration_ratio"] = 0.95
         hp['validation_curve_ratio'] = 0.98
+        hp['validation_curve_prob'] = 0.95
 
         return hp
 
@@ -902,6 +905,8 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
                 validation_configuration_ratio=self.meta.validation_configuration_ratio,
                 validation_curve_ratio=self.meta.validation_curve_ratio,
                 validation_mode=self.meta.check_model_predict_mode,
+                check_model_train_mode=self.meta.check_model_train_mode,
+                validation_curve_prob=self.meta.validation_curve_prob,
                 seed=self.seed
             )
         self.target_normalization_value = target_normalization_value

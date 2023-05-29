@@ -80,7 +80,7 @@ class EnsembleModel(BasePytorchModule):
     @staticmethod
     def get_default_meta():
         hp = {
-            'model_class_name': 'NNModel',
+            'model_class_name': 'TargetSpaceComplex3PowerLawModel',
             # 'ConditionedPowerLawModel', # 'ComplexPowerLawModel',  # 'TargetSpaceComplex3PowerLawModel', 'NNModel'
             'ensemble_size': 5,
             'nr_epochs': 250,
@@ -231,6 +231,11 @@ class EnsembleModel(BasePytorchModule):
     def meta_num_mc_dropout(cls):
         model_class = get_class("src/models/power_law", cls.meta.model_class_name)
         return model_class.meta_num_mc_dropout
+
+    @classproperty
+    def meta_use_y_constraint_weights(cls):
+        model_class = get_class("src/models/power_law", cls.meta.model_class_name)
+        return model_class.meta_use_y_constraint_weights
 
     @property
     def has_batchnorm_layers(self):

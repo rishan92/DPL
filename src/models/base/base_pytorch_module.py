@@ -130,6 +130,13 @@ class BasePytorchModule(nn.Module, Meta, ABC):
         else:
             return 1
 
+    @classproperty
+    def meta_use_y_constraint_weights(cls):
+        if hasattr(cls.meta, 'use_y_constraint_weights'):
+            return cls.meta.use_y_constraint_weights
+        else:
+            return False
+
     def print_parameters(self):
         for name, param in self.named_parameters():
             print(f"{name}: {param}")
