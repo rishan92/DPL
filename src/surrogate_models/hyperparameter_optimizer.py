@@ -265,7 +265,7 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
                 'curve_size_mode': 'fixed',
                 'acq_mode': 'ei',
                 'acq_best_value_mode': 'normal',
-                'use_target_normalization': True,
+                'use_target_normalization': False,
                 'target_normalization_range': [0.1, 0.9],
                 'use_scaled_budgets': True,
                 'use_exploitation_sampling': False,
@@ -282,7 +282,7 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
                 'acq_mode': 'ei',
                 'acq_best_value_mode': 'mf',  # 'normal',  #    mf - multi-fidelity, normal, None
                 'use_target_normalization': False,
-                'target_normalization_range': [0.2, 0.8],
+                'target_normalization_range': [0.1, 0.9],
                 'use_scaled_budgets': True,
                 'use_exploitation_sampling': False,
                 'reset_refine_optimizer': True,
@@ -358,7 +358,8 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
 
         return return_state
 
-    def _predict(self) -> Tuple[NDArray[np.float32], NDArray[np.float32], NDArray[int], NDArray[int], Optional[Dict]]:
+    def _predict(self) -> Tuple[
+        NDArray[np.float32], NDArray[np.float32], NDArray[int], NDArray[int], Optional[Dict], NDArray[np.float32]]:
         """
         Predict the performances of the hyperparameter configurations
         as well as the standard deviations based on the ensemble.
@@ -378,8 +379,9 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
         )
         train_data = self.history_manager.get_train_dataset(curve_size_mode=self.meta.curve_size_mode)
 
-        mean_predictions, std_predictions, predict_infos = self.model.predict(test_data=test_data,
-                                                                              train_data=train_data)
+        mean_predictions, std_predictions, predict_infos, model_std_predictions = self.model.predict(
+            test_data=test_data,
+            train_data=train_data)
 
         # # order between model_output_normalization_inverse_fn and use_target_normalization should be reversed
         # # to match the order applied in making the training data
@@ -392,10 +394,12 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
         if self.meta.use_target_normalization:
             mean_predictions = self.target_normalization_inverse_fn(mean_predictions)
             std_predictions = self.target_normalization_std_inverse_fn(std_predictions)
+            if model_std_predictions is not None:
+                model_std_predictions = self.target_normalization_std_inverse_fn(model_std_predictions)
             if predict_infos is not None and 'pl_output' in predict_infos:
                 predict_infos['pl_output'] = self.target_normalization_inverse_fn(predict_infos['pl_output'])
 
-        return mean_predictions, std_predictions, hp_indices, real_budgets, predict_infos
+        return mean_predictions, std_predictions, hp_indices, real_budgets, predict_infos, model_std_predictions
 
     def suggest(self) -> Tuple[int, int]:
         """Suggest a hyperparameter configuration and a budget
@@ -417,7 +421,7 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
             budget = self.rand_init_budgets[self.initial_random_index]
             self.initial_random_index += 1
         else:
-            mean_predictions, std_predictions, hp_indices, real_budgets, predict_infos = self._predict()
+            mean_predictions, std_predictions, hp_indices, real_budgets, predict_infos, mean_model_stds = self._predict()
 
             evaluated_mask = None
             if hasattr(self.meta, 'use_exploitation_sampling') and self.meta.use_exploitation_sampling:
@@ -456,7 +460,8 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
                 acq_best_value_mode=self.meta.acq_best_value_mode,
                 exploitation_mask=evaluated_mask,
                 hp_indices=hp_indices,
-                acq_explore_factor=acq_explore_factor
+                acq_explore_factor=acq_explore_factor,
+                mean_model_stds=mean_model_stds
             )
 
             """
@@ -646,6 +651,7 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
         exploitation_mask=None,
         hp_indices=None,
         acq_explore_factor=0,
+        mean_model_stds: Optional[NDArray[np.float32]] = None,
     ) -> int:
         """Return the hyperparameter with the highest acq function value.
 
@@ -676,13 +682,39 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
         else:
             best_values = np.full_like(mean_predictions, self.best_value_observed)
 
-        acq_func_values = self.acq(
-            best_values,
-            mean_predictions,
-            mean_stds,
-            acq_mode=acq_mode,
-            explore_factor=acq_explore_factor,
-        )
+        if self.meta_uncertainty_combine_mode == 'before' and mean_model_stds is not None:
+            data_stds = mean_stds - mean_model_stds
+            mean_stds = self.meta_model_uncertainty_factor * mean_model_stds + \
+                        self.meta_data_uncertainty_factor * data_stds
+            mean_stds[mean_stds < 0] = 0
+
+        if self.meta_uncertainty_combine_mode == 'after' and mean_model_stds is not None:
+            data_stds = mean_stds - mean_model_stds
+            data_stds[data_stds < 0] = 0
+            model_acq_func_values = self.acq(
+                best_values,
+                mean_predictions,
+                mean_model_stds,
+                acq_mode=acq_mode,
+                explore_factor=acq_explore_factor,
+            )
+            data_acq_func_values = self.acq(
+                best_values,
+                mean_predictions,
+                data_stds,
+                acq_mode=acq_mode,
+                explore_factor=acq_explore_factor,
+            )
+            acq_func_values = self.meta_model_uncertainty_factor * model_acq_func_values + \
+                              self.meta_data_uncertainty_factor * data_acq_func_values
+        else:
+            acq_func_values = self.acq(
+                best_values,
+                mean_predictions,
+                mean_stds,
+                acq_mode=acq_mode,
+                explore_factor=acq_explore_factor,
+            )
 
         if gv.PLOT_ACQ and gv.IS_WANDB:
             true_labels = self.benchmark_labels[hp_indices]
@@ -758,7 +790,8 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
 
         train_data = self.history_manager.get_train_dataset(curve_size_mode=self.meta.curve_size_mode)
 
-        mean_data, std_data, predict_infos = self.model.predict(test_data=pred_test_data, train_data=train_data)
+        mean_data, std_data, predict_infos, model_std_data = self.model.predict(test_data=pred_test_data,
+                                                                                train_data=train_data)
 
         # order between model_output_normalization_inverse_fn and use_target_normalization should be reversed
         # to match the order applied in making the training data. This is only calculated for plotting, since
@@ -937,3 +970,24 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
             self.logger.warning("Training failed. Restarting.")
 
         sys.exit(0)
+
+    @property
+    def meta_uncertainty_combine_mode(self):
+        if hasattr(self.model_class.meta, 'uncertainty_combine_mode'):
+            return self.model_class.meta.uncertainty_combine_mode
+        else:
+            return None
+
+    @property
+    def meta_model_uncertainty_factor(self):
+        if hasattr(self.model_class.meta, 'model_uncertainty_factor'):
+            return self.model_class.meta.model_uncertainty_factor
+        else:
+            return 1
+
+    @property
+    def meta_data_uncertainty_factor(self):
+        if hasattr(self.model_class.meta, 'data_uncertainty_factor'):
+            return self.model_class.meta.data_uncertainty_factor
+        else:
+            return 1

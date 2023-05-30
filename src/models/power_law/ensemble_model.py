@@ -122,7 +122,7 @@ class EnsembleModel(BasePytorchModule):
         predict_infos = predict_infos[0]
         predict_infos = {key: value.detach().to('cpu').numpy() for key, value in predict_infos.items()}
 
-        return mean_predictions, std_predictions, predict_infos
+        return mean_predictions, std_predictions, predict_infos, None
 
     def train_loop(self, train_dataset, should_refine=False, reset_optimizer=False, last_sample=None, val_dataset=None,
                    **kwargs):

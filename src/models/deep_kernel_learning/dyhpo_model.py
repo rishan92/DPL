@@ -16,6 +16,7 @@ from torch.nn.utils import clip_grad_norm_
 import itertools
 from functools import partial
 import torch.nn.functional as F
+import torch.nn as nn
 from torch.utils.data import Subset
 import traceback
 import math
@@ -26,7 +27,7 @@ from src.models.deep_kernel_learning.base_feature_extractor import BaseFeatureEx
 from src.models.deep_kernel_learning.gp_regression_model import GPRegressionModel
 from src.models.base.base_pytorch_module import BasePytorchModule
 from src.dataset.tabular_dataset import TabularDataset
-from src.utils.utils import get_class_from_package, get_class_from_packages
+from src.utils.utils import get_class_from_package, get_class_from_packages, weighted_spearman
 import src.models.deep_kernel_learning
 from src.models.base.meta import Meta
 from src.utils.utils import get_class, classproperty
@@ -132,6 +133,9 @@ class DyHPOModel(BasePytorchModule):
         if hasattr(self.meta, 'alpha_beta_constraint_factor') and self.meta.alpha_beta_constraint_factor != 0:
             self.alpha_beta_constraint_factor = self.meta.alpha_beta_constraint_factor
 
+        self.alpha_beta_constraint_lower = 0
+        self.alpha_beta_constraint_upper = 1
+
         self.gamma_constraint_factor = 0
         if hasattr(self.meta, 'gamma_constraint_factor') and self.meta.gamma_constraint_factor != 0:
             self.gamma_constraint_factor = self.meta.gamma_constraint_factor
@@ -158,6 +162,13 @@ class DyHPOModel(BasePytorchModule):
         if hasattr(self.meta, 'mll_loss_factor'):
             self.mll_loss_factor = self.meta.mll_loss_factor
 
+        self.y_constraint_factor = 0
+        if hasattr(self.meta, 'y_constraint_factor') and self.meta.y_constraint_factor != 0 and \
+            self.meta.feature_class_name == 'FeatureExtractorTargetSpaceDYHPO':
+            self.y_constraint_factor = self.meta.y_constraint_factor
+
+        self.num_mc_dropout = self.meta.num_mc_dropout
+
         if gv.IS_WANDB and gv.PLOT_GRADIENTS:
             wandb.watch([self.feature_extractor, self.model, self.likelihood], log='all', idx=0, log_freq=10)
 
@@ -168,7 +179,7 @@ class DyHPOModel(BasePytorchModule):
             'nr_patience_epochs': 10,
             'nr_epochs': 1000,
             'refine_nr_epochs': 50,
-            'feature_class_name': 'FeatureExtractorTargetSpaceDYHPO',
+            'feature_class_name': 'FeatureExtractorDYHPO',
             # 'FeatureExtractor',  #  'FeatureExtractorDYHPO',  # 'FeatureExtractorTargetSpaceDYHPO'
             'gp_class_name': 'GPRegressionPowerLawMeanModel',
             # 'GPRegressionPowerLawMeanModel',  #  'GPRegressionModel'
@@ -176,6 +187,11 @@ class DyHPOModel(BasePytorchModule):
             'mll_loss_function': 'ExactMarginalLogLikelihood',
             'learning_rate': 1e-3,
             'refine_learning_rate': 1e-3,
+            'use_mc_dropout': False,
+            'num_mc_dropout': 1,
+            'uncertainty_combine_mode': None,
+            'model_uncertainty_factor': 1,
+            'data_uncertainty_factor': -1,
             'power_law_loss_function': 'MSELoss',
             'power_law_loss_factor': 0.5,
             'l1_loss_factor': 0,
@@ -186,13 +202,14 @@ class DyHPOModel(BasePytorchModule):
             'gamma_constraint_factor': 0,
             'output_constraint_factor': 0,
             'target_space_constraint_factor': 0,
+            'y_constraint_factor': 0.1,
+            'use_y_constraint_weights': True,
             'noise_lower_bound': 1e-4,  # 1e-4,  #
             'noise_upper_bound': 1e-3,  # 1e-3,  #
             'use_seperate_lengthscales': False,
             'optimize_likelihood': False,
             'use_scale_to_bounds': False,
             'use_suggested_learning_rate': False,
-            'use_weight_by_budget': False,
             'optimizer': 'Adam',
             'reset_on_divergence': False,
             'learning_rate_scheduler': None,
@@ -337,6 +354,7 @@ class DyHPOModel(BasePytorchModule):
         train_budgets = train_dataset.budgets
         train_curves = train_dataset.curves
         y_train = train_dataset.Y
+        train_weights = train_dataset.weights
 
         initial_state = self.get_state()
         training_errored = False
@@ -367,7 +385,7 @@ class DyHPOModel(BasePytorchModule):
             self.model.set_train_data(projected_x, y_train, strict=False)
             output: gpytorch.ExactMarginalLogLikelihood = self.model(projected_x)
 
-            l1_norm = torch.tensor(0.0, requires_grad=True)
+            zero_tensor = torch.tensor(0.0, requires_grad=True)
             if self.regularization_factor != 0:
                 num_params = 0
                 for param in self.parameters():
@@ -375,14 +393,16 @@ class DyHPOModel(BasePytorchModule):
                     num_params += param.numel()
                 l1_norm = l1_norm / num_params
                 l1_norm = torch.max(torch.tensor(1), l1_norm) - 1
+            else:
+                l1_norm = zero_tensor
 
             if self.alpha_beta_constraint_factor != 0:
                 alpha_plus_beta = predict_info['alpha'] + predict_info['beta']
-                lower_loss = torch.clamp(-1 * alpha_plus_beta, min=0)
-                upper_loss = torch.clamp(alpha_plus_beta - 1, min=0)
+                lower_loss = torch.clamp(self.alpha_beta_constraint_lower - alpha_plus_beta, min=0)
+                upper_loss = torch.clamp(alpha_plus_beta - self.alpha_beta_constraint_upper, min=0)
                 alpha_beta_constraint_loss = torch.mean(lower_loss + upper_loss)
             else:
-                alpha_beta_constraint_loss = torch.tensor(0.0, requires_grad=True)
+                alpha_beta_constraint_loss = zero_tensor
 
             if self.gamma_constraint_factor != 0:
                 gamma = predict_info['gamma']
@@ -393,7 +413,7 @@ class DyHPOModel(BasePytorchModule):
                 upper_loss = torch.clamp(gamma - gamma_upper_bound, min=0)
                 gamma_constraint_loss = torch.mean(lower_loss + upper_loss)
             else:
-                gamma_constraint_loss = torch.tensor(0.0, requires_grad=True)
+                gamma_constraint_loss = zero_tensor
 
             if self.target_space_constraint_factor != 0:
                 y1: torch.Tensor = predict_info['y1']
@@ -405,7 +425,7 @@ class DyHPOModel(BasePytorchModule):
                     torch.where(mask, torch.tensor(0.0), torch.abs(alpha - ((y1 + y2) / 2)))
                 target_space_constraint_loss = target_space_constraint_loss.mean()
             else:
-                target_space_constraint_loss = torch.tensor(0.0, requires_grad=True)
+                target_space_constraint_loss = zero_tensor
 
             try:
                 # Calc loss and backprop derivatives
@@ -419,19 +439,41 @@ class DyHPOModel(BasePytorchModule):
                 if self.power_law_l1_loss_factor != 0:
                     power_law_l1_loss = self.l1_loss(power_law_output, self.model.train_targets)
                 else:
-                    power_law_l1_loss = torch.tensor(0.0, requires_grad=True)
+                    power_law_l1_loss = zero_tensor
 
                 if self.l1_loss_factor != 0:
                     l1_loss = self.l1_loss(mean_prediction, self.model.train_targets)
                 else:
-                    l1_loss = torch.tensor(0.0, requires_grad=True)
+                    l1_loss = zero_tensor
 
                 if self.output_constraint_factor != 0:
                     lower_loss = torch.clamp(-1 * power_law_output, min=0)
                     upper_loss = torch.clamp(power_law_output - 1, min=0)
                     output_constraint_loss = torch.mean(lower_loss + upper_loss)
                 else:
-                    output_constraint_loss = torch.tensor(0.0, requires_grad=True)
+                    output_constraint_loss = zero_tensor
+
+                if hasattr(self.meta, 'use_y_constraint_weights') and self.meta.use_y_constraint_weights:
+                    # if self.meta.use_sample_weight_by_budget or self.meta.use_sample_weight_by_label or self.meta.use_sample_weights:
+                    #     y_constraint_weight = train_weights[:, 1]
+                    #     train_weights = train_weights[:, 0]
+                    # else:
+                    y_constraint_weight = train_weights
+
+                if self.y_constraint_factor != 0:
+                    y1: torch.Tensor = predict_info['y1']
+                    y2: torch.Tensor = predict_info['y2']
+                    y_constraint_loss = torch.abs(y1 - y2)
+                    if hasattr(self.meta, 'use_y_constraint_weights') and self.meta.use_y_constraint_weights:
+                        y_constraint_loss = y_constraint_weight * y_constraint_loss
+                    y_constraint_loss = torch.mean(y_constraint_loss)
+                    # y_constraint_loss = torch.abs(y1 - y2)
+                    # y_constraint_weights = 1 - batch_budgets
+                    # y_constraint_weights = y_constraint_weights * nr_examples_batch / y_constraint_weights.sum()
+                    # y_constraint_loss = torch.mean(y_constraint_weights * y_constraint_loss)
+                else:
+                    y_constraint_loss = zero_tensor
+
                 # diff_m = torch.sum(torch.abs(y_train - self.model.train_targets))
                 # stds = prediction.stddev
                 # diff = torch.abs(mean_prediction - y_train)
@@ -444,7 +486,8 @@ class DyHPOModel(BasePytorchModule):
                        self.power_law_l1_loss_factor * power_law_l1_loss + \
                        self.gamma_constraint_factor * gamma_constraint_loss + \
                        self.output_constraint_factor * output_constraint_loss + \
-                       self.target_space_constraint_factor * target_space_constraint_loss
+                       self.target_space_constraint_factor * target_space_constraint_loss + \
+                       self.y_constraint_factor * y_constraint_loss
 
                 mae = gpytorch.metrics.mean_absolute_error(prediction, self.model.train_targets)
                 mse = gpytorch.metrics.mean_squared_error(prediction, self.model.train_targets)
@@ -482,12 +525,17 @@ class DyHPOModel(BasePytorchModule):
                     self.lr_scheduler.step()
 
                 if val_dataset:
-                    means, stds, predict_infos, val_power_law_mae = self._batch_predict(
+                    means, stds, predict_infos, val_power_law_mae, model_stds = self._batch_predict(
                         test_data=val_dataset,
                         train_data=train_dataset,
                         target_normalization_inverse_fn=self.target_normalization_inverse_fn,
                         target_normalization_std_inverse_fn=self.target_normalization_std_inverse_fn
                     )
+                    if self.target_normalization_inverse_fn:
+                        means = self.target_normalization_inverse_fn(means)
+                        stds = self.target_normalization_std_inverse_fn(stds)
+                        model_stds = self.target_normalization_std_inverse_fn(model_stds)
+
                     means_tensor = torch.from_numpy(means).to(model_device)
                     labels = val_dataset.Y
                     val_mae = F.l1_loss(means_tensor, labels, reduction='mean')
@@ -496,26 +544,78 @@ class DyHPOModel(BasePytorchModule):
                     labels = labels.detach().numpy()
 
                     abs_residuals = np.abs(means - labels)
-                    val_correlation_value = np.corrcoef(stds, abs_residuals)
-                    val_correlation_value = val_correlation_value[0, 1]
 
-                    coverage_1std = np.mean(abs_residuals <= stds) - 0.68
-                    coverage_2std = np.mean(abs_residuals <= 2 * stds) - 0.95
-                    coverage_3std = np.mean(abs_residuals <= 3 * stds) - 0.997
+                    mean_correlation, _ = spearmanr(means, labels, nan_policy='raise')
+                    w_mean_correlation = weighted_spearman(y_pred=means, y_true=labels)
 
-                    crps_score = ps.crps_gaussian(labels, mu=means, sig=stds)
-                    crps_score = crps_score.mean()
+                    min_label = np.min(labels)
+                    mean_regret = labels[np.argmin(means)] - min_label
 
                     best_values = np.ones_like(means)
                     best_values[:] = np.mean(labels)
-                    acq_func_values = acq(
+
+                    def std_metrics(stds):
+                        val_correlation_value = np.corrcoef(stds, abs_residuals)
+                        val_correlation_value = val_correlation_value[0, 1]
+
+                        coverage_1std = np.mean(abs_residuals <= stds) - 0.68
+                        coverage_2std = np.mean(abs_residuals <= 2 * stds) - 0.95
+                        coverage_3std = np.mean(abs_residuals <= 3 * stds) - 0.997
+
+                        crps_score = ps.crps_gaussian(labels, mu=means, sig=stds)
+                        crps_score = crps_score.mean()
+
+                        acq_func_values = acq(
+                            best_values,
+                            means,
+                            stds,
+                            acq_mode='ei',
+                        )
+
+                        acq_correlation, _ = spearmanr(acq_func_values, -1 * labels, nan_policy='raise')
+                        w_acq_correlation = weighted_spearman(y_pred=acq_func_values, y_true=-1 * labels)
+                        acq_regret = labels[np.argmax(acq_func_values)] - min_label
+                        print(np.argmax(acq_func_values))
+
+                        metrics = {
+                            "val_correlation": val_correlation_value,
+                            "coverage_1std": coverage_1std,
+                            "coverage_2std": coverage_2std,
+                            "coverage_3std": coverage_3std,
+                            "crps_score": crps_score,
+                            "acq_correlation": acq_correlation,
+                            "w_acq_correlation": w_acq_correlation,
+                            "acq_regret": acq_regret,
+                        }
+                        return metrics
+
+                    total_std_metrcs = std_metrics(stds)
+                    model_std_metrcs = std_metrics(model_stds)
+                    data_std = stds - model_stds
+                    # data_uncertainty[data_uncertainty < 0] = 0
+                    combined_std = self.meta.model_uncertainty_factor * model_stds + \
+                                   self.meta.data_uncertainty_factor * data_std
+                    combined_std[combined_std < 0] = 0
+                    combined_std_metrcs = std_metrics(combined_std)
+
+                    data_std[data_std < 0] = 0
+                    data_acq_func_values = acq(
                         best_values,
                         means,
-                        stds,
+                        data_std,
                         acq_mode='ei',
                     )
-                    mean_correlation, _ = spearmanr(means, labels, nan_policy='raise')
-                    acq_correlation, _ = spearmanr(acq_func_values, labels, nan_policy='raise')
+                    model_acq_func_values = acq(
+                        best_values,
+                        means,
+                        model_stds,
+                        acq_mode='ei',
+                    )
+                    combined_acq = self.meta.model_uncertainty_factor * model_acq_func_values + \
+                                   self.meta.data_uncertainty_factor * data_acq_func_values
+                    combined_acq_correlation, _ = spearmanr(combined_acq, -1 * labels, nan_policy='raise')
+                    combined_w_acq_correlation = weighted_spearman(y_pred=combined_acq, y_true=-1 * labels)
+                    combined_acq_regret = labels[np.argmax(combined_acq)] - min_label
 
                     self.train()
 
@@ -555,12 +655,59 @@ class DyHPOModel(BasePytorchModule):
                     wandb_data["surrogate/check_training/validation_loss"] = val_mae_value
                     wandb_data["surrogate/check_training/validation_power_law_MAE"] = val_power_law_mae
                     wandb_data["surrogate/check_training/mean_correlation"] = mean_correlation
-                    wandb_data["surrogate/check_training/acq_correlation"] = acq_correlation
-                    wandb_data["surrogate/check_training/validation_crps"] = crps_score
-                    wandb_data["surrogate/check_training/validation_std_correlation"] = val_correlation_value
-                    wandb_data["surrogate/check_training/validation_std_coverage_1sigma"] = coverage_1std
-                    wandb_data["surrogate/check_training/validation_std_coverage_2sigma"] = coverage_2std
-                    wandb_data["surrogate/check_training/validation_std_coverage_3sigma"] = coverage_3std
+                    wandb_data["surrogate/check_training/weighted_mean_correlation"] = w_mean_correlation
+                    wandb_data["surrogate/check_training/mean_regret"] = mean_regret
+                    wandb_data["surrogate/check_training/acq_correlation"] = total_std_metrcs["acq_correlation"]
+                    wandb_data["surrogate/check_training/weighted_acq_correlation"] = total_std_metrcs[
+                        "w_acq_correlation"]
+                    wandb_data["surrogate/check_training/acq_regret"] = total_std_metrcs["acq_regret"]
+                    wandb_data["surrogate/check_training/validation_crps"] = total_std_metrcs["crps_score"]
+                    wandb_data["surrogate/check_training/validation_std_correlation"] = total_std_metrcs[
+                        "val_correlation"]
+                    wandb_data["surrogate/check_training/validation_std_coverage_1sigma"] = total_std_metrcs[
+                        "coverage_1std"]
+                    wandb_data["surrogate/check_training/validation_std_coverage_2sigma"] = total_std_metrcs[
+                        "coverage_2std"]
+                    wandb_data["surrogate/check_training/validation_std_coverage_3sigma"] = total_std_metrcs[
+                        "coverage_3std"]
+
+                    wandb_data["surrogate/check_training/model_uncertainty/acq_correlation"] = model_std_metrcs[
+                        "acq_correlation"]
+                    wandb_data["surrogate/check_training/model_uncertainty/weighted_acq_correlation"] = \
+                        model_std_metrcs["w_acq_correlation"]
+                    wandb_data["surrogate/check_training/model_uncertainty/acq_regret"] = model_std_metrcs["acq_regret"]
+                    wandb_data["surrogate/check_training/model_uncertainty/validation_crps"] = model_std_metrcs[
+                        "crps_score"]
+                    wandb_data["surrogate/check_training/model_uncertainty/validation_std_correlation"] = \
+                        model_std_metrcs["val_correlation"]
+                    wandb_data["surrogate/check_training/model_uncertainty/validation_std_coverage_1sigma"] = \
+                        model_std_metrcs["coverage_1std"]
+                    wandb_data["surrogate/check_training/model_uncertainty/validation_std_coverage_2sigma"] = \
+                        model_std_metrcs["coverage_2std"]
+                    wandb_data["surrogate/check_training/model_uncertainty/validation_std_coverage_3sigma"] = \
+                        model_std_metrcs["coverage_3std"]
+
+                    wandb_data["surrogate/check_training/combined_uncertainty/acq_correlation"] = combined_std_metrcs[
+                        "acq_correlation"]
+                    wandb_data["surrogate/check_training/combined_uncertainty/weighted_acq_correlation"] = \
+                        combined_std_metrcs["w_acq_correlation"]
+                    wandb_data["surrogate/check_training/combined_uncertainty/acq_regret"] = combined_std_metrcs[
+                        "acq_regret"]
+                    wandb_data["surrogate/check_training/combined_uncertainty/validation_crps"] = combined_std_metrcs[
+                        "crps_score"]
+                    wandb_data["surrogate/check_training/combined_uncertainty/validation_std_correlation"] = \
+                        combined_std_metrcs["val_correlation"]
+                    wandb_data["surrogate/check_training/combined_uncertainty/validation_std_coverage_1sigma"] = \
+                        combined_std_metrcs["coverage_1std"]
+                    wandb_data["surrogate/check_training/combined_uncertainty/validation_std_coverage_2sigma"] = \
+                        combined_std_metrcs["coverage_2std"]
+                    wandb_data["surrogate/check_training/combined_uncertainty/validation_std_coverage_3sigma"] = \
+                        combined_std_metrcs["coverage_3std"]
+
+                    wandb_data["surrogate/check_training/com_acq_correlation"] = combined_acq_correlation
+                    wandb_data["surrogate/check_training/com_weighted_acq_correlation"] = combined_w_acq_correlation
+                    wandb_data["surrogate/check_training/com_acq_regret"] = combined_acq_regret
+
                 if gv.PLOT_SUGGEST_LR or self.meta.use_suggested_learning_rate:
                     wandb_data["surrogate/dyhpo/suggested_lr"] = DyHPOModel._suggested_lr
 
@@ -610,7 +757,7 @@ class DyHPOModel(BasePytorchModule):
         target_normalization_inverse_fn=None,
         target_normalization_std_inverse_fn=None
     ) -> Tuple[NDArray[np.float32], NDArray[np.float32], Optional[Dict[str, Any]]]:
-        means, stds, predict_info, power_law_loss = self._predict(
+        means, stds, predict_info, power_law_loss, model_stds = self._predict(
             test_data=test_data,
             train_data=train_data,
             target_normalization_inverse_fn=target_normalization_inverse_fn,
@@ -623,7 +770,7 @@ class DyHPOModel(BasePytorchModule):
             "surrogate/dyhpo/testing_power_law_MAE": power_law_loss
         })
 
-        return means, stds, predict_info
+        return means, stds, predict_info, model_stds
 
     def _predict(
         self,
@@ -631,7 +778,7 @@ class DyHPOModel(BasePytorchModule):
         train_data: TabularDataset,
         target_normalization_inverse_fn=None,
         target_normalization_std_inverse_fn=None
-    ) -> Tuple[NDArray[np.float32], NDArray[np.float32], Optional[Dict[str, Any]], float]:
+    ) -> Tuple[NDArray[np.float32], NDArray[np.float32], Optional[Dict[str, Any]], float, NDArray[np.float32]]:
         """
 
         Args:
@@ -649,49 +796,69 @@ class DyHPOModel(BasePytorchModule):
         test_data.to(model_device)
 
         self.eval()
+        if hasattr(self.meta, 'use_mc_dropout') and self.meta.use_mc_dropout:
+            self.enable_dropout()
 
+        all_mean_predictions = []
+        all_std_predictions = []
+        all_projected_test_x = []
+        all_test_predict_infos = []
         with torch.no_grad():  # gpytorch.settings.fast_pred_var():
-            projected_train_x, _ = self.feature_extractor(
-                train_data.X,
-                train_data.budgets,
-                train_data.curves,
-            )
-            self.model.set_train_data(inputs=projected_train_x, targets=train_data.Y, strict=False)
-            projected_test_x, test_predict_infos = self.feature_extractor(
-                test_data.X,
-                test_data.budgets,
-                test_data.curves,
-            )
-            preds: gpytorch.distributions.Distribution = self.likelihood(self.model(projected_test_x))
+            for i in range(self.num_mc_dropout):
+                projected_train_x, _ = self.feature_extractor(
+                    train_data.X,
+                    train_data.budgets,
+                    train_data.curves,
+                )
+                self.model.set_train_data(inputs=projected_train_x, targets=train_data.Y, strict=False)
+                projected_test_x, test_predict_infos = self.feature_extractor(
+                    test_data.X,
+                    test_data.budgets,
+                    test_data.curves,
+                )
+                preds: gpytorch.distributions.Distribution = self.likelihood(self.model(projected_test_x))
+                all_mean_predictions.append(preds.mean)
+                all_std_predictions.append(preds.stddev)
+                all_projected_test_x.append(projected_test_x)
+                all_test_predict_infos.append(test_predict_infos)
 
-            means = preds.mean
-            stds = preds.stddev
+            stacked_mean = torch.stack(all_mean_predictions)
+            stacked_std = torch.stack(all_std_predictions)
+            means = torch.mean(stacked_mean, dim=0)
+            model_stds = torch.std(stacked_mean, dim=0)
 
-            power_law_output = projected_test_x[:, -1]
+            vars = torch.mean(stacked_std ** 2 + stacked_mean ** 2, dim=0) - means ** 2
+            stds = torch.sqrt(vars)
 
-            if target_normalization_inverse_fn:
-                means = target_normalization_inverse_fn(means)
-                stds = target_normalization_std_inverse_fn(stds)
-                power_law_output = target_normalization_inverse_fn(power_law_output)
+            stacked_projected_test_x = torch.stack(all_projected_test_x)
+            stacked_power_law_output = stacked_projected_test_x[:, :, -1]
 
-            power_law_loss = F.l1_loss(means, power_law_output, reduction='sum')
+            # if target_normalization_inverse_fn:
+            #     means = target_normalization_inverse_fn(means)
+            #     stds = target_normalization_std_inverse_fn(stds)
+            #     model_stds = target_normalization_std_inverse_fn(model_stds)
+            #     power_law_output = target_normalization_inverse_fn(power_law_output)
+
+            power_law_loss = F.l1_loss(stacked_mean, stacked_power_law_output, reduction='sum')
             power_law_loss_value = power_law_loss.detach().to('cpu').item()
+            power_law_loss_value /= self.num_mc_dropout
 
         means = means.detach().to('cpu').numpy().reshape(-1, )
         stds = stds.detach().to('cpu').numpy().reshape(-1, )
+        model_stds = model_stds.detach().to('cpu').numpy().reshape(-1, )
 
-        predict_infos = test_predict_infos
+        predict_infos = all_test_predict_infos[0]
         if predict_infos is not None:
             predict_infos = {key: value.detach().to('cpu').numpy() for key, value in predict_infos.items()}
 
-        return means, stds, predict_infos, power_law_loss_value
+        return means, stds, predict_infos, power_law_loss_value, model_stds
 
     def _batch_predict(
         self,
         test_data: TabularDataset,
         train_data: TabularDataset,
         **kwargs
-    ) -> Tuple[NDArray[np.float32], NDArray[np.float32], Optional[Dict[str, Any]], float]:
+    ) -> Tuple[NDArray[np.float32], NDArray[np.float32], Optional[Dict[str, Any]], float, NDArray[np.float32]]:
         """
 
         Args:
@@ -708,13 +875,12 @@ class DyHPOModel(BasePytorchModule):
         train_data.to(model_device)
         test_data.to(model_device)
 
-        self.eval()
-
         batch_size = 512
         last_batch_index = int(len(test_data) / batch_size) - 1 if len(test_data) >= batch_size else 0
 
         mean_data = []
         std_data = []
+        model_std_data = []
         predict_info_data = []
         power_law_loss_data = []
 
@@ -724,24 +890,32 @@ class DyHPOModel(BasePytorchModule):
             else:
                 batch_indices = range(i * batch_size, ((i + 1) * batch_size))
             batch_data = test_data.get_subset(batch_indices)
-            means, stds, predict_info, power_law_loss = \
+            means, stds, predict_info, power_law_loss, model_stds = \
                 self._predict(test_data=batch_data, train_data=train_data, **kwargs)
 
             mean_data.append(means)
             std_data.append(stds)
+            model_std_data.append(model_stds)
             predict_info_data.append(predict_info)
             power_law_loss_data.append(power_law_loss)
 
         power_law_loss = np.sum(power_law_loss_data).item() / len(test_data)
         means = np.concatenate(mean_data, axis=0)
         stds = np.concatenate(std_data, axis=0)
+        model_stds = np.concatenate(model_std_data, axis=0)
 
         predict_infos = None
         if predict_info_data[0] is not None:
             predict_infos = \
                 {key: np.concatenate([d[key] for d in predict_info_data]) for key in predict_info_data[0].keys()}
 
-        return means, stds, predict_infos, power_law_loss
+        return means, stds, predict_infos, power_law_loss, model_stds
+
+    def enable_dropout(self):
+        """Function to enable dropout layers during test-time"""
+        for m in self.feature_extractor.modules():
+            if isinstance(m, nn.Dropout):
+                m.train()
 
     def load_checkpoint(self):
         """
