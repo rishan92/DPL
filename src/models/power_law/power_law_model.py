@@ -139,6 +139,9 @@ class PowerLawModel(BasePytorchModule, ABC):
         if hasattr(self.meta, 'alpha_beta_constraint_factor') and self.meta.alpha_beta_constraint_factor != 0:
             self.alpha_beta_constraint_factor = self.meta.alpha_beta_constraint_factor
 
+        self.alpha_beta_constraint_lower = 0
+        self.alpha_beta_constraint_upper = 1
+
         self.gamma_constraint_factor = 0
         if hasattr(self.meta, 'gamma_constraint_factor') and self.meta.gamma_constraint_factor != 0:
             self.gamma_constraint_factor = self.meta.gamma_constraint_factor
@@ -299,8 +302,8 @@ class PowerLawModel(BasePytorchModule, ABC):
 
                 if self.alpha_beta_constraint_factor != 0:
                     alpha_plus_beta = predict_info['alpha'] + predict_info['beta']
-                    lower_loss = torch.clamp(-1 * alpha_plus_beta, min=0)
-                    upper_loss = torch.clamp(alpha_plus_beta - 1, min=0)
+                    lower_loss = torch.clamp(self.alpha_beta_constraint_lower - alpha_plus_beta, min=0)
+                    upper_loss = torch.clamp(alpha_plus_beta - self.alpha_beta_constraint_upper, min=0)
                     alpha_beta_constraint_loss = torch.mean(lower_loss + upper_loss)
                 else:
                     alpha_beta_constraint_loss = zero_tensor

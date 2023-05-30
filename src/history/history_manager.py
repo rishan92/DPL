@@ -244,12 +244,12 @@ class HistoryManager:
             if isinstance(self.use_sample_weight_by_label, int):
                 power = self.use_sample_weight_by_label
             weights = train_labels.copy()
-            max_weight = np.max(weights)
-            min_weight = np.min(weights)
-            if max_weight != min_weight:
-                weights = (weights - min_weight) / (max_weight - min_weight)
-            weights = np.abs(np.exp(-power * weights) - np.exp(-power)) / (1 - np.exp(-power))
-            # weights = 1 / (weights + 1e-1)
+            # max_weight = np.max(weights)
+            # min_weight = np.min(weights)
+            # if max_weight != min_weight:
+            #     weights = (weights - min_weight) / (max_weight - min_weight)
+            # weights = np.abs(np.exp(-power * weights) - np.exp(-power)) / (1 - np.exp(-power))
+            weights = 1 / (weights + 1e-3)
             weights *= weights.shape[0] / weights.sum()
 
             all_weights = weights * all_weights
@@ -736,12 +736,12 @@ class HistoryManager:
             if isinstance(self.use_sample_weight_by_label, int):
                 power = self.use_sample_weight_by_label
             weights = train_labels.copy()
-            max_weight = np.max(weights)
-            min_weight = np.min(weights)
-            if max_weight != min_weight:
-                weights = (weights - min_weight) / (max_weight - min_weight)
-            weights = np.abs(np.exp(-power * weights) - np.exp(-power)) / (1 - np.exp(-power))
-            # weights = 1 / (weights + 1e-1)
+            # max_weight = np.max(weights)
+            # min_weight = np.min(weights)
+            # if max_weight != min_weight:
+            #     weights = (weights - min_weight) / (max_weight - min_weight)
+            # weights = np.abs(np.exp(-power * weights) - np.exp(-power)) / (1 - np.exp(-power))
+            weights = 1 / (weights + 1e-3)
             weights *= weights.shape[0] / weights.sum()
 
             all_weights = weights * all_weights

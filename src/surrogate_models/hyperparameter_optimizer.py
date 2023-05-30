@@ -265,8 +265,8 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
                 'curve_size_mode': 'fixed',
                 'acq_mode': 'ei',
                 'acq_best_value_mode': 'normal',
-                'use_target_normalization': False,
-                'target_normalization_range': [0.2, 0.8],
+                'use_target_normalization': True,
+                'target_normalization_range': [0.1, 0.9],
                 'use_scaled_budgets': True,
                 'use_exploitation_sampling': False,
                 'reset_refine_optimizer': True,
@@ -292,7 +292,7 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
         else:
             raise NotImplementedError(f"{model_class=}")
 
-        hp["check_model"] = True
+        hp["check_model"] = False
         hp["check_model_predict_mode"] = 'best'  # 'end'
         hp["check_model_train_mode"] = 'exp'
         hp["validation_configuration_ratio"] = 0.95
