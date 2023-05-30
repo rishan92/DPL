@@ -187,9 +187,9 @@ class DyHPOModel(BasePytorchModule):
             'mll_loss_function': 'ExactMarginalLogLikelihood',
             'learning_rate': 1e-3,
             'refine_learning_rate': 1e-3,
-            'use_mc_dropout': False,
-            'num_mc_dropout': 1,
-            'uncertainty_combine_mode': None,
+            'use_mc_dropout': True,
+            'num_mc_dropout': 100,
+            'uncertainty_combine_mode': 'before',
             'model_uncertainty_factor': 1,
             'data_uncertainty_factor': -1,
             'power_law_loss_function': 'MSELoss',
@@ -198,7 +198,7 @@ class DyHPOModel(BasePytorchModule):
             'power_law_l1_loss_factor': 1,
             'mll_loss_factor': 0,
             'weight_regularization_factor': 0,
-            'alpha_beta_constraint_factor': 0,
+            'alpha_beta_constraint_factor': 1,
             'gamma_constraint_factor': 0,
             'output_constraint_factor': 0,
             'target_space_constraint_factor': 0,
@@ -991,7 +991,10 @@ class DyHPOModel(BasePytorchModule):
     @classproperty
     def meta_output_act_func(cls):
         model_class = get_class("src/models/deep_kernel_learning", cls.meta.feature_class_name)
-        return model_class.meta_output_act_func
+        if model_class.meta.stop_output_act_func:
+            return None
+        else:
+            return model_class.meta_output_act_func
 
     @classproperty
     def meta_cnn_kernel_size(cls):
