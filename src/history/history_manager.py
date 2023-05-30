@@ -728,8 +728,28 @@ class HistoryManager:
 
         all_weights = np.ones_like(train_labels)
 
-        # if self.use_sample_weight_by_budget:
-        #     all_weights = train_weights
+        if self.use_sample_weight_by_budget:
+            if self.sample_weight_by_budget_strategy is not None:
+                if self.sample_weight_by_budget_strategy.isdigit():
+                    power_value = int(self.sample_weight_by_budget_strategy)
+                    weight_fn = lambda w: np.power(w / self.max_benchmark_epochs, power_value)
+                elif self.sample_weight_by_budget_strategy == "softmax":
+                    weight_fn = lambda w: np.exp(w - np.max(w))
+                else:
+                    raise NotImplementedError
+            else:
+                weight_fn = lambda w: w
+
+            train_weights = np.zeros_like(train_budgets)
+            for i in np.unique(train_hp_indices):
+                budgets = train_budgets[train_hp_indices == i]
+
+                weights = budgets.astype(np.float32)
+                weights = weight_fn(weights)
+                weights /= weights.sum()
+                weights *= weights.shape[0]
+                train_weights[train_hp_indices == i] = weights
+            all_weights = train_weights
 
         if self.use_sample_weight_by_label:
             power = 1
@@ -765,7 +785,7 @@ class HistoryManager:
             else:
                 train_weights = y_constraint_weights
 
-        if self.use_sample_weight_by_label or self.use_y_constraint_weights:  # or self.use_sample_weight_by_budget:
+        if self.use_sample_weight_by_label or self.use_y_constraint_weights or self.use_sample_weight_by_budget:
             train_weights = torch.from_numpy(train_weights)
         else:
             train_weights = None
