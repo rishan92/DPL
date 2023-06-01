@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import List, Union, Dict
+from typing import List, Union, Dict, Tuple
 from pathlib import Path
 
 import numpy as np
@@ -16,13 +16,14 @@ class BaseBenchmark(ABC):
     # if the best value corresponds to a lower value
     minimization_metric = True
 
-    def __init__(self, path_to_json_file: Path):
+    def __init__(self, path_to_json_file: Path, seed=0):
         self.path_to_json_file: Path = path_to_json_file
         self.max_value = None
         self.min_value = None
         self.categorical_indicator = None
         self.objective_performance_info = {}
         self.categories = None
+        self.seed = seed
 
     def load_dataset_names(self):
         raise NotImplementedError('Please implement the load_dataset_names method')
@@ -44,7 +45,7 @@ class BaseBenchmark(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def get_curve(self, hp_index: int, budget: int, prev_budget: Union[int, Dict] = None) -> List[float]:
+    def get_curve(self, hp_index: int, budget: int) -> List[float]:
         raise NotImplementedError
 
     def get_curve_best(self, hp_index: int) -> float:
@@ -61,13 +62,15 @@ class BaseBenchmark(ABC):
     def size(self) -> int:
         return self.nr_hyperparameters * self.max_budget
 
-    def get_objective_function_performance(self, hp_index: int, budget: Union[int, Dict]) -> List:
-        performances = self.get_curve(hp_index=hp_index, budget=budget)
-        first_index = 0
-        if hp_index in self.objective_performance_info:
-            first_index = self.objective_performance_info[hp_index]
+    def get_objective_function_performance(self, hp_index: int, budget: Union[int, Dict]) -> Tuple[List, List]:
+        # performances = self.get_curve(hp_index=hp_index, budget=budget)
+        # first_index = 0
+        # if hp_index in self.objective_performance_info:
+        #     first_index = self.objective_performance_info[hp_index]
+        #
+        # self.objective_performance_info[hp_index] = budget
+        #
+        # performance = performances[first_index:]
 
-        self.objective_performance_info[hp_index] = budget
-
-        performance = performances[first_index:]
-        return performance
+        performance = self.get_performance(hp_index=hp_index, budget=budget)
+        return [performance], [budget]

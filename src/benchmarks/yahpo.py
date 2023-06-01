@@ -1,5 +1,5 @@
 from collections import OrderedDict
-from typing import List, Union, Dict
+from typing import List, Union, Dict, Tuple
 from pathlib import Path
 
 import numpy as np
@@ -12,7 +12,7 @@ from ConfigSpace.hyperparameters import FloatHyperparameter, IntegerHyperparamet
 
 
 class YAHPOGym(BaseBenchmark):
-    nr_hyperparameters = 100
+    nr_hyperparameters = 2000
 
     # Declaring the search space for LCBench
     param_space = None
@@ -20,6 +20,7 @@ class YAHPOGym(BaseBenchmark):
     min_budget = 1
     max_budgets = None
     min_budgets = None
+    max_steps = 10
 
     hp_names = None
     fidelity_names = None
@@ -49,8 +50,8 @@ class YAHPOGym(BaseBenchmark):
         "rbv2_svm": 0,
     }
 
-    def __init__(self, path_to_json_files: Path, dataset_name: str):
-        super().__init__(path_to_json_files)
+    def __init__(self, path_to_json_files: Path, dataset_name: str, seed=None):
+        super().__init__(path_to_json_files, seed=seed)
 
         local_config.init_config()
         local_config.set_data_path(path_to_json_files)
@@ -62,7 +63,8 @@ class YAHPOGym(BaseBenchmark):
         self.categorical_indicator = None
         self.max_value = 1.0
         self.min_value = 0.0
-        self.generated_config = None
+        self.benchmark_config = None
+        self.benchmark_config_pd = None
         self.metric_name = self.scenario_metric_names[self.scenario_name]
         YAHPOGym.minimization_metric = self.scenario_metric_is_minimize[self.scenario_name]
         YAHPOGym.min_budget = self.scenario_start_index[self.scenario_name]
@@ -75,13 +77,13 @@ class YAHPOGym(BaseBenchmark):
         # print(bench.instances)
         bench.set_instance(self.dataset_name)
 
-        config_space = bench.get_opt_space(drop_fidelity_params=True)
+        config_space = bench.get_opt_space(drop_fidelity_params=True, seed=self.seed)
         YAHPOGym.param_space = self.extract_hyperparameter_info(config_space=config_space)
         # sort so that categorical columns will be at the end
         YAHPOGym.param_space = OrderedDict(sorted(YAHPOGym.param_space.items(), key=lambda item: item[1][2] == 'str'))
         YAHPOGym.hp_names = list(YAHPOGym.param_space.keys())
 
-        fidelity_space = bench.get_fidelity_space()
+        fidelity_space = bench.get_fidelity_space(seed=self.seed)
         YAHPOGym.fidelity_space = self.extract_hyperparameter_info(config_space=fidelity_space)
         YAHPOGym.fidelity_names = list(YAHPOGym.fidelity_space.keys())
 
@@ -95,10 +97,10 @@ class YAHPOGym(BaseBenchmark):
             if v[2] == 'int':
                 interval = 1
                 size = v[1] - v[0] + 1
-                if size > self.max_budget:
-                    max_budget = v[0] + self.max_budget - 1
+                if size > self.max_steps:
+                    max_budget = v[0] + self.max_steps - 1
             elif v[2] == 'float':
-                interval = (v[1] - v[0]) / self.max_budget
+                interval = (v[1] - v[0]) / self.max_steps
             else:
                 raise NotImplementedError
             YAHPOGym.max_budgets[k] = max_budget
@@ -109,9 +111,18 @@ class YAHPOGym(BaseBenchmark):
         self.categories = [v[4] for v in YAHPOGym.param_space.values()]
         YAHPOGym.log_indicator = [v[3] for v in YAHPOGym.param_space.values()]
 
-        self.generated_config = self.generate_hyperparameter_candidates(bench)
+        self.benchmark_config = self.generate_hyperparameter_candidates(bench)
+        self.benchmark_config_pd = pd.DataFrame(self.benchmark_config, columns=YAHPOGym.hp_names)
 
         return bench
+
+    def generate_hyperparameter_candidates(self, benchmark) -> List:
+        configs = benchmark.get_opt_space(drop_fidelity_params=True, seed=self.seed).sample_configuration(
+            YAHPOGym.nr_hyperparameters)
+
+        hp_configs = [config.get_dictionary() for config in configs]
+
+        return hp_configs
 
     def extract_hyperparameter_info(self, config_space):
         hyperparameter_info = OrderedDict()
@@ -157,28 +168,8 @@ class YAHPOGym(BaseBenchmark):
     def load_dataset_names(self) -> List[str]:
         return self.benchmark.instances
 
-    def generate_hyperparameter_candidates(self, benchmark) -> NDArray:
-        configs = benchmark.get_opt_space(drop_fidelity_params=True).sample_configuration(
-            YAHPOGym.nr_hyperparameters)
-
-        hp_configs = []
-        for i in range(YAHPOGym.nr_hyperparameters):
-            config = []
-            for hp_name in YAHPOGym.hp_names:
-                if hp_name in configs[i]:
-                    value = configs[i][hp_name]
-                    config.append(value)
-                else:
-                    config.append(np.nan)
-
-            hp_configs.append(config)
-
-        hp_configs = pd.DataFrame(hp_configs, columns=YAHPOGym.hp_names)
-
-        return hp_configs
-
     def get_hyperparameter_candidates(self) -> pd.DataFrame:
-        return self.generated_config
+        return self.benchmark_config_pd
 
     def get_best_performance(self):
         incumbent_curve = self.get_incumbent_curve()
@@ -189,34 +180,32 @@ class YAHPOGym(BaseBenchmark):
     def get_worst_performance(self):
         min_value = np.PINF
         for hp_index in range(0, YAHPOGym.nr_hyperparameters):
-            val_curve = self.get_curve(hp_index=hp_index, budget=YAHPOGym.max_budgets)
+            val_curve, _ = self.get_curve(hp_index=hp_index, budget=YAHPOGym.max_budgets)
             worst_performance_hp_curve = min(val_curve)
             if worst_performance_hp_curve < min_value:
                 min_value = worst_performance_hp_curve
 
         return min_value
 
-    def get_performance(self, hp_index: int, budget: Union[int, List]) -> float:
-        config = self.generated_config[hp_index]
-        config_dict = {k: v for k, v in zip(YAHPOGym.hp_names, config)}
+    def get_performance(self, hp_index: int, budget: Union[int, List, Dict]) -> float:
+        config_dict = self.benchmark_config[hp_index]
 
         if isinstance(budget, List):
             fidelity_dict = {k: v for k, v in zip(YAHPOGym.fidelity_names, budget)}
             config_dict.update(fidelity_dict)
-        elif isinstance(budget, Dict):
+        elif isinstance(budget, int):
             fidelity_dict = {self.fidelity_names[0]: budget}
         else:
             fidelity_dict = budget
         config_dict.update(fidelity_dict)
 
-        metrics = self.benchmark.objective_function(config_dict)
-        metric = metrics[self.metric_name]
+        metrics = self.benchmark.objective_function(config_dict, seed=self.seed)
+        metric = metrics[0][self.metric_name]
 
         return metric
 
-    def get_curve(self, hp_index: int, budget: Union[int, Dict], prev_budget: Union[int, Dict] = None) -> List[float]:
-        config = self.generated_config.iloc[hp_index, :]
-        config_dict = {k: v for k, v in zip(YAHPOGym.hp_names, config)}
+    def get_curve(self, hp_index: int, budget: Union[int, Dict]) -> Tuple[List[float], List[Dict]]:
+        config_dict = self.benchmark_config[hp_index]
 
         if isinstance(budget, int):
             budget = {self.fidelity_names[0]: budget}
@@ -230,16 +219,19 @@ class YAHPOGym(BaseBenchmark):
 
         # Stack the meshgrid to get 2D array of coordinates and reshape it
         fidelity_product = np.dstack(mesh).reshape(-1, len(self.fidelity_names))
-        fidelity_dicts = [{k: v[i]} for i, k in enumerate(self.fidelity_names) for v in fidelity_product]
+        fidelity_dicts = [
+            {k: (int(v) if YAHPOGym.fidelity_space[k][2] == 'int' else v) for k, v in zip(self.fidelity_names, values)}
+            for values in fidelity_product]
+
         config_dict = [{**config_dict, **dict} for dict in fidelity_dicts]
 
-        metrics = self.benchmark.objective_function(config_dict)
+        metrics = self.benchmark.objective_function(config_dict, seed=self.seed)
         metric = [v[self.metric_name] for v in metrics]
 
-        return metric
+        return metric, fidelity_dicts
 
     def get_curve_best(self, hp_index: int) -> float:
-        curve = self.get_curve(hp_index=hp_index, budget=YAHPOGym.max_budgets)
+        curve, _ = self.get_curve(hp_index=hp_index, budget=YAHPOGym.max_budgets)
         best_value = max(curve)
         return best_value
 
@@ -247,7 +239,7 @@ class YAHPOGym(BaseBenchmark):
         best_value = -1
         best_curve = None
         for index in range(0, YAHPOGym.nr_hyperparameters):
-            val_curve = self.get_curve(hp_index=index, budget=YAHPOGym.max_budgets)
+            val_curve, _ = self.get_curve(hp_index=index, budget=YAHPOGym.max_budgets)
             max_value = max(val_curve)
             if max_value > best_value:
                 best_value = max_value
@@ -261,7 +253,7 @@ class YAHPOGym(BaseBenchmark):
         best_value = -1
         best_index = -1
         for index in range(0, YAHPOGym.nr_hyperparameters):
-            val_curve = self.get_curve(hp_index=index, budget=YAHPOGym.max_budgets)
+            val_curve, _ = self.get_curve(hp_index=index, budget=YAHPOGym.max_budgets)
             max_value = max(val_curve)
 
             if max_value > best_value:

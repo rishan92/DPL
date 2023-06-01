@@ -13,6 +13,8 @@ export use_config=true
 #"$ROOT_PATH"/bash_scripts/experiment_run_array.sh "lcbench" "dyhpo" "$ROOT_PATH/results" "$use_config"
 #"$ROOT_PATH"/bash_scripts/experiment_run_array.sh "lcbench_mini" "dyhpo" "$ROOT_PATH/results" "$use_config"
 
+#"$ROOT_PATH"/bash_scripts/experiment_run_array.sh "yahpo" "power_law" "$ROOT_PATH/results" "$use_config"
+#"$ROOT_PATH"/bash_scripts/experiment_run_array.sh "yahpo" "dyhpo" "$ROOT_PATH/results" "$use_config"
 
 #"$ROOT_PATH"/bash_scripts/experiment_run_array.sh "taskset" "random" "$ROOT_PATH/results"
 #"$ROOT_PATH"/bash_scripts/experiment_run_array.sh "taskset" "asha" "$ROOT_PATH/results"

@@ -1,4 +1,4 @@
-from typing import List, Tuple
+from typing import List, Tuple, Union, Dict
 from abc import ABC, abstractmethod
 
 from src.models.base.meta import Meta
@@ -10,7 +10,7 @@ class BaseHyperparameterOptimizer(Meta, ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def observe(self, hp_index: int, budget: int, hp_curve: float):
+    def observe(self, hp_index: int, budget: Union[int, Dict], hp_curve: float):
         raise NotImplementedError
 
     @classmethod

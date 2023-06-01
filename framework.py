@@ -26,7 +26,7 @@ from src.surrogate_models.hyperparameter_optimizer import HyperparameterOptimize
 from src.surrogate_models.asha import AHBOptimizer
 from src.surrogate_models.dehb.interface import DEHBOptimizer
 from src.surrogate_models.random_search import RandomOptimizer
-# from src.surrogate_models.many_fidelity_hyperparameter_optimizer import MFHyperparameterOptimizer
+from src.surrogate_models.many_fidelity_hyperparameter_optimizer import MFHyperparameterOptimizer
 import global_variables as gv
 import subprocess
 from src.utils.utils import delete_folder_content
@@ -45,6 +45,7 @@ class Framework:
         'dehb': DEHBOptimizer,
         # 'dragonfly': DragonFlyOptimizer,
         'random': RandomOptimizer,
+        'many_fidelity': MFHyperparameterOptimizer
     }
 
     benchmark_types = {
@@ -104,7 +105,8 @@ class Framework:
 
         self.benchmark: BaseBenchmark = Framework.benchmark_types[self.benchmark_name](
             benchmark_data_path,
-            self.dataset_name
+            self.dataset_name,
+            seed=seed
         )
         self.seed = seed
         self.max_value = self.benchmark.max_value
@@ -188,14 +190,28 @@ class Framework:
         else:
             self.hp_candidates = self.benchmark.get_hyperparameter_candidates()
 
-        surrogate_class = Framework.surrogate_types[self.surrogate_name]
+        if self.benchmark_name == 'yahpo':
+            max_budgets = self.benchmark.max_budgets
+            min_budgets = self.benchmark.min_budgets
+            fantasize_step = {k: self.fantasize_step * v for k, v in self.benchmark.fidelity_interval.items()}
+            fidelity_names = self.benchmark.fidelity_names
+            # surrogate_class = Framework.surrogate_types['many_fidelity']
+            surrogate_class = Framework.surrogate_types[self.surrogate_name]
+        else:
+            max_budgets = self.benchmark.max_budget
+            min_budgets = self.benchmark.min_budget
+            fantasize_step = self.fantasize_step
+            fidelity_names = 'epochs'
+            surrogate_class = Framework.surrogate_types[self.surrogate_name]
+
         if self.surrogate_name == 'power_law' or self.surrogate_name == 'dyhpo':
             self.surrogate = surrogate_class(
                 hp_candidates=self.hp_candidates,
                 surrogate_name=self.surrogate_name,
                 seed=seed,
-                max_benchmark_epochs=self.benchmark.max_budget,
-                fantasize_step=self.fantasize_step,
+                max_budgets=max_budgets,
+                min_budgets=min_budgets,
+                fantasize_step=fantasize_step,
                 minimization=self.benchmark.minimization_metric,
                 total_budget=self.total_budget,
                 device='cpu',
@@ -204,7 +220,8 @@ class Framework:
                 max_value=self.max_value,
                 min_value=self.min_value,
                 benchmark=self.benchmark,
-                pred_trend_path=self.pred_trend_path
+                pred_trend_path=self.pred_trend_path,
+                fidelity_names=fidelity_names
             )
         else:
             self.surrogate = surrogate_class(
@@ -239,7 +256,7 @@ class Framework:
         while self.surrogate_budget < self.total_budget:
 
             start_time = time.time()
-            hp_index, budget = self.surrogate.suggest()
+            hp_indices, budgets = self.surrogate.suggest()
 
             if gv.PLOT_PRED_CURVES and (
                 budget == 5 or budget == 10 or budget == 20 or budget == 40 or
@@ -267,9 +284,24 @@ class Framework:
                     surrogate_budget=self.surrogate_budget,
                     output_dir=self.pred_dist_path
                 )
+            if not isinstance(hp_indices, List):
+                hp_indices = [hp_indices]
+                budgets = [budgets]
 
-            hp_curve = self.benchmark.get_objective_function_performance(hp_index, budget)
-            self.surrogate.observe(hp_index, budget, hp_curve)
+            hp_curves = []
+            for hp_index, budget in zip(hp_indices, budgets):
+                hp_curve, budget_out = self.benchmark.get_objective_function_performance(hp_index, budget)
+                # hp_curve = self.benchmark.get_performance(hp_index, budget)
+                hp_curves.append(hp_curve)
+                self.surrogate.observe(hp_index, budget_out, hp_curve)
+
+            # if len(hp_indices) == 1:
+            #     hp_indices = hp_indices[0]
+            #     budgets = budgets[0]
+            #     hp_curves = hp_curves[0]
+
+            # self.surrogate.observe(hp_indices, budgets, hp_curves)
+
             time_duration = time.time() - start_time
 
             if hp_index in evaluated_configs:
@@ -277,49 +309,67 @@ class Framework:
             else:
                 previous_budget = 0
 
-            budget_cost = budget - previous_budget
+            # budget_cost = budget - previous_budget
             evaluated_configs[hp_index] = budget
 
-            step_time_duration = time_duration / budget_cost
+            # step_time_duration = time_duration / budget_cost
+            step_time_duration = time_duration
 
-            for i, epoch in enumerate(range(previous_budget + 1, budget + 1)):
-                epoch = int(epoch)
-                epoch_performance = float(hp_curve[i])
-                if self.benchmark.minimization_metric:
-                    if best_value > epoch_performance:
-                        best_value = epoch_performance
-                else:
-                    if best_value < epoch_performance:
-                        best_value = epoch_performance
+            if self.benchmark.minimization_metric:
+                best_index = np.argmin(hp_curves)
+                budget_performance = hp_curves[best_index]
+                budget_performance = np.min(budget_performance)
+                if best_value > budget_performance:
+                    best_value = budget_performance
+            else:
+                best_index = np.argmax(hp_curves)
+                budget_performance = hp_curves[best_index]
+                budget_performance = np.max(budget_performance)
+                if best_value < budget_performance:
+                    best_value = budget_performance
 
-                self.surrogate_budget += 1
+            best_hp_index = hp_indices[best_index]
+            best_budget = budgets[best_index]
 
-                if self.benchmark.minimization_metric:
-                    regret = best_value - incumbent_value
-                else:
-                    regret = incumbent_value - best_value
+            self.surrogate_budget += 1
 
-                self.log_info(
-                    int(hp_index),
-                    epoch_performance,
-                    epoch,
-                    best_value,
-                    step_time_duration,
-                )
-                metrics = {
-                    'hpo/hp': int(hp_index),
-                    'hpo/scores': epoch_performance,
-                    'hpo/epochs': epoch,
-                    'hpo/curve': best_value,
-                    'hpo/overhead': step_time_duration,
-                    'hpo/surrogate_budget': self.surrogate_budget,
-                    'hpo/regret': regret,
-                }
-                wandb.log(metrics)
+            if self.benchmark.minimization_metric:
+                regret = best_value - incumbent_value
+            else:
+                regret = incumbent_value - best_value
 
-                if self.surrogate_budget >= self.total_budget or self.surrogate_budget >= self.benchmark.size():
-                    self.finish()
-                    return
+            # log_budget = []
+            # for v in best_budget.values():
+            #     if isinstance(v, float):
+            #         v = float(v)
+            #     elif isinstance(v, int):
+            #         v = int(v)
+            #     else:
+            #         raise NotImplementedError
+            #     log_budget.append(v)
+            log_budget = [v for v in best_budget.values()]
+            self.log_info(
+                int(best_hp_index),
+                float(budget_performance),
+                log_budget,
+                float(best_value),
+                step_time_duration,
+            )
+            metrics = {
+                'hpo/hp': int(best_hp_index),
+                'hpo/scores': budget_performance,
+                'hpo/curve': best_value,
+                'hpo/overhead': step_time_duration,
+                'hpo/surrogate_budget': self.surrogate_budget,
+                'hpo/regret': regret,
+            }
+            for k, v in best_budget.items():
+                metrics[f'hpo/{k}'] = v
+            wandb.log(metrics)
+
+            if self.surrogate_budget >= self.total_budget or self.surrogate_budget >= self.benchmark.size():
+                self.finish()
+                return
 
         self.finish()
 
@@ -417,7 +467,7 @@ class Framework:
         self,
         hp_index: int,
         performance: float,
-        budget: int,
+        budget: List,
         best_value_observed: float,
         time_duration: float,
     ):
@@ -454,10 +504,10 @@ class Framework:
         else:
             self.info_dict['curve'] = [incumbent_acc_performance]
 
-        if 'epochs' in self.info_dict:
-            self.info_dict['epochs'].append(budget)
+        if 'budgets' in self.info_dict:
+            self.info_dict['budgets'].append(budget)
         else:
-            self.info_dict['epochs'] = [budget]
+            self.info_dict['budgets'] = [budget]
 
         if 'overhead' in self.info_dict:
             self.info_dict['overhead'].append(time_duration)

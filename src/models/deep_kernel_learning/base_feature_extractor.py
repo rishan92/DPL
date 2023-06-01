@@ -24,9 +24,11 @@ class BaseFeatureExtractor(BasePytorchModule, ABC):
     The feature extractor that is part of the deep kernel.
     """
 
-    def __init__(self, nr_features, seed=None):
-        super().__init__(nr_features, seed=seed)
+    def __init__(self, nr_features, seed=None, nr_fidelity=1):
+        super().__init__(nr_features, seed=seed, nr_fidelity=nr_fidelity)
 
+        self.nr_initial_features = self.nr_features
+        
         self.act_func = None
         self.last_act_func = None
         self.alpha_act_func = None
@@ -69,8 +71,6 @@ class BaseFeatureExtractor(BasePytorchModule, ABC):
 
         # set nr_units as a List
         self.meta.nr_units = self.get_layer_units()
-
-        self.nr_initial_features = nr_features
 
         self.linear_net = self.get_linear_net()
 

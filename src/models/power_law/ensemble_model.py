@@ -15,8 +15,9 @@ from src.models.power_law.power_law_model import PowerLawModel
 class EnsembleModel(BasePytorchModule):
     _instantiated_count = 0
 
-    def __init__(self, nr_features, total_budget, surrogate_budget, seed=None, checkpoint_path: Path = '.'):
-        super().__init__(nr_features=nr_features, seed=seed, checkpoint_path=checkpoint_path)
+    def __init__(self, nr_features, total_budget, surrogate_budget, seed=None, checkpoint_path: Path = '.',
+                 nr_fidelity=1):
+        super().__init__(nr_features=nr_features, seed=seed, checkpoint_path=checkpoint_path, nr_fidelity=nr_fidelity)
 
         self.total_budget = total_budget
         self.surrogate_budget = surrogate_budget
@@ -54,7 +55,8 @@ class EnsembleModel(BasePytorchModule):
                     nr_features=self.nr_features,
                     max_instances=self.meta.ensemble_size,
                     checkpoint_path=self.checkpoint_path,
-                    seed=self.model_seeds[i]
+                    seed=self.model_seeds[i],
+                    nr_fidelity=self.nr_fidelity
                 )
             )
 
@@ -80,7 +82,7 @@ class EnsembleModel(BasePytorchModule):
     @staticmethod
     def get_default_meta():
         hp = {
-            'model_class_name': 'TargetSpaceComplex3PowerLawModel',
+            'model_class_name': 'NNModel',
             # 'ConditionedPowerLawModel', # 'ComplexPowerLawModel',  # 'TargetSpaceComplex3PowerLawModel', 'NNModel'
             'ensemble_size': 5,
             'nr_epochs': 250,

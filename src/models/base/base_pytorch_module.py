@@ -23,7 +23,7 @@ class BasePytorchModule(nn.Module, Meta, ABC):
     meta = None
     _view_gradient_step = 0
 
-    def __init__(self, nr_features, seed=None, checkpoint_path='.'):
+    def __init__(self, nr_features, seed=None, checkpoint_path='.', nr_fidelity=1):
         super().__init__()
 
         self.train_dataset = None
@@ -40,6 +40,7 @@ class BasePytorchModule(nn.Module, Meta, ABC):
         assert self.meta is not None, "Meta parameters are not set"
 
         self.nr_features = nr_features
+        self.nr_fidelity = nr_fidelity
         self.seed = seed
         self.set_seed(self.seed)
 

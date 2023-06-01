@@ -39,7 +39,8 @@ class PowerLawModel(BasePytorchModule, ABC):
         nr_features,
         max_instances,
         seed=None,
-        checkpoint_path='.'
+        checkpoint_path='.',
+        nr_fidelity=1
     ):
         """
         Args:
@@ -58,7 +59,7 @@ class PowerLawModel(BasePytorchModule, ABC):
             nr_cnn_layers: int
                 The number of cnn layers to be used.
         """
-        super().__init__(nr_features=nr_features, seed=seed, checkpoint_path=checkpoint_path)
+        super().__init__(nr_features=nr_features, seed=seed, checkpoint_path=checkpoint_path, nr_fidelity=nr_fidelity)
         self.max_instances = max_instances
         self.instance_id = PowerLawModel._instance_counter
         PowerLawModel._instance_counter += 1

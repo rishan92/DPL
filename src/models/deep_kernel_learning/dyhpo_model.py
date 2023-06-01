@@ -52,7 +52,8 @@ class DyHPOModel(BasePytorchModule):
         total_budget,
         surrogate_budget,
         checkpoint_path: Path = '.',
-        seed=None
+        seed=None,
+        nr_fidelity=1
     ):
         """
         The constructor for the DyHPO model.
@@ -78,8 +79,13 @@ class DyHPOModel(BasePytorchModule):
         self.power_law_criterion_class = get_class_from_packages([torch.nn, src.models.deep_kernel_learning],
                                                                  self.meta.power_law_loss_function)
 
-        self.feature_extractor: BaseFeatureExtractor = self.feature_extractor_class(nr_features=nr_features, seed=seed)
-        self.feature_output_size = self.get_feature_extractor_output_size(nr_features=nr_features)
+        self.feature_extractor: BaseFeatureExtractor = self.feature_extractor_class(
+            nr_features=nr_features, seed=seed, nr_fidelity=nr_fidelity
+        )
+        self.feature_output_size = self.get_feature_extractor_output_size(
+            nr_features=self.feature_extractor.nr_features,
+            nr_fidelity=self.feature_extractor.nr_fidelity
+        )
 
         self.early_stopping_patience = self.meta.nr_patience_epochs
         self.seed = seed
@@ -179,31 +185,31 @@ class DyHPOModel(BasePytorchModule):
             'nr_patience_epochs': 10,
             'nr_epochs': 1000,
             'refine_nr_epochs': 50,
-            'feature_class_name': 'FeatureExtractorDYHPO',
+            'feature_class_name': 'FeatureExtractor',
             # 'FeatureExtractor',  #  'FeatureExtractorDYHPO',  # 'FeatureExtractorTargetSpaceDYHPO'
-            'gp_class_name': 'GPRegressionPowerLawMeanModel',
+            'gp_class_name': 'GPRegressionModel',
             # 'GPRegressionPowerLawMeanModel',  #  'GPRegressionModel'
             'likelihood_class_name': 'GaussianLikelihood',
             'mll_loss_function': 'ExactMarginalLogLikelihood',
             'learning_rate': 1e-3,
             'refine_learning_rate': 1e-3,
-            'use_mc_dropout': True,
-            'num_mc_dropout': 100,
-            'uncertainty_combine_mode': 'before',
+            'use_mc_dropout': False,
+            'num_mc_dropout': 1,
+            'uncertainty_combine_mode': None,
             'model_uncertainty_factor': 1,
             'data_uncertainty_factor': -1,
             'power_law_loss_function': 'MSELoss',
-            'power_law_loss_factor': 0.5,
+            'power_law_loss_factor': 1.0,
             'l1_loss_factor': 0,
-            'power_law_l1_loss_factor': 1,
+            'power_law_l1_loss_factor': 0,
             'mll_loss_factor': 0,
             'weight_regularization_factor': 0,
-            'alpha_beta_constraint_factor': 1,
+            'alpha_beta_constraint_factor': 0,
             'gamma_constraint_factor': 0,
             'output_constraint_factor': 0,
             'target_space_constraint_factor': 0,
-            'y_constraint_factor': 0.1,
-            'use_y_constraint_weights': True,
+            'y_constraint_factor': 0,
+            'use_y_constraint_weights': False,
             'noise_lower_bound': 1e-4,  # 1e-4,  #
             'noise_upper_bound': 1e-3,  # 1e-3,  #
             'use_seperate_lengthscales': False,
@@ -575,7 +581,6 @@ class DyHPOModel(BasePytorchModule):
                         acq_correlation, _ = spearmanr(acq_func_values, -1 * labels, nan_policy='raise')
                         w_acq_correlation = weighted_spearman(y_pred=acq_func_values, y_true=-1 * labels)
                         acq_regret = labels[np.argmax(acq_func_values)] - min_label
-                        print(np.argmax(acq_func_values))
 
                         metrics = {
                             "val_correlation": val_correlation_value,
@@ -991,7 +996,7 @@ class DyHPOModel(BasePytorchModule):
     @classproperty
     def meta_output_act_func(cls):
         model_class = get_class("src/models/deep_kernel_learning", cls.meta.feature_class_name)
-        if model_class.meta.stop_output_act_func:
+        if not hasattr(model_class.meta, 'stop_output_act_func') or model_class.meta.stop_output_act_func:
             return None
         else:
             return model_class.meta_output_act_func
@@ -1001,11 +1006,11 @@ class DyHPOModel(BasePytorchModule):
         model_class = get_class("src/models/deep_kernel_learning", cls.meta.feature_class_name)
         return model_class.meta_cnn_kernel_size
 
-    def get_feature_extractor_output_size(self, nr_features):
+    def get_feature_extractor_output_size(self, nr_features, nr_fidelity):
         valid_budget_size = 50
         # Create a dummy input with the appropriate input size
         dummy_x_input = torch.zeros(4, nr_features)
-        dummy_budget_input = torch.ones(4)
+        dummy_budget_input = torch.ones(4, nr_fidelity)
         dummy_learning_curves_input = torch.zeros(4, valid_budget_size)
         self.feature_extractor.eval()
         output, _ = self.feature_extractor(dummy_x_input, dummy_budget_input, dummy_learning_curves_input)

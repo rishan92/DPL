@@ -9,6 +9,9 @@ from scipy.stats import norm
 import torch
 from types import SimpleNamespace
 import global_variables as gv
+import pandas as pd
+import copy
+
 from src.dataset.tabular_dataset import TabularDataset
 import functools
 from functools import partial
@@ -20,16 +23,17 @@ import matplotlib.pyplot as plt
 
 
 class HistoryManager:
-    def __init__(self, hp_candidates, max_benchmark_epochs, fantasize_step, use_learning_curve, use_learning_curve_mask,
-                 fill_value='zero', use_target_normalization=False, use_scaled_budgets=True,
+    def __init__(self, hp_candidates, max_budgets, min_budgets, fantasize_step, use_learning_curve,
+                 use_learning_curve_mask, fill_value='zero', use_target_normalization=False, use_scaled_budgets=True,
                  model_output_normalization=None, cnn_kernel_size=0, target_normalization_range=None,
                  use_sample_weights=False, use_sample_weight_by_budget=False, sample_weight_by_budget_strategy=None,
-                 use_sample_weight_by_label=False, use_y_constraint_weights=False):
+                 use_sample_weight_by_label=False, use_y_constraint_weights=False, fidelity_names=None):
         assert fill_value in ["zero", "last"], "Invalid fill value mode"
         # assert predict_mode in ["end_budget", "next_budget"], "Invalid predict mode"
         # assert curve_size_mode in ["fixed", "variable"], "Invalid curve size mode"
         self.hp_candidates = hp_candidates
-        self.max_benchmark_epochs = max_benchmark_epochs
+        self.max_budgets = max_budgets
+        self.min_budgets = min_budgets
         self.fill_value = fill_value
         self.use_learning_curve = use_learning_curve
         self.use_learning_curve_mask = use_learning_curve_mask
@@ -40,6 +44,9 @@ class HistoryManager:
         self.sample_weight_by_budget_strategy = sample_weight_by_budget_strategy
         self.use_sample_weight_by_label = use_sample_weight_by_label
         self.use_y_constraint_weights = use_y_constraint_weights
+        self.fidelity_names = fidelity_names
+        self.extra_budgets_names = list(self.max_budgets.keys())
+        self.extra_budgets_names = [v for v in self.extra_budgets_names if v not in self.fidelity_names]
 
         self.use_target_normalization = use_target_normalization
         self.target_normalization_range = \
@@ -58,8 +65,9 @@ class HistoryManager:
         # the keys will be hyperparameter indices while the value
         # will be a list with all the budgets evaluated for examples
         # and with all performances for the performances
-        self.examples: Dict[int, NDArray[int]] = dict()
+        self.examples: Dict[int, List[int]] = dict()
         self.performances: Dict[int, List[float]] = dict()
+        self.extra_budget: Dict[int, List[Dict]] = dict()
 
         self.last_point = None
 
@@ -81,18 +89,33 @@ class HistoryManager:
         initial_empty_value = self.get_mean_initial_value() if self.fill_value == 'last' else 0
         return initial_empty_value
 
-    def add(self, hp_index: int, b: int, hp_curve: List):
-        self.examples[hp_index] = np.arange(1, b + 1)
+    def add(self, hp_index: int, b: List[Union[int, Dict]], hp_curve: List):
+        extra_b = None
+        if isinstance(b, Dict):
+            fidelity_size = len(self.fidelity_names)
+            in_fidelity_size = 1 if not isinstance(b, Dict) else len(b)
+            if fidelity_size < in_fidelity_size:
+                extra_b = {k: v for k, v in b.items() if k not in self.fidelity_names}
+                b = {k: b[k] for k in self.fidelity_names}
+
+                if hp_index in self.extra_budget:
+                    self.extra_budget[hp_index].extend(extra_b)
+                else:
+                    self.extra_budget[hp_index] = [extra_b]
+
         if hp_index in self.performances:
             self.performances[hp_index].extend(hp_curve)
+            self.examples[hp_index].extend(b)
         else:
             self.performances[hp_index] = hp_curve
+            self.examples[hp_index] = b
 
         initial_empty_value = self.get_initial_empty_value()
 
         cur_curve = self.performances[hp_index]
 
-        self.last_point = (hp_index, b, cur_curve[b - 1], cur_curve[0:b - 1] if b > 1 else [initial_empty_value])
+        self.last_point = (
+            hp_index, b[-1], cur_curve[-1], cur_curve[0:-1] if len(cur_curve) > 1 else [initial_empty_value], extra_b)
 
         max_curve = np.max(cur_curve)
         self.max_curve_value = max(self.max_curve_value, max_curve)
@@ -104,7 +127,7 @@ class HistoryManager:
     def get_evaluated_budgets(self, suggested_hp_index):
         if suggested_hp_index in self.examples:
             eval_budgets = self.examples[suggested_hp_index]
-            return eval_budgets.tolist()
+            return eval_budgets
         else:
             return []
 
@@ -115,17 +138,27 @@ class HistoryManager:
             return list(self.examples.keys())
 
     def get_last_sample(self, curve_size_mode):
-        newp_index, newp_budget, newp_performance, newp_curve = self.last_point
+        newp_index, newp_budget, newp_performance, newp_curve, newp_extra_b = deepcopy(self.last_point)
 
         modified_curve = self.get_processed_curves(curves=[newp_curve], curve_size_mode=curve_size_mode,
                                                    real_budgets=newp_budget)
 
         new_example = torch.tensor(self.hp_candidates[newp_index], dtype=torch.float32)
         new_example = torch.unsqueeze(new_example, dim=0)
+        if newp_extra_b is not None:
+            for k in self.extra_budgets_names:
+                newp_extra_b[k] = newp_extra_b[k] / self.max_budgets[k]
+            train_extra_budgets = np.array([newp_extra_b[k] for k in self.extra_budgets_names])
+            train_extra_budgets = np.expand_dims(train_extra_budgets, axis=0)
+            new_example = np.concatenate([new_example, train_extra_budgets], axis=1)
 
-        newp_budget = torch.tensor([newp_budget], dtype=torch.float32)
         if self.use_scaled_budgets:
-            newp_budget = newp_budget / self.max_benchmark_epochs
+            # newp_budget = newp_budget / self.max_budgets[self.fidelity_name]
+            for k in self.fidelity_names:
+                newp_budget[k] = newp_budget[k] / self.max_budgets[k]
+
+        newp_budget = torch.tensor([newp_budget[k] for k in self.fidelity_names], dtype=torch.float32)
+        newp_budget = torch.unsqueeze(newp_budget, dim=0)
 
         if self.use_target_normalization:
             newp_performance = self.target_normalization_fn(newp_performance)
@@ -141,7 +174,9 @@ class HistoryManager:
             modified_curve = torch.tensor([0], dtype=torch.float32)
             modified_curve = torch.unsqueeze(modified_curve, dim=0)
 
-        if self.cached_train_dataset is not None:
+        if self.cached_train_dataset is not None and \
+            (self.use_sample_weights or self.use_sample_weight_by_budget or
+             self.use_sample_weight_by_label or self.use_y_constraint_weights):
             weight = self.cached_train_dataset.get_weight(x=new_example, budget=newp_budget)
         else:
             weight = torch.tensor([1.0])
@@ -150,8 +185,8 @@ class HistoryManager:
         return last_sample
 
     def history_configurations(self, curve_size_mode) -> \
-        Tuple[NDArray[int], NDArray[np.float32], NDArray[np.float32],
-              Optional[NDArray[np.float32]], NDArray[np.float32], NDArray[np.float32]]:
+        Tuple[NDArray[int], NDArray[np.float32], pd.DataFrame, Optional[NDArray[np.float32]],
+              NDArray[np.float32], NDArray[np.float32], pd.DataFrame]:
         """
         Generate the configurations, labels, budgets and curves
         based on the history of evaluated configurations.
@@ -167,12 +202,13 @@ class HistoryManager:
         train_curves = []
         train_weights = []
         train_max_budget = []
+        train_extra_budget = []
         initial_empty_value = self.get_initial_empty_value()
 
         if self.sample_weight_by_budget_strategy is not None:
             if self.sample_weight_by_budget_strategy.isdigit():
                 power_value = int(self.sample_weight_by_budget_strategy)
-                weight_fn = lambda w: np.power(w / self.max_benchmark_epochs, power_value)
+                weight_fn = lambda w: np.power(w / self.max_budgets[self.fidelity_name], power_value)
             elif self.sample_weight_by_budget_strategy == "softmax":
                 weight_fn = lambda w: np.exp(w - np.max(w))
             else:
@@ -184,31 +220,40 @@ class HistoryManager:
             budgets = self.examples[hp_index]
             performances = self.performances[hp_index]
 
-            weights = budgets.astype(np.float32)
-            weights = weight_fn(weights)
-            weights /= weights.sum()
-            weights *= weights.shape[0]
+            # weights = np.array(budgets, dtype=np.float32)
+            # weights = weight_fn(weights)
+            # weights /= weights.sum()
+            # weights *= weights.shape[0]
 
-            for i, budget in enumerate(budgets):
+            for i, (budget, performance) in enumerate(zip(budgets, performances)):
                 train_indices.append(hp_index)
                 train_budgets.append(budget)
-                train_labels.append(performances[budget - 1])
+                train_labels.append(performance)
                 if self.use_learning_curve:
-                    train_curve = performances[:budget - 1] if budget > 1 else [initial_empty_value]
+                    train_curve = performances[:i] if i > 0 else [initial_empty_value]
                     train_curves.append(train_curve)
-                train_weights.append(weights[i])
+                # train_weights.append(weights[i])
                 train_max_budget.append(budgets[-1])
+                if len(self.extra_budgets_names) != 0:
+                    train_extra_budget.append(self.extra_budget[hp_index][i])
 
         train_curves = self.get_processed_curves(curves=train_curves, curve_size_mode=curve_size_mode,
                                                  real_budgets=train_budgets)
 
         train_indices = np.array(train_indices, dtype=int)
-        train_budgets = np.array(train_budgets, dtype=np.float32)
         train_labels = np.array(train_labels, dtype=np.float32)
         train_weights = np.array(train_weights, dtype=np.float32)
-        train_max_budget = np.array(train_max_budget, dtype=np.float32)
+        # train_max_budget = np.array(train_max_budget, dtype=np.float32)
+        train_max_budget = None
 
-        return train_indices, train_labels, train_budgets, train_curves, train_weights, train_max_budget
+        train_budgets = pd.DataFrame(train_budgets, columns=self.fidelity_names).astype(np.float32)
+
+        if len(self.extra_budgets_names) != 0:
+            train_extra_budgets = pd.DataFrame(train_extra_budget, columns=self.extra_budgets_names).astype(np.float32)
+        else:
+            train_extra_budgets = None
+
+        return train_indices, train_labels, train_budgets, train_curves, train_weights, train_max_budget, train_extra_budgets
 
     def get_train_dataset(self, curve_size_mode) -> TabularDataset:
         """This method is called to prepare the necessary training dataset
@@ -221,12 +266,15 @@ class HistoryManager:
         if not self.is_train_data_modified:
             return self.cached_train_dataset
 
-        hp_indices, train_labels, train_budgets, train_curves, train_weights, train_max_budget = \
+        hp_indices, train_labels, train_budgets_pd, train_curves, train_weights, train_max_budget, train_extra_budgets = \
             self.history_configurations(curve_size_mode)
 
         if self.use_scaled_budgets:
             # scale budgets to [0, 1]
-            train_budgets = train_budgets / self.max_benchmark_epochs
+            # train_budgets = train_budgets / self.max_budgets[self.fidelity_name]
+            for col in train_budgets_pd.columns:
+                train_budgets_pd[col] = train_budgets_pd[col] / self.max_budgets[col]
+        train_budgets = train_budgets_pd.to_numpy()
 
         if self.use_target_normalization:
             train_labels = self.target_normalization_fn(train_labels)
@@ -260,11 +308,11 @@ class HistoryManager:
         if self.use_y_constraint_weights:
             if isinstance(self.use_y_constraint_weights, int):
                 power = self.use_y_constraint_weights
-                y_constraint_weights = train_max_budget / self.max_benchmark_epochs
+                y_constraint_weights = train_max_budget / self.max_budgets[self.fidelity_name]
                 y_constraint_weights = np.abs(np.exp(-power * y_constraint_weights) - np.exp(-power)) / (
                     1 - np.exp(-power))
             else:
-                y_constraint_weights = 1 - train_max_budget / self.max_benchmark_epochs
+                y_constraint_weights = 1 - train_max_budget / self.max_budgets[self.fidelity_name]
 
             if self.use_sample_weight_by_budget or self.use_sample_weight_by_label:
                 train_weights = np.expand_dims(train_weights, axis=1)
@@ -275,6 +323,12 @@ class HistoryManager:
 
         # This creates a copy
         train_examples = self.hp_candidates[hp_indices]
+        if train_extra_budgets is not None:
+            for col in train_extra_budgets.columns:
+                train_extra_budgets[col] = train_extra_budgets[col] / self.max_budgets[col]
+            train_extra_budgets = train_extra_budgets.to_numpy()
+            train_extra_budgets = train_extra_budgets.astype(np.float32)
+            train_examples = np.concatenate([train_examples, train_extra_budgets], axis=1)
 
         train_examples = torch.from_numpy(train_examples)
         train_labels = torch.from_numpy(train_labels)
@@ -321,19 +375,19 @@ class HistoryManager:
 
         p_config = self.hp_candidates[hp_index]
         p_config = torch.tensor(p_config, dtype=torch.float32)
-        p_config = p_config.expand(self.max_benchmark_epochs, -1)
+        p_config = p_config.expand(self.max_budgets[self.fidelity_name], -1)
 
-        real_budgets = np.arange(1, self.max_benchmark_epochs + 1)
+        real_budgets = np.arange(1, self.max_budgets[self.fidelity_name] + 1)
 
         p_budgets = torch.tensor(real_budgets, dtype=torch.float32)
         if self.use_scaled_budgets:
-            p_budgets = p_budgets / self.max_benchmark_epochs
+            p_budgets = p_budgets / self.max_budgets[self.fidelity_name]
 
         p_curve = None
         if curves is not None:
             p_curve = torch.tensor(curves, dtype=torch.float32)
             p_curve_last_row = p_curve[-1].unsqueeze(0)
-            p_curve_num_repeats = self.max_benchmark_epochs - p_curve.size(0)
+            p_curve_num_repeats = self.max_budgets[self.fidelity_name] - p_curve.size(0)
             repeated_last_row = p_curve_last_row.repeat_interleave(p_curve_num_repeats, dim=0)
             p_curve = torch.cat((p_curve, repeated_last_row), dim=0)
 
@@ -350,7 +404,7 @@ class HistoryManager:
             if curve_size_mode == "variable":
                 min_size = self.cnn_kernel_size
             elif curve_size_mode == "fixed":
-                min_size = self.max_benchmark_epochs - 1
+                min_size = self.max_budgets[self.fidelity_name] - 1
             else:
                 raise NotImplementedError
 
@@ -413,7 +467,7 @@ class HistoryManager:
 
         return best_value
 
-    def calculate_fidelity_ymax_dyhpo(self, fidelity: int):
+    def calculate_fidelity_ymax_dyhpo(self, fidelity: Union[int, Dict]):
         """
         Find ymax for a given fidelity level.
 
@@ -434,10 +488,15 @@ class HistoryManager:
         lower_fidelity_config_values = []
 
         for example_index in self.examples.keys():
-            try:
-                performance = self.performances[example_index][fidelity - 1]
+            fidelity_index = -1
+            for i, entry in enumerate(self.examples[example_index]):
+                if entry == fidelity:
+                    fidelity_index = i
+                    break
+            if fidelity_index >= 0:
+                performance = self.performances[example_index][fidelity_index]
                 exact_fidelity_config_values.append(performance)
-            except IndexError:
+            else:
                 learning_curve = self.performances[example_index]
                 # The hyperparameter was not evaluated until fidelity, or more.
                 # Take the maximum value from the curve.
@@ -500,20 +559,30 @@ class HistoryManager:
         return mean_initial_value
 
     def get_candidate_configurations_dataset(self, predict_mode, curve_size_mode) -> \
-        Tuple[TabularDataset, NDArray[int], NDArray[int]]:
+        Tuple[TabularDataset, NDArray[int], List[Dict]]:
 
         if not self.is_test_data_modified:
             return self.cached_test_dataset
 
-        hp_indices, budgets, real_budgets, hp_curves = self.generate_candidate_configurations(predict_mode,
-                                                                                              curve_size_mode)
+        hp_indices, budgets_pd, real_budgets, hp_curves, hp_extra_budgets = self.generate_candidate_configurations(
+            predict_mode,
+            curve_size_mode)
 
         if self.use_scaled_budgets:
             # scale budgets to [0, 1]
-            budgets = budgets / self.max_benchmark_epochs
+            # budgets = budgets / self.max_budgets[self.fidelity_name]
+            for col in budgets_pd.columns:
+                budgets_pd[col] = budgets_pd[col] / self.max_budgets[col]
+        budgets = budgets_pd.to_numpy()
 
         # This creates a copy
         configurations = self.hp_candidates[hp_indices]
+        if hp_extra_budgets is not None:
+            for col in hp_extra_budgets.columns:
+                hp_extra_budgets[col] = hp_extra_budgets[col] / self.max_budgets[col]
+            hp_extra_budgets = hp_extra_budgets.to_numpy()
+            hp_extra_budgets = hp_extra_budgets.astype(np.float32)
+            configurations = np.concatenate([configurations, hp_extra_budgets], axis=1)
 
         configurations = torch.from_numpy(configurations)
         budgets = torch.from_numpy(budgets)
@@ -533,7 +602,7 @@ class HistoryManager:
     # TODO: break this function to only handle candidates in history and make config manager handle configs
     #  not in history
     def generate_candidate_configurations(self, predict_mode, curve_size_mode) -> \
-        Tuple[NDArray[int], NDArray[np.float32], NDArray[int], Optional[NDArray[np.float32]]]:
+        Tuple[NDArray[int], pd.DataFrame, List[Dict], Optional[NDArray[np.float32]], pd.DataFrame]:
         """Generate candidate configurations that will be
         fantasized upon.
 
@@ -548,27 +617,52 @@ class HistoryManager:
         hp_budgets = []
         hp_curves = []
         real_budgets = []
+        real_extra_budgets = []
+        hp_extra_budgets = []
         initial_empty_value = self.get_mean_initial_value() if self.fill_value == 'last' else 0
 
-        for hp_index in range(0, self.hp_candidates.shape[0]):
+        first_budgets = {fidelity_name: min(self.fantasize_step[fidelity_name], self.min_budgets[fidelity_name])
+                         for fidelity_name in self.fidelity_names}
+        first_extra_budgets = {fidelity_name: min(self.fantasize_step[fidelity_name], self.min_budgets[fidelity_name])
+                               for fidelity_name in self.extra_budgets_names}
+        max_budgets = {fidelity_name: self.max_budgets[fidelity_name] for fidelity_name in self.fidelity_names}
+        max_extra_budgets = {fidelity_name: self.max_budgets[fidelity_name] for fidelity_name in
+                             self.extra_budgets_names}
 
+        for hp_index in range(0, self.hp_candidates.shape[0]):
             if hp_index in self.examples:
                 budgets = self.examples[hp_index]
                 # Take the max budget evaluated for a certain hpc
                 max_budget = budgets[-1]
-                if max_budget == self.max_benchmark_epochs:
+                num_max_budgets = 0
+                next_budget = {}
+                for k in self.fidelity_names:
+                    next_b = max_budget[k] + self.fantasize_step[k]
+                    if next_b >= self.max_budgets[k]:
+                        next_b = self.max_budgets[k]
+                        num_max_budgets += 1
+                    next_budget[k] = next_b
+                if num_max_budgets == len(self.fidelity_names):
                     continue
-                real_budgets.append(max_budget + self.fantasize_step)
+                real_budgets.append(next_budget)
+                if len(self.extra_budgets_names) != 0:
+                    real_extra_budgets.append(self.extra_budget[hp_index][-1])
                 learning_curve = self.performances[hp_index]
 
-                hp_curve = learning_curve[:max_budget - 1] if max_budget > 1 else [initial_empty_value]
+                budget_index = len(budgets) - 1
+                if budget_index > 0:
+                    a = 0
+                hp_curve = learning_curve[:budget_index] if budget_index > 0 else [initial_empty_value]
             else:
-                real_budgets.append(self.fantasize_step)
+                real_budgets.append(first_budgets)
                 hp_curve = [initial_empty_value]
+                if len(self.extra_budgets_names) != 0:
+                    real_extra_budgets.append(first_extra_budgets)
 
             hp_indices.append(hp_index)
-            hp_budgets.append(self.max_benchmark_epochs)
             hp_curves.append(hp_curve)
+        hp_budgets = [max_budgets] * len(real_budgets)
+        hp_extra_budgets = [max_extra_budgets] * len(real_budgets)
 
         hp_curves = self.get_processed_curves(curves=hp_curves, curve_size_mode=curve_size_mode,
                                               real_budgets=hp_budgets)
@@ -577,12 +671,16 @@ class HistoryManager:
             # make sure there is a copy happening because hp_budgets get normalized and real_budgets does not.
             # Creating np.array below copies the data.
             hp_budgets = real_budgets
+            hp_extra_budgets = real_extra_budgets
 
         hp_indices = np.array(hp_indices, dtype=int)
-        hp_budgets = np.array(hp_budgets, dtype=np.float32)
-        real_budgets = np.array(real_budgets, dtype=int)
+        hp_budgets = pd.DataFrame(hp_budgets, columns=self.fidelity_names).astype(np.float32)
+        if len(self.extra_budgets_names) != 0:
+            hp_extra_budgets = pd.DataFrame(hp_extra_budgets, columns=self.extra_budgets_names).astype(np.float32)
+        else:
+            hp_extra_budgets = None
 
-        return hp_indices, hp_budgets, real_budgets, hp_curves
+        return hp_indices, hp_budgets, real_budgets, hp_curves, hp_extra_budgets
 
     def all_configurations(self, curve_size_mode, benchmark: BaseBenchmark) -> \
         Tuple[NDArray[int], NDArray[np.float32], NDArray[np.float32], Optional[NDArray[np.float32]], NDArray[bool],
@@ -597,9 +695,9 @@ class HistoryManager:
         train_max_budget = []
         initial_empty_value = self.get_initial_empty_value()
 
-        budgets = range(1, self.max_benchmark_epochs + 1)
+        budgets = range(1, self.max_budgets[self.fidelity_name] + 1)
         for hp_index in range(0, self.hp_candidates.shape[0]):
-            performances = benchmark.get_curve(hp_index, budget=self.max_benchmark_epochs)
+            performances = benchmark.get_curve(hp_index, budget=self.max_budgets[self.fidelity_name])
             if not benchmark.minimization_metric:
                 performances = benchmark.max_value - np.array(performances)
                 performances = performances.tolist()
@@ -613,7 +711,7 @@ class HistoryManager:
                 best_labels.append(best_performance)
                 train_max_budget.append(budgets[-1])
                 if self.use_learning_curve:
-                    train_curve = performances[:budget - 1] if budget > 1 else [initial_empty_value]
+                    train_curve = performances[:budget - 1] if budget > 0 else [initial_empty_value]
                     train_curves.append(train_curve)
 
         train_curves = self.get_processed_curves(curves=train_curves, curve_size_mode=curve_size_mode,
@@ -648,9 +746,9 @@ class HistoryManager:
         if len(train_indices) == self.hp_candidates.shape[0]:
             train_indices = []
 
-        budgets = np.arange(1, self.max_benchmark_epochs + 1)
-        train_budgets_indices = budgets[:int(self.max_benchmark_epochs * (1 - validation_curve_ratio)) + 1]
-        val_budgets_indices = budgets[int(self.max_benchmark_epochs * (1 - validation_curve_ratio)) + 1:]
+        budgets = np.arange(1, self.max_budgets[self.fidelity_name] + 1)
+        train_budgets_indices = budgets[:int(self.max_budgets[self.fidelity_name] * (1 - validation_curve_ratio)) + 1]
+        val_budgets_indices = budgets[int(self.max_budgets[self.fidelity_name] * (1 - validation_curve_ratio)) + 1:]
 
         all_hp_indices, all_labels, all_budgets, all_curves, all_is_up_curve, all_best_labels = \
             self.all_configurations(curve_size_mode, benchmark=benchmark)
@@ -661,7 +759,7 @@ class HistoryManager:
         train_hp_index = np.isin(all_hp_indices, train_indices)
 
         if check_model_train_mode == "exp":
-            upper_budget = int(self.max_benchmark_epochs * (1 - validation_curve_ratio)) + 1
+            upper_budget = int(self.max_budgets[self.fidelity_name] * (1 - validation_curve_ratio)) + 1
             weights = 1.0 / budgets
             # weights /= np.sum(weights)
             weights[:upper_budget] = weights[:upper_budget] * validation_curve_prob / np.sum(weights[:upper_budget])
@@ -678,7 +776,7 @@ class HistoryManager:
         val_hp_index = np.isin(all_budgets, val_budgets_indices)
 
         if validation_mode == "end" or validation_mode == "best":
-            val_budget_index = all_budgets == self.max_benchmark_epochs
+            val_budget_index = all_budgets == self.max_budgets[self.fidelity_name]
             val_hp_index = np.logical_and(val_hp_index, val_budget_index)
 
         # a = val_hp_index.sum()
@@ -690,12 +788,12 @@ class HistoryManager:
 
         # first_label_index = all_budgets == 1
         # first_label = all_labels[first_label_index]
-        # last_label_index = all_budgets == self.max_benchmark_epochs
+        # last_label_index = all_budgets == self.max_budgets[self.fidelity_name]
         # last_label = all_best_labels[last_label_index]
 
         if self.use_scaled_budgets:
             # scale budgets to [0, 1]
-            all_budgets = all_budgets / self.max_benchmark_epochs
+            all_budgets = all_budgets / self.max_budgets[self.fidelity_name]
 
         transformed_all_labels = all_labels
         if self.use_target_normalization:
@@ -732,7 +830,7 @@ class HistoryManager:
             if self.sample_weight_by_budget_strategy is not None:
                 if self.sample_weight_by_budget_strategy.isdigit():
                     power_value = int(self.sample_weight_by_budget_strategy)
-                    weight_fn = lambda w: np.power(w / self.max_benchmark_epochs, power_value)
+                    weight_fn = lambda w: np.power(w / self.max_budgets[self.fidelity_name], power_value)
                 elif self.sample_weight_by_budget_strategy == "softmax":
                     weight_fn = lambda w: np.exp(w - np.max(w))
                 else:

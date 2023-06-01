@@ -21,10 +21,10 @@ class FeatureExtractor(BaseFeatureExtractor):
     The feature extractor that is part of the deep kernel.
     """
 
-    def __init__(self, nr_features, seed=None):
+    def __init__(self, nr_features, seed=None, nr_fidelity=1):
         # adding one since we concatenate the features with the budget
-        nr_initial_features = nr_features + 1
-        super().__init__(nr_initial_features, seed=seed)
+        # nr_initial_features = nr_features + 1
+        super().__init__(nr_features, seed=seed, nr_fidelity=nr_fidelity)
 
         # self.linear_net = self.get_linear_net()
         # self.after_cnn_linear_net = self.get_after_cnn_linear_net()
@@ -32,6 +32,7 @@ class FeatureExtractor(BaseFeatureExtractor):
         # if self.meta.use_learning_curve:
         #     self.cnn_net = self.get_cnn_net()
         self.set_seed(seed=seed)
+        self.nr_initial_features = self.nr_features + self.nr_fidelity
         self.fc1 = nn.Linear(self.nr_initial_features, self.meta.nr_units[0])
         self.bn1 = nn.BatchNorm1d(self.meta.nr_units[0])
         for i in range(1, self.meta.nr_layers - 1):
@@ -77,6 +78,7 @@ class FeatureExtractor(BaseFeatureExtractor):
     def get_linear_net(self):
         layers = []
 
+        self.nr_initial_features = self.nr_features + self.nr_fidelity
         layers.append(nn.Linear(self.nr_initial_features, self.meta.nr_units[0]))
         layers.append(nn.BatchNorm1d(self.meta.nr_units[0]))
         layers.append(self.act_func)
@@ -131,7 +133,7 @@ class FeatureExtractor(BaseFeatureExtractor):
 
         # add an extra dimensionality for the budget
         # making it nr_rows x 1.
-        budgets = torch.unsqueeze(budgets, dim=1)
+        # budgets = torch.unsqueeze(budgets, dim=1)
         # concatenate budgets with examples
         x = cat((x, budgets), dim=1)
         x = self.fc1(x)
