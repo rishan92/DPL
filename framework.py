@@ -22,6 +22,7 @@ from src.benchmarks.taskset import TaskSet
 from src.benchmarks.hyperbo import PD1
 from src.benchmarks.synthetic import SyntheticBench
 from src.benchmarks.yahpo import YAHPOGym
+from src.benchmarks.hpobench import HPOBench
 from src.surrogate_models.hyperparameter_optimizer import HyperparameterOptimizer
 from src.surrogate_models.asha import AHBOptimizer
 from src.surrogate_models.dehb.interface import DEHBOptimizer
@@ -55,6 +56,7 @@ class Framework:
         'pd1': PD1,
         'synthetic': SyntheticBench,
         'yahpo': YAHPOGym,
+        'hpobench': HPOBench
     }
 
     def __init__(
@@ -90,6 +92,7 @@ class Framework:
             'pd1': Path('data', 'pd1'),
             'synthetic': Path('synthetic'),
             'yahpo': Path('yahpo_data'),
+            'hpobench': Path('hpobench'),
         }
 
         if self.benchmark_name in benchmark_extensions:
@@ -253,17 +256,34 @@ class Framework:
 
         incumbent_value = self.benchmark.get_best_performance()
 
+        plot_pred_curves_budget = [5, 10, 20, 40]
+
         while self.surrogate_budget < self.total_budget:
 
             start_time = time.time()
             hp_indices, budgets = self.surrogate.suggest()
 
+            is_budget = False
+            if self.benchmark_name == 'yahpo':
+                keys = list(budgets.keys())
+                for i in range(self.benchmark.fidelity_curve_points[keys[0]].shape[0]):
+                    for k, v in budgets.items():
+                        index = self.benchmark.fidelity_curve_points[k] == v
+                        is_budget = np.argmax(index)
+                        is_budget = is_budget in plot_pred_curves_budget
+                        if is_budget:
+                            break
+            else:
+                is_budget = budgets in plot_pred_curves_budget
             if gv.PLOT_PRED_CURVES and (
-                budget == 5 or budget == 10 or budget == 20 or budget == 40 or
-                self.benchmark_name == 'synthetic'
-                # or self.benchmark_name == 'yahpo'
+                is_budget
+                or self.benchmark_name == 'synthetic'
+                or self.benchmark_name == 'yahpo'
                 # or self.benchmark_name == 'lcbench_mini'
             ):
+                hp_index = hp_indices
+                if isinstance(hp_indices, List):
+                    hp_index = hp_indices[0]
                 self.surrogate.plot_pred_curve(
                     hp_index=hp_index,
                     benchmark=self.benchmark,

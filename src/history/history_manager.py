@@ -355,39 +355,58 @@ class HistoryManager:
 
         return train_dataset
 
-    def get_predict_curves_dataset(self, hp_index, curve_size_mode):
+    def get_predict_curves_dataset(self, hp_index, curve_size_mode, fidelity_name='epochs'):
         curves = []
         real_budgets = []
+        initial_empty_value = self.get_initial_empty_value()
+        first_budgets = {fidelity_name: min(self.fantasize_step[fidelity_name], self.min_budgets[fidelity_name])
+                         for fidelity_name in self.fidelity_names}
+
         if hp_index in self.examples:
-            budgets = self.examples[hp_index]
-            max_train_budget = max(budgets)
+            budgets: List = self.examples[hp_index]
+            max_train_budget = budgets[-1]
             performances = self.performances[hp_index]
-            for budget, performance in zip(budgets, performances):
+            for i, (budget, performance) in enumerate(zip(budgets, performances)):
                 real_budgets.append(budget)
-                train_curve = performances[:budget - 1] if budget > 1 else [0.0]
+                train_curve = performances[:i] if i > 0 else [initial_empty_value]
                 curves.append(train_curve)
         else:
-            max_train_budget = 0
-            real_budgets.append(0)
+            max_train_budget = first_budgets
+            real_budgets.append(first_budgets)
             curves.append([0])
 
         curves = self.get_processed_curves(curves=curves, curve_size_mode=curve_size_mode, real_budgets=real_budgets)
 
+        fidelity_steps = ((self.max_budgets[fidelity_name] - self.min_budgets[fidelity_name]) / self.fantasize_step[
+            fidelity_name]) + 1
+        fidelity_steps = int(fidelity_steps)
+
         p_config = self.hp_candidates[hp_index]
         p_config = torch.tensor(p_config, dtype=torch.float32)
-        p_config = p_config.expand(self.max_budgets[self.fidelity_name], -1)
+        p_config = p_config.expand(fidelity_steps, -1)
 
-        real_budgets = np.arange(1, self.max_budgets[self.fidelity_name] + 1)
+        real_budgets = np.arange(
+            self.min_budgets[fidelity_name],
+            self.max_budgets[fidelity_name] + self.fantasize_step[fidelity_name],
+            self.fantasize_step[fidelity_name]
+        )
+        real_budgets = np.around(real_budgets, decimals=4)
+        real_budgets = [{**max_train_budget, fidelity_name: v} for v in real_budgets]
 
-        p_budgets = torch.tensor(real_budgets, dtype=torch.float32)
+        budgets_pd = pd.DataFrame(real_budgets, columns=self.fidelity_names).astype(np.float32)
+
         if self.use_scaled_budgets:
-            p_budgets = p_budgets / self.max_budgets[self.fidelity_name]
+            for col in budgets_pd.columns:
+                budgets_pd[col] = budgets_pd[col] / self.max_budgets[col]
+        p_budgets = budgets_pd.to_numpy()
+
+        p_budgets = torch.from_numpy(p_budgets)
 
         p_curve = None
         if curves is not None:
             p_curve = torch.tensor(curves, dtype=torch.float32)
             p_curve_last_row = p_curve[-1].unsqueeze(0)
-            p_curve_num_repeats = self.max_budgets[self.fidelity_name] - p_curve.size(0)
+            p_curve_num_repeats = fidelity_steps - p_curve.size(0)
             repeated_last_row = p_curve_last_row.repeat_interleave(p_curve_num_repeats, dim=0)
             p_curve = torch.cat((p_curve, repeated_last_row), dim=0)
 
@@ -631,13 +650,14 @@ class HistoryManager:
 
         for hp_index in range(0, self.hp_candidates.shape[0]):
             if hp_index in self.examples:
-                budgets = self.examples[hp_index]
+                budgets: List = self.examples[hp_index]
                 # Take the max budget evaluated for a certain hpc
-                max_budget = budgets[-1]
+                max_budget: Dict = budgets[-1]
                 num_max_budgets = 0
                 next_budget = {}
                 for k in self.fidelity_names:
                     next_b = max_budget[k] + self.fantasize_step[k]
+                    next_b = round(next_b, 4)
                     if next_b >= self.max_budgets[k]:
                         next_b = self.max_budgets[k]
                         num_max_budgets += 1
@@ -650,8 +670,6 @@ class HistoryManager:
                 learning_curve = self.performances[hp_index]
 
                 budget_index = len(budgets) - 1
-                if budget_index > 0:
-                    a = 0
                 hp_curve = learning_curve[:budget_index] if budget_index > 0 else [initial_empty_value]
             else:
                 real_budgets.append(first_budgets)

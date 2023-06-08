@@ -280,7 +280,7 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
         if model_class == EnsembleModel:
             hp = {
                 'fraction_random_configs': 0.1,
-                'initial_full_training_trials': 2,
+                'initial_full_training_trials': 10,
                 'predict_mode': 'end_budget',
                 'curve_size_mode': 'fixed',
                 'acq_mode': 'ei',
@@ -297,10 +297,10 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
             hp = {
                 'fraction_random_configs': 0.1,
                 'initial_full_training_trials': 10,
-                'predict_mode': 'end_budget',  # 'end_budget',  #
+                'predict_mode': 'next_budget',  # 'end_budget',  #
                 'curve_size_mode': 'variable',  # 'fixed',
                 'acq_mode': 'ei',
-                'acq_best_value_mode': 'normal',  # 'normal',  #    mf - multi-fidelity, normal, None
+                'acq_best_value_mode': 'mf',  # 'normal',  #    mf - multi-fidelity, normal, None
                 'use_target_normalization': False,
                 'target_normalization_range': [0.1, 0.9],
                 'use_scaled_budgets': True,
@@ -507,6 +507,7 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
                 next_budget = {}
                 for k in self.fidelity_names:
                     next_b = max_budget[k] + self.fantasize_step[k]
+                    next_b = round(next_b, 4)
                     if next_b >= self.max_budgets[k]:
                         next_b = self.max_budgets[k]
                         num_max_budgets += 1
@@ -813,73 +814,114 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
         if self.model is None:
             return
 
-        real_curve, budgets = benchmark.get_curve(hp_index, self.max_benchmark_epochs)
-
-        if not self.minimization:
-            real_curve = self.max_value - np.array(real_curve)
-
-        pred_test_data, real_budgets, max_train_budget = self.history_manager.get_predict_curves_dataset(
-            hp_index=hp_index,
-            curve_size_mode=self.meta.curve_size_mode
-        )
+        # real_curves, real_curve_budgets = benchmark.get_curve(hp_index, self.max_budgets)
+        #
+        # if not self.minimization:
+        #     real_curves = self.max_value - np.array(real_curves)
 
         train_data = self.history_manager.get_train_dataset(curve_size_mode=self.meta.curve_size_mode)
 
-        mean_data, std_data, predict_infos, model_std_data = self.model.predict(test_data=pred_test_data,
-                                                                                train_data=train_data)
+        prediction_data = []
+        for fidelity_name in self.fidelity_names:
+            pred_test_data, real_budgets, max_train_budget = self.history_manager.get_predict_curves_dataset(
+                hp_index=hp_index,
+                curve_size_mode=self.meta.curve_size_mode,
+                fidelity_name=fidelity_name
+            )
 
-        # order between model_output_normalization_inverse_fn and use_target_normalization should be reversed
-        # to match the order applied in making the training data. This is only calculated for plotting, since
-        # standard deviation calculation have no simple solution.
-        if self.model_type == "dyhpo" and self.model_output_normalization_inverse_fn:
-            mean_data = self.model_output_normalization_inverse_fn(mean_data)
-            # std_data = self.model_output_normalization_inverse_fn(std_data)
-            if predict_infos is not None and 'pl_output' in predict_infos:
-                predict_infos['pl_output'] = self.model_output_normalization_inverse_fn(predict_infos['pl_output'])
+            mean_data, std_data, predict_infos, model_std_data = self.model.predict(test_data=pred_test_data,
+                                                                                    train_data=train_data)
 
-        if self.meta.use_target_normalization:
-            mean_data = self.target_normalization_inverse_fn(mean_data)
-            std_data = self.target_normalization_std_inverse_fn(std_data)
-            if predict_infos is not None and 'pl_output' in predict_infos:
-                predict_infos['pl_output'] = self.target_normalization_inverse_fn(predict_infos['pl_output'])
+            # order between model_output_normalization_inverse_fn and use_target_normalization should be reversed
+            # to match the order applied in making the training data. This is only calculated for plotting, since
+            # standard deviation calculation have no simple solution.
+            if self.model_type == "dyhpo" and self.model_output_normalization_inverse_fn:
+                mean_data = self.model_output_normalization_inverse_fn(mean_data)
+                # std_data = self.model_output_normalization_inverse_fn(std_data)
+                if predict_infos is not None and 'pl_output' in predict_infos:
+                    predict_infos['pl_output'] = self.model_output_normalization_inverse_fn(predict_infos['pl_output'])
+
+            if self.meta.use_target_normalization:
+                mean_data = self.target_normalization_inverse_fn(mean_data)
+                std_data = self.target_normalization_std_inverse_fn(std_data)
+                if predict_infos is not None and 'pl_output' in predict_infos:
+                    predict_infos['pl_output'] = self.target_normalization_inverse_fn(predict_infos['pl_output'])
+
+            # real_curve = [real_curves[real_curve_budgets.index(v)] for v in real_budgets]
+            real_curve = []
+            for real_budget in real_budgets:
+                performance = benchmark.get_performance(hp_index, real_budget)
+                real_curve.append(performance)
+
+            if not self.minimization:
+                real_curve = self.max_value - np.array(real_curve)
+
+            prediction_data.append({
+                'max_train_budget': max_train_budget,
+                'real_budgets': real_budgets,
+                'mean_data': mean_data,
+                'std_data': std_data,
+                'predict_infos': predict_infos,
+                'model_std_data': model_std_data,
+                'real_curve': real_curve,
+            })
 
         # import torch.nn.functional as F
         # val_mae = F.l1_loss(torch.from_numpy(mean_data), torch.tensor(real_curve), reduction='mean')
         # print("val", val_mae)
 
+        predict_infos_exist = prediction_data[-1]['predict_infos'] is not None and \
+                              len(prediction_data[-1]['predict_infos']) > 1
         plt.clf()
-        if predict_infos is not None:
+        if predict_infos_exist:
             nrows, ncols, figsize = 1, 2, (10, 6)
         else:
-            nrows, ncols, figsize = 1, 1, (6.4, 4.8)
+            nrows, ncols, figsize = len(self.fidelity_names), 1, (6.4, 4.8 * len(self.fidelity_names))
 
         fig, axes = plt.subplots(nrows=nrows, ncols=ncols, figsize=figsize)
+        max_train_budget_str = ' '.join(f'{k} {v}' for k, v in prediction_data[-1]['max_train_budget'].items())
         fig.suptitle(
-            f'hp index {hp_index} at surrogate budget {surrogate_budget} and budget {max_train_budget}'
+            f'hp index {hp_index} at surrogate budget {surrogate_budget} and budget {max_train_budget_str}'
         )
 
-        predict_curve_axes = axes[0] if predict_infos is not None else axes
-        param_axes = axes[1] if predict_infos is not None else None
+        if predict_infos_exist and len(self.fidelity_names) == 1:
+            predict_curve_axes = axes[0]
+            param_axes = axes[1]
+        elif predict_infos_exist:
+            predict_curve_axes = axes[0]
+            param_axes = axes[1]
+        else:
+            predict_curve_axes = axes
+            param_axes = None
 
-        sns.lineplot(x=real_budgets, y=mean_data, ax=predict_curve_axes, color='blue', label='mean prediction')
-        if predict_infos is not None:
-            sns.lineplot(x=real_budgets, y=predict_infos['pl_output'], ax=predict_curve_axes, color='red',
-                         label='power law output')
-        predict_curve_axes.set_xlabel('Budget')
+        for i, fidelity_name in enumerate(self.fidelity_names):
+            real_budgets = prediction_data[i]['real_budgets']
+            mean_data = prediction_data[i]['mean_data']
+            std_data = prediction_data[i]['std_data']
+            predict_infos = prediction_data[i]['predict_infos']
+            real_curve = prediction_data[i]['real_curve']
+            max_train_budget_limit = real_budgets.index(prediction_data[i]['max_train_budget'])
 
-        predict_curve_axes.fill_between(real_budgets, mean_data + std_data, mean_data - std_data, alpha=0.3)
+            x_data = [v[fidelity_name] for v in real_budgets]
+            sns.lineplot(x=x_data, y=mean_data, ax=predict_curve_axes[i], color='blue', label='mean prediction')
+            if predict_infos_exist:
+                sns.lineplot(x=x_data, y=predict_infos['pl_output'], ax=predict_curve_axes[i], color='red',
+                             label='power law output')
+            predict_curve_axes[i].set_xlabel(f'Budget {fidelity_name}')
 
-        predict_curve_axes.plot(real_budgets[:max_train_budget], real_curve[:max_train_budget], 'k-')
-        predict_curve_axes.plot(real_budgets[max_train_budget:], real_curve[max_train_budget:], 'k--')
+            predict_curve_axes[i].fill_between(x_data, mean_data + std_data, mean_data - std_data, alpha=0.3)
 
-        if predict_infos is not None:
+            predict_curve_axes[i].plot(x_data[:max_train_budget_limit], real_curve[:max_train_budget_limit], 'k-')
+            predict_curve_axes[i].plot(x_data[max_train_budget_limit:], real_curve[max_train_budget_limit:], 'k--')
+
+        if predict_infos_exist:
             data = self.prediction_params_pd.loc[:, hp_index]
             sns.lineplot(data=data, ax=param_axes)
             param_axes.set_xlabel('Surrogate Budget')
 
         plt.tight_layout()
         file_path = \
-            output_dir / f"{prefix}surrogateBudget_{surrogate_budget}_trainBudget_{max_train_budget}_hpIndex_{hp_index}"
+            output_dir / f"{prefix}surrogateBudget_{surrogate_budget}_trainBudget_{max_train_budget_str}_hpIndex_{hp_index}.png"
         plt.savefig(file_path, dpi=200)
 
         plt.close()
