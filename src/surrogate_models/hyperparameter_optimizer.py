@@ -33,6 +33,7 @@ from src.utils.utils import get_class_from_package, get_class_from_packages, get
     numpy_to_torch_apply, weighted_spearman
 from scipy.stats import spearmanr
 import properscoring as ps
+from src.history.fidelity_manager import FidelityManager
 
 warnings.filterwarnings('ignore')
 
@@ -46,6 +47,7 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
     def __init__(
         self,
         hp_candidates: np.ndarray,
+        fidelity_manager: FidelityManager = None,
         surrogate_name: str = 'power_law',
         seed: int = 11,
         max_budgets: Union[int, Dict] = 52,
@@ -128,6 +130,7 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
         self.backbone = backbone
         self.benchmark = benchmark
         self.pred_trend_path = pred_trend_path
+        self.fidelity_manager = fidelity_manager
 
         self.pretrained_path = output_path / 'power_law' / f'checkpoint_{seed}.pth'
 
@@ -169,6 +172,8 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
 
         init_budgets = [{fidelity_name: self.min_budgets[fidelity_name] + i * self.fantasize_step[fidelity_name]
                          for fidelity_name in self.fidelity_names} for i in range(0, conf_individual_budget)]
+
+        init_budgets = list(range(0, conf_individual_budget))
 
         self.rand_init_conf_indices = []
         self.rand_init_budgets = []
@@ -234,6 +239,7 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
 
         self.history_manager = HistoryManager(
             hp_candidates=self.hp_candidates,
+            fidelity_manager=self.fidelity_manager,
             max_budgets=self.max_budgets,
             min_budgets=self.min_budgets,
             fill_value=self.fill_value,
@@ -439,7 +445,7 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
                 'Returning randomly sampled configuration'
             )
             suggested_hp_index = self.rand_init_conf_indices[self.initial_random_index]
-            budget = self.rand_init_budgets[self.initial_random_index]
+            # budget = self.rand_init_budgets[self.initial_random_index]
             self.initial_random_index += 1
         else:
             mean_predictions, std_predictions, hp_indices, real_budgets, predict_infos, mean_model_stds = self._predict()
@@ -503,6 +509,7 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
                 # if budget > self.max_budgets[self.fidelity_name]:
                 #     budget = self.max_budgets[self.fidelity_name]
                 max_budget = evaluated_budgets[-1]
+                max_budget = dict(zip(self.fidelity_manager.fidelity_names, max_budget))
                 num_max_budgets = 0
                 next_budget = {}
                 for k in self.fidelity_names:
@@ -515,10 +522,8 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
                 budget = next_budget
             else:
                 budget = {
-                    fidelity_name: min(self.fantasize_step[fidelity_name], self.min_budgets[fidelity_name])
-                    for fidelity_name in self.fidelity_names
+                    fidelity_name: self.min_budgets[fidelity_name] for fidelity_name in self.fidelity_names
                 }
-
             if gv.PLOT_PRED_CURVES and predict_infos is not None:
                 if self.prediction_params_pd is None:
                     info_names = list(predict_infos.keys())
@@ -534,12 +539,14 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
                 for k, v in predict_infos.items():
                     self.prediction_params_pd.loc[self.iterations_counter, (hp_indices, k)] = v
 
+        fidelity_id = self.fidelity_manager.get_next_fidelity_id(configuration_id=suggested_hp_index)
+
         suggest_time_end = time.time()
         self.suggest_time_duration = suggest_time_end - suggest_time_start
 
-        return suggested_hp_index, budget
+        return suggested_hp_index, fidelity_id
 
-    def observe(self, hp_index: int, budget: List[Union[int, Dict]], hp_curve: List):
+    def observe(self, hp_index: int, budget: List[Tuple[int]], hp_curve: List):
         """Receive information regarding the performance of a hyperparameter
         configuration that was suggested.
 
@@ -711,10 +718,9 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
             best_values_cache = {}
             best_values = np.empty(shape=len(budgets), dtype=np.float32)
             for i, budget in enumerate(budgets):
-                budget_tuple = tuple(sorted(budget.items()))
-                if budget_tuple not in best_values_cache:
-                    best_values_cache[budget_tuple] = self.history_manager.calculate_fidelity_ymax_dyhpo(budget)
-                best_values[i] = best_values_cache[budget_tuple]
+                if budget not in best_values_cache:
+                    best_values_cache[budget] = self.history_manager.calculate_fidelity_ymax_dyhpo(budget)
+                best_values[i] = best_values_cache[budget]
         else:
             best_values = np.full_like(mean_predictions, self.best_value_observed)
 
@@ -900,8 +906,12 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
             std_data = prediction_data[i]['std_data']
             predict_infos = prediction_data[i]['predict_infos']
             real_curve = prediction_data[i]['real_curve']
-            max_train_budget_limit = real_budgets.index(prediction_data[i]['max_train_budget'])
+            # max_train_budget_limit = real_budgets.index(prediction_data[i]['max_train_budget'])
+            max_train_budget_limit = 0
 
+            real_budgets = self.fidelity_manager.get_fidelities(
+                fidelity_ids=real_budgets, is_normalized=False, return_dict=True,
+            )
             x_data = [v[fidelity_name] for v in real_budgets]
             sns.lineplot(x=x_data, y=mean_data, ax=predict_curve_axes[i], color='blue', label='mean prediction')
             if predict_infos_exist:

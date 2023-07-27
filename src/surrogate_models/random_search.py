@@ -2,12 +2,14 @@ from typing import List, Tuple
 import numpy as np
 
 from src.surrogate_models.base_hyperparameter_optimizer import BaseHyperparameterOptimizer
+from src.history.fidelity_manager import FidelityManager
 
 
 class RandomOptimizer(BaseHyperparameterOptimizer):
     def __init__(
         self,
-        hyperparameter_candidates: np.ndarray,
+        hp_candidates: np.ndarray,
+        fidelity_manager: FidelityManager = None,
         max_budget: int = 52,
         seed: int = 0,
         max_nr_trials=1000,
@@ -27,10 +29,11 @@ class RandomOptimizer(BaseHyperparameterOptimizer):
         max_nr_trials: int
             The total runtime budget, given as the number of epochs spent during HPO.
         """
-        self.hyperparameter_candidates = hyperparameter_candidates
+        self.hyperparameter_candidates = hp_candidates
         self.rng = np.random.RandomState(seed)
         np.random.seed(seed)
         self.evaluated_configurations = set()
+        self.fidelity_manager = fidelity_manager
         self.max_budget = max_budget
         self.max_trials = max_nr_trials
         self.extra_args = kwargs
@@ -53,11 +56,12 @@ class RandomOptimizer(BaseHyperparameterOptimizer):
         self.evaluated_configurations.add(config_index)
 
         # if not enough budget to give max fidelity, give max budget
-        max_budget = min(self.max_budget, self.max_trials)
+        # max_budget = min(self.max_budget, self.max_trials)
+        max_budget = self.fidelity_manager.last_fidelity_id
 
-        return config_index, max_budget
+        return [config_index], [max_budget]
 
-    def observe(self, hp_index: int, budget: int, hp_curve: List[float]):
+    def observe(self, hp_index: int, budget: List[Tuple[int]], hp_curve: List[float]):
         """
         Respond regarding the performance of a
         hyperparameter configuration. get_next should

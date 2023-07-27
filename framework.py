@@ -23,14 +23,18 @@ from src.benchmarks.hyperbo import PD1
 from src.benchmarks.synthetic import SyntheticBench
 from src.benchmarks.yahpo import YAHPOGym
 from src.benchmarks.hpobench import HPOBench
+from src.benchmarks.jahsbench import JAHSBench
+from src.benchmarks.synthetic_mf import SyntheticMFBench
 from src.surrogate_models.hyperparameter_optimizer import HyperparameterOptimizer
 from src.surrogate_models.asha import AHBOptimizer
 from src.surrogate_models.dehb.interface import DEHBOptimizer
 from src.surrogate_models.random_search import RandomOptimizer
 from src.surrogate_models.many_fidelity_hyperparameter_optimizer import MFHyperparameterOptimizer
+from src.surrogate_models.dragonfly import DragonFlyOptimizer
 import global_variables as gv
 import subprocess
 from src.utils.utils import delete_folder_content
+from src.history.fidelity_manager import FidelityManager
 
 
 # if warnings.catch_warnings():
@@ -44,7 +48,7 @@ class Framework:
         'dyhpo': HyperparameterOptimizer,
         'asha': AHBOptimizer,
         'dehb': DEHBOptimizer,
-        # 'dragonfly': DragonFlyOptimizer,
+        'dragonfly': DragonFlyOptimizer,
         'random': RandomOptimizer,
         'many_fidelity': MFHyperparameterOptimizer
     }
@@ -56,7 +60,9 @@ class Framework:
         'pd1': PD1,
         'synthetic': SyntheticBench,
         'yahpo': YAHPOGym,
-        'hpobench': HPOBench
+        'hpobench': HPOBench,
+        'jahsbench': JAHSBench,
+        'synthetic_mf': SyntheticMFBench,
     }
 
     def __init__(
@@ -93,6 +99,8 @@ class Framework:
             'synthetic': Path('synthetic'),
             'yahpo': Path('yahpo_data'),
             'hpobench': Path('hpobench'),
+            'jahsbench': Path('jahsbench'),
+            'synthetic_mf': Path('synthetic_mf'),
         }
 
         if self.benchmark_name in benchmark_extensions:
@@ -193,7 +201,9 @@ class Framework:
         else:
             self.hp_candidates = self.benchmark.get_hyperparameter_candidates()
 
-        if self.benchmark_name == 'yahpo':
+        self.fidelity_manager: FidelityManager = self.benchmark.fidelity_manager
+
+        if hasattr(self.benchmark, 'fidelity_names') and self.benchmark.fidelity_names is not None:
             max_budgets = self.benchmark.max_budgets
             min_budgets = self.benchmark.min_budgets
             fantasize_step = {k: self.fantasize_step * v for k, v in self.benchmark.fidelity_interval.items()}
@@ -207,9 +217,10 @@ class Framework:
             fidelity_names = 'epochs'
             surrogate_class = Framework.surrogate_types[self.surrogate_name]
 
-        if self.surrogate_name == 'power_law' or self.surrogate_name == 'dyhpo':
+        if self.surrogate_name in ['power_law', 'dyhpo', 'random']:
             self.surrogate = surrogate_class(
                 hp_candidates=self.hp_candidates,
+                fidelity_manager=self.benchmark.fidelity_manager,
                 surrogate_name=self.surrogate_name,
                 seed=seed,
                 max_budgets=max_budgets,
@@ -256,47 +267,50 @@ class Framework:
 
         incumbent_value = self.benchmark.get_best_performance()
 
-        plot_pred_curves_budget = [5, 10, 20, 40]
+        plot_pred_curves_fidelity_percentile = np.array([5, 10, 20, 40]) / 50
+        plot_pred_curves_fidelity = []
+        for k in self.fidelity_manager.fidelity_names:
+            n = len(self.fidelity_manager.fidelity_space[k])
+            indices = [int(round(p * (n - 1))) for p in plot_pred_curves_fidelity_percentile]
+            plot_pred_curves_fidelity.append(set(indices))
 
         while self.surrogate_budget < self.total_budget:
 
             start_time = time.time()
-            hp_indices, budgets = self.surrogate.suggest()
+            hp_indices, fidelity_ids = self.surrogate.suggest()
 
-            is_budget = False
-            if self.benchmark_name == 'yahpo':
-                keys = list(budgets.keys())
-                for i in range(self.benchmark.fidelity_curve_points[keys[0]].shape[0]):
-                    for k, v in budgets.items():
-                        index = self.benchmark.fidelity_curve_points[k] == v
-                        is_budget = np.argmax(index)
-                        is_budget = is_budget in plot_pred_curves_budget
+            if gv.PLOT_PRED_CURVES:
+                is_budget = False
+                if self.benchmark_name == 'yahpo' or self.benchmark_name == 'synthetic_mf':
+                    for i, pred_curves in enumerate(plot_pred_curves_fidelity):
+                        is_budget = fidelity_ids[i] in pred_curves
                         if is_budget:
                             break
-            else:
-                is_budget = budgets in plot_pred_curves_budget
-            if gv.PLOT_PRED_CURVES and (
-                is_budget
-                or self.benchmark_name == 'synthetic'
-                or self.benchmark_name == 'yahpo'
-                # or self.benchmark_name == 'lcbench_mini'
-            ):
-                hp_index = hp_indices
-                if isinstance(hp_indices, List):
-                    hp_index = hp_indices[0]
-                self.surrogate.plot_pred_curve(
-                    hp_index=hp_index,
-                    benchmark=self.benchmark,
-                    surrogate_budget=self.surrogate_budget,
-                    output_dir=self.pred_curves_path
-                )
-                # self.surrogate.plot_pred_curve(
-                #     hp_index=self.incumbent_hp_index,
-                #     benchmark=self.benchmark,
-                #     surrogate_budget=self.surrogate_budget,
-                #     output_dir=self.pred_curves_path,
-                #     prefix="incumbent_"
-                # )
+                else:
+                    is_budget = fidelity_ids in plot_pred_curves_fidelity
+                if gv.PLOT_PRED_CURVES and (
+                    is_budget
+                    or self.benchmark_name == 'synthetic'
+                    or self.benchmark_name == 'yahpo'
+                    # or self.benchmark_name == 'lcbench_mini'
+                    or self.benchmark_name == 'synthetic_mf'
+                ):
+                    hp_index = hp_indices
+                    if isinstance(hp_indices, List):
+                        hp_index = hp_indices[0]
+                    self.surrogate.plot_pred_curve(
+                        hp_index=hp_index,
+                        benchmark=self.benchmark,
+                        surrogate_budget=self.surrogate_budget,
+                        output_dir=self.pred_curves_path
+                    )
+                    # self.surrogate.plot_pred_curve(
+                    #     hp_index=self.incumbent_hp_index,
+                    #     benchmark=self.benchmark,
+                    #     surrogate_budget=self.surrogate_budget,
+                    #     output_dir=self.pred_curves_path,
+                    #     prefix="incumbent_"
+                    # )
 
             if gv.PLOT_PRED_DIST and self.surrogate_budget % 100 == 1:
                 self.surrogate.plot_pred_dist(
@@ -306,14 +320,14 @@ class Framework:
                 )
             if not isinstance(hp_indices, List):
                 hp_indices = [hp_indices]
-                budgets = [budgets]
+                fidelity_ids = [fidelity_ids]
 
             hp_curves = []
-            for hp_index, budget in zip(hp_indices, budgets):
-                hp_curve, budget_out = self.benchmark.get_objective_function_performance(hp_index, budget)
+            for hp_index, fidelity_id in zip(hp_indices, fidelity_ids):
+                hp_curve, fidelity_id_out = self.benchmark.get_objective_function_performance(hp_index, fidelity_id)
                 # hp_curve = self.benchmark.get_performance(hp_index, budget)
                 hp_curves.append(hp_curve)
-                self.surrogate.observe(hp_index, budget_out, hp_curve)
+                self.surrogate.observe(hp_index, fidelity_id_out, hp_curve)
 
             # if len(hp_indices) == 1:
             #     hp_indices = hp_indices[0]
@@ -324,13 +338,13 @@ class Framework:
 
             time_duration = time.time() - start_time
 
-            if hp_index in evaluated_configs:
-                previous_budget = evaluated_configs[hp_index]
-            else:
-                previous_budget = 0
+            # if hp_index in evaluated_configs:
+            #     previous_budget = evaluated_configs[hp_index]
+            # else:
+            #     previous_budget = 0
 
             # budget_cost = budget - previous_budget
-            evaluated_configs[hp_index] = budget
+            # evaluated_configs[hp_index] = budget
 
             # step_time_duration = time_duration / budget_cost
             step_time_duration = time_duration
@@ -349,7 +363,7 @@ class Framework:
                     best_value = budget_performance
 
             best_hp_index = hp_indices[best_index]
-            best_budget = budgets[best_index]
+            best_fidelity_id = fidelity_ids[best_index]
 
             self.surrogate_budget += 1
 
@@ -367,11 +381,11 @@ class Framework:
             #     else:
             #         raise NotImplementedError
             #     log_budget.append(v)
-            log_budget = [v for v in best_budget.values()]
+            log_fidelity = self.fidelity_manager.get_fidelities(best_fidelity_id)
             self.log_info(
                 int(best_hp_index),
                 float(budget_performance),
-                log_budget,
+                log_fidelity,
                 float(best_value),
                 step_time_duration,
             )
@@ -383,8 +397,8 @@ class Framework:
                 'hpo/surrogate_budget': self.surrogate_budget,
                 'hpo/regret': regret,
             }
-            for k, v in best_budget.items():
-                metrics[f'hpo/{k}'] = v
+            for i, name in enumerate(self.fidelity_manager.fidelity_names):
+                metrics[f'hpo/{name}'] = log_fidelity[i]
             wandb.log(metrics)
 
             if self.surrogate_budget >= self.total_budget or self.surrogate_budget >= self.benchmark.size():
@@ -538,6 +552,8 @@ class Framework:
             json.dump(self.info_dict, fp)
 
     def finish(self, is_failed=False):
+        self.benchmark.close()
+
         wandb.log_artifact(str(self.log_path), name='debug_log', type='log')
         wandb.log_artifact(str(self.result_file), name='result_json', type='result')
 

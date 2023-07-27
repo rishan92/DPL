@@ -33,7 +33,7 @@ class BaseBenchmark(ABC):
         raise NotImplementedError('Please extend the get_hyperparameter_candidates method')
 
     @abstractmethod
-    def get_performance(self, hp_index: int, budget: int) -> float:
+    def get_performance(self, hp_index: int, fidelity_id: Tuple[int]) -> float:
         raise NotImplementedError('Please extend the get_performance method')
 
     @abstractmethod
@@ -62,7 +62,7 @@ class BaseBenchmark(ABC):
     def size(self) -> int:
         return self.nr_hyperparameters * self.max_budget
 
-    def get_objective_function_performance(self, hp_index: int, budget: Union[int, Dict]) -> Tuple[List, List]:
+    def get_objective_function_performance(self, hp_index: int, fidelity_id: Tuple[int]) -> Tuple[List, List]:
         # performances = self.get_curve(hp_index=hp_index, budget=budget)
         # first_index = 0
         # if hp_index in self.objective_performance_info:
@@ -72,5 +72,8 @@ class BaseBenchmark(ABC):
         #
         # performance = performances[first_index:]
 
-        performance = self.get_performance(hp_index=hp_index, budget=budget)
-        return [performance], [budget]
+        performance = self.get_performance(hp_index=hp_index, fidelity_id=fidelity_id)
+        return [performance], [fidelity_id]
+
+    def close(self):
+        pass

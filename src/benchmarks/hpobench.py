@@ -90,10 +90,10 @@ class HPOBench(BaseBenchmark):
 
     def _load_benchmark(self):
         task_ids = get_openmlcc18_taskids()
-        bench: AbstractBenchmark = TabularBenchmark(task_id=int(self.dataset_name), rng=self.seed)
-        # bench: AbstractBenchmark = TabularBenchmark(
-        #     model=self.scenario_name, task_id=int(self.dataset_name), rng=self.seed
-        # )
+        # bench: AbstractBenchmark = TabularBenchmark(task_id=int(self.dataset_name), rng=self.seed)
+        bench: AbstractBenchmark = TabularBenchmark(
+            model=self.scenario_name, task_id=int(self.dataset_name), rng=self.seed
+        )
         # print(bench.instances)
 
         config_space = bench.get_configuration_space(seed=self.seed)
