@@ -19,7 +19,7 @@ from src.history.fidelity_manager import FidelityManager
 
 
 class SyntheticMFBench(BaseBenchmark):
-    nr_hyperparameters = 10  # 2000
+    nr_hyperparameters = 2000
 
     param_space = None
     max_budget = 51
@@ -405,7 +405,7 @@ class SyntheticMFBench(BaseBenchmark):
 
     @lru_cache
     def get_worst_performance(self):
-        min_value = np.NINF if self.is_minimize else np.PINF
+        min_value = np.PINF if self.is_minimize else np.NINF
         for hp_index in range(SyntheticMFBench.nr_hyperparameters):
             val_curve, _ = self.get_curve(hp_index=hp_index, budget=SyntheticMFBench.max_budgets)
             if self.is_minimize:

@@ -37,6 +37,8 @@ class RandomOptimizer(BaseHyperparameterOptimizer):
         self.max_budget = max_budget
         self.max_trials = max_nr_trials
         self.extra_args = kwargs
+        self.previous_fidelity = None
+        self.previous_config_index = None
 
     def suggest(self) -> Tuple[int, int]:
         """
@@ -50,16 +52,24 @@ class RandomOptimizer(BaseHyperparameterOptimizer):
             given) and the budget for the hyperparameter to be evaluated
             on.
         """
-        possible_candidates = {i for i in range(self.hyperparameter_candidates.shape[0])}
-        not_evaluated_candidates = possible_candidates - self.evaluated_configurations
-        config_index = np.random.choice(list(not_evaluated_candidates))
-        self.evaluated_configurations.add(config_index)
+        while True:
+            if self.previous_fidelity is None:
+                possible_candidates = {i for i in range(self.hyperparameter_candidates.shape[0])}
+                not_evaluated_candidates = possible_candidates - self.evaluated_configurations
+                config_index = np.random.choice(list(not_evaluated_candidates))
+                self.evaluated_configurations.add(config_index)
+                self.previous_config_index = config_index
 
-        # if not enough budget to give max fidelity, give max budget
-        # max_budget = min(self.max_budget, self.max_trials)
-        max_budget = self.fidelity_manager.last_fidelity_id
+            current_config_id = self.previous_config_index
 
-        return [config_index], [max_budget]
+            fidelity = self.fidelity_manager.get_next_fidelity_id(configuration_id=current_config_id)
+            self.previous_fidelity = fidelity
+
+            if fidelity is not None:
+                self.fidelity_manager.set_fidelity_id(configuration_id=current_config_id, fidelity_id=fidelity)
+                break
+
+        return [current_config_id], [fidelity]
 
     def observe(self, hp_index: int, budget: List[Tuple[int]], hp_curve: List[float]):
         """
