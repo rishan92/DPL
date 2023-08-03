@@ -303,7 +303,7 @@ class SyntheticMFBench(BaseBenchmark):
         )
         result_data = self.mf_objective(z=converted_fidelity, x=converted_config)
 
-        self.benchmark_results.loc[row_values_tuple] = result_data
+        self.benchmark_results.loc[row_values_tuple, 'result'] = result_data
         self.is_new_data_added = True
 
         return result_data
@@ -429,12 +429,12 @@ class SyntheticMFBench(BaseBenchmark):
         print("Saving benchmark data")
         if self.is_new_data_added:
             self.root_save_path.mkdir(parents=True, exist_ok=True)
-            benchmark_path = self.root_save_path / f"{self.dataset_name}.parquet"
+            benchmark_path = self.root_save_path / f"{self.dataset_name}_seed_{self.seed}.parquet"
             self.benchmark_results.to_parquet(path=benchmark_path)
 
     def load_benchmark(self):
         print("Loading benchmark data")
-        benchmark_path = self.root_save_path / f"{self.dataset_name}.parquet"
+        benchmark_path = self.root_save_path / f"{self.dataset_name}_seed_{self.seed}.parquet"
         if benchmark_path.is_file():
             benchmark = pd.read_parquet(benchmark_path)
         else:

@@ -1,24 +1,23 @@
 import time
 from argparse import Namespace
 import threading
-
+import numpy as np
 from typing import Dict, List, OrderedDict, Tuple
 
 from dragonfly import load_config, maximize_multifidelity_function, minimize_multifidelity_function
 
-import numpy as np
-
 from src.surrogate_models.base_hyperparameter_optimizer import BaseHyperparameterOptimizer
+from src.history.fidelity_manager import FidelityManager
 
 
 class DragonFlyOptimizer(BaseHyperparameterOptimizer):
     def __init__(
         self,
-        hyperparameter_candidates: np.ndarray,
-        param_space: OrderedDict,
+        hp_candidates: np.ndarray,
+        fidelity_manager: FidelityManager = None,
         seed: int = 0,
         max_budget: int = 52,
-        max_nr_trials: int = 2000,
+        total_budget: int = 1000,
         maximization: bool = True,
         **kwargs,
     ):
@@ -42,8 +41,8 @@ class DragonFlyOptimizer(BaseHyperparameterOptimizer):
             If the inner objective is to maximize or minimize.
         """
         self.maximization = maximization
-        self.hyperparameter_candidates = hyperparameter_candidates
-        self.param_space = param_space
+        self.hyperparameter_candidates = hp_candidates
+        self.fidelity_manager = fidelity_manager
         self.extra_arguments = kwargs
 
         self.hyperparameter_mapping = self.create_configuration_to_indices()
@@ -67,11 +66,13 @@ class DragonFlyOptimizer(BaseHyperparameterOptimizer):
         domain_vars = [
             {'type': 'discrete_euclidean', 'items': list(self.hyperparameter_candidates)},
         ]
+        self.fidelity_path_to_id_map = {i + 1: (i, i) for i in range(10)}
+        self.fidelity_id_to_path_map = {(i, i): i + 1 for i in range(10)}
         fidel_vars = [
-            {'type': 'int', 'min': 1, 'max': max_budget},
+            {'type': 'int', 'min': 1, 'max': 10},
         ]
 
-        fidel_to_opt = [int(max_budget)]
+        fidel_to_opt = [int(10)]
 
         config = {
             'domain': domain_vars,
@@ -85,11 +86,14 @@ class DragonFlyOptimizer(BaseHyperparameterOptimizer):
         )
         config = load_config(config)
 
+        self.previous_fidelity = None
+        self.previous_config_index = None
+
         self.dragonfly_run = threading.Thread(
             target=maximize_multifidelity_function if self.maximization else minimize_multifidelity_function,
             kwargs={
                 'func': self.target_function,
-                'max_capital': max_nr_trials,
+                'max_capital': total_budget,
                 'config': config,
                 'domain': config.domain,
                 'fidel_space': config.fidel_space,
@@ -104,30 +108,31 @@ class DragonFlyOptimizer(BaseHyperparameterOptimizer):
     def fidel_cost_function(self, fidelity):
 
         fidelity_value = fidelity[0]
-        while True:
-            if self.fidelity_index is not None:
-                config_index = self.fidelity_index
-                if config_index in self.fidelity_hp_curves:
-                    budget_evaluated = self.fidelity_hp_curves[config_index]
-                    # the hyperparameter configuration has been evaluated before
-                    # and it was evaluated for a higher\same budget
-                    if budget_evaluated >= fidelity_value:
-                        # there was a curve which was evaluated for longer
-                        fidelity_opt_cost = 0
-                    else:
-                        # will only resume training for the extra query
-                        fidelity_opt_cost = fidelity_value - budget_evaluated
-                        self.fidelity_hp_curves[config_index] = fidelity_value
-                else:
-                    # first evaluation
-                    fidelity_opt_cost = fidelity_value
-                    self.fidelity_hp_curves[config_index] = fidelity_value
-                self.fidelity_index = None
-                break
-            else:
-                time.sleep(1)
-
-        return fidelity_opt_cost
+        return fidelity_value
+        # while True:
+        #     if self.fidelity_index is not None:
+        #         config_index = self.fidelity_index
+        #         if config_index in self.fidelity_hp_curves:
+        #             budget_evaluated = self.fidelity_hp_curves[config_index]
+        #             # the hyperparameter configuration has been evaluated before
+        #             # and it was evaluated for a higher\same budget
+        #             if budget_evaluated >= fidelity_value:
+        #                 # there was a curve which was evaluated for longer
+        #                 fidelity_opt_cost = 0
+        #             else:
+        #                 # will only resume training for the extra query
+        #                 fidelity_opt_cost = fidelity_value - budget_evaluated
+        #                 self.fidelity_hp_curves[config_index] = fidelity_value
+        #         else:
+        #             # first evaluation
+        #             fidelity_opt_cost = fidelity_value
+        #             self.fidelity_hp_curves[config_index] = fidelity_value
+        #         self.fidelity_index = None
+        #         break
+        #     else:
+        #         time.sleep(1)
+        #
+        # return fidelity_opt_cost
 
     def target_function(
         self,
@@ -189,10 +194,10 @@ class DragonFlyOptimizer(BaseHyperparameterOptimizer):
             while True:
                 if self.conf_info is not None:
                     score = self.conf_info['score']
-                    val_curve = self.conf_info['val_curve']
-                    # save the curve for the evaluated hyperparameter
-                    # configuration
-                    self.evaluated_hp_curves[config_index] = val_curve
+                    # val_curve = self.conf_info['val_curve']
+                    # # save the curve for the evaluated hyperparameter
+                    # # configuration
+                    # self.evaluated_hp_curves[config_index] = val_curve
                     break
                 else:
                     # The framework has not yet responded with a value,
@@ -220,12 +225,27 @@ class DragonFlyOptimizer(BaseHyperparameterOptimizer):
             given) and the budget for the hyperparameter to be evaluated
             on.
         """
-        while self.next_conf is None:
-            # DragonFly has not generated the config yet
-            time.sleep(1)
-        self.conf_info = None
+        if self.previous_fidelity is None:
+            while self.next_conf is None:
+                # DragonFly has not generated the config yet
+                time.sleep(1)
+            self.conf_info = None
+            self.previous_config_index = self.next_conf
 
-        return self.next_conf, self.conf_budget
+        req_budget = self.fidelity_path_to_id_map[self.conf_budget]
+
+        current_config_id = self.previous_config_index
+
+        fidelity = self.fidelity_manager.get_next_fidelity_id(configuration_id=current_config_id)
+        if fidelity != req_budget:
+            self.previous_fidelity = fidelity
+        else:
+            self.previous_fidelity = None
+
+        if fidelity is not None:
+            self.fidelity_manager.set_fidelity_id(configuration_id=current_config_id, fidelity_id=fidelity)
+        # print(self.next_conf, fidelity)
+        return [self.next_conf], [fidelity]
 
     def observe(
         self,
@@ -247,13 +267,22 @@ class DragonFlyOptimizer(BaseHyperparameterOptimizer):
         hp_curve: np.ndarray, list
             validation accuracy curve. The last value is the same as the score.
         """
-        assert self.next_conf is not None, 'Call get_next first.'
-        self.next_conf = None
+        req_budget = self.fidelity_path_to_id_map[self.conf_budget]
 
-        self.conf_info = {
-            'score': hp_curve[-1],
-            'val_curve': hp_curve,
-        }
+        if hp_index in self.evaluated_hp_curves:
+            self.evaluated_hp_curves[hp_index].append(hp_curve[-1])
+        else:
+            self.evaluated_hp_curves[hp_index] = [hp_curve[-1]]
+
+        if budget[-1] == req_budget and hp_index == self.previous_config_index:
+            assert self.next_conf is not None, 'Call get_next first.'
+            self.next_conf = None
+
+            self.conf_info = {
+                'score': hp_curve[-1],
+                'val_curve': hp_curve,
+                'fidelity': budget,
+            }
 
     def create_configuration_to_indices(
         self,

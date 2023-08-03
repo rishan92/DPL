@@ -21,9 +21,9 @@ from src.benchmarks.lcbench import LCBench
 from src.benchmarks.taskset import TaskSet
 from src.benchmarks.hyperbo import PD1
 from src.benchmarks.synthetic import SyntheticBench
-from src.benchmarks.yahpo import YAHPOGym
-from src.benchmarks.hpobench import HPOBench
-from src.benchmarks.jahsbench import JAHSBench
+# from src.benchmarks.yahpo import YAHPOGym
+# from src.benchmarks.hpobench import HPOBench
+# from src.benchmarks.jahsbench import JAHSBench
 from src.benchmarks.synthetic_mf import SyntheticMFBench
 from src.surrogate_models.hyperparameter_optimizer import HyperparameterOptimizer
 from src.surrogate_models.asha import AHBOptimizer
@@ -59,9 +59,9 @@ class Framework:
         'lcbench_mini': LCBench,
         'pd1': PD1,
         'synthetic': SyntheticBench,
-        'yahpo': YAHPOGym,
-        'hpobench': HPOBench,
-        'jahsbench': JAHSBench,
+        # 'yahpo': YAHPOGym,
+        # 'hpobench': HPOBench,
+        # 'jahsbench': JAHSBench,
         'synthetic_mf': SyntheticMFBench,
     }
 
@@ -217,7 +217,7 @@ class Framework:
             fidelity_names = 'epochs'
             surrogate_class = Framework.surrogate_types[self.surrogate_name]
 
-        if self.surrogate_name in ['power_law', 'dyhpo', 'random']:
+        if self.surrogate_name in ['power_law', 'dyhpo', 'random', 'dragonfly']:
             self.surrogate = surrogate_class(
                 hp_candidates=self.hp_candidates,
                 fidelity_manager=self.benchmark.fidelity_manager,

@@ -732,7 +732,7 @@ class HistoryManager:
                     real_extra_budgets.append(self.extra_budget[hp_index][-1])
                 learning_curve = self.performance_history[hp_index]
 
-                budget_index = len(budgets) - 1
+                budget_index = len(budgets)  # - 1
                 hp_curve = learning_curve[:budget_index] if budget_index > 0 else [initial_empty_value]
             else:
                 real_budgets.append(first_budgets)

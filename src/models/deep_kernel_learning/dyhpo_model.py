@@ -434,6 +434,7 @@ class DyHPOModel(BasePytorchModule):
                 target_space_constraint_loss = zero_tensor
 
             try:
+                # with gpytorch.settings.cholesky_jitter(float_value=1e-2, double_value=1e-2):
                 # Calc loss and backprop derivatives
                 mll_loss = -self.mll_criterion(output, self.model.train_targets)
 
