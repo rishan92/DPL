@@ -2,7 +2,7 @@ import math
 from collections import OrderedDict
 from typing import List
 import numpy as np
-from numpy.typing import NDArray
+# from numpy.typing import NDArray
 import pandas as pd
 from pathlib import Path
 
@@ -86,7 +86,7 @@ class SyntheticBench(BaseBenchmark):
 
         self.benchmark_data.loc[:, 0] = curve
 
-    def get_hyperparameter_candidates(self) -> NDArray:
+    def get_hyperparameter_candidates(self) -> np.ndarray:
 
         hp_names = list(self.param_space.keys())
         hp_configs = []

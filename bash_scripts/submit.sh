@@ -7,7 +7,9 @@ export ENV_PATH=/home/fr/fr_fr/fr_rs442/.conda/envs/modpl
 export use_config=true
 #"$ROOT_PATH"/bash_scripts/experiment_run_array.sh "taskset" "power_law" "$ROOT_PATH/results" "$use_config"
 #"$ROOT_PATH"/bash_scripts/experiment_run_array.sh "lcbench" "power_law" "$ROOT_PATH/results" "$use_config"
-"$ROOT_PATH"/bash_scripts/experiment_run_array.sh "lcbench_mini" "power_law" "$ROOT_PATH/results" "$use_config"
+#"$ROOT_PATH"/bash_scripts/experiment_run_array.sh "lcbench_mini" "power_law" "$ROOT_PATH/results" "$use_config"
+
+"$ROOT_PATH"/bash_scripts/experiment_run_array.sh "synthetic_mf" "random" "$ROOT_PATH/results" "$use_config"
 
 #"$ROOT_PATH"/bash_scripts/experiment_run_array.sh "taskset" "dyhpo" "$ROOT_PATH/results" "$use_config"
 #"$ROOT_PATH"/bash_scripts/experiment_run_array.sh "lcbench" "dyhpo" "$ROOT_PATH/results" "$use_config"

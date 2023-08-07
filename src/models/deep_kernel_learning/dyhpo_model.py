@@ -2,7 +2,7 @@ import time
 from copy import deepcopy
 import os
 from typing import Dict, Tuple, Any, Optional
-from numpy.typing import NDArray
+# from numpy.typing import NDArray
 import numpy as np
 import torch
 from loguru import logger
@@ -762,7 +762,7 @@ class DyHPOModel(BasePytorchModule):
         train_data: TabularDataset,
         target_normalization_inverse_fn=None,
         target_normalization_std_inverse_fn=None
-    ) -> Tuple[NDArray[np.float32], NDArray[np.float32], Optional[Dict[str, Any]]]:
+    ) -> Tuple[np.ndarray, np.ndarray, Optional[Dict[str, Any]]]:
         means, stds, predict_info, power_law_loss, model_stds = self._predict(
             test_data=test_data,
             train_data=train_data,
@@ -784,7 +784,7 @@ class DyHPOModel(BasePytorchModule):
         train_data: TabularDataset,
         target_normalization_inverse_fn=None,
         target_normalization_std_inverse_fn=None
-    ) -> Tuple[NDArray[np.float32], NDArray[np.float32], Optional[Dict[str, Any]], float, NDArray[np.float32]]:
+    ) -> Tuple[np.ndarray, np.ndarray, Optional[Dict[str, Any]], float, np.ndarray]:
         """
 
         Args:
@@ -864,7 +864,7 @@ class DyHPOModel(BasePytorchModule):
         test_data: TabularDataset,
         train_data: TabularDataset,
         **kwargs
-    ) -> Tuple[NDArray[np.float32], NDArray[np.float32], Optional[Dict[str, Any]], float, NDArray[np.float32]]:
+    ) -> Tuple[np.ndarray, np.ndarray, Optional[Dict[str, Any]], float, np.ndarray]:
         """
 
         Args:

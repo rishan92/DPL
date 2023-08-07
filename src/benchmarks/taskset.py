@@ -5,7 +5,7 @@ from collections import OrderedDict
 from pathlib import Path
 
 import numpy as np
-from numpy.typing import NDArray
+# from numpy.typing import NDArray
 import pandas as pd
 
 from src.benchmarks.base_benchmark import BaseBenchmark
@@ -118,7 +118,7 @@ class TaskSet(BaseBenchmark):
 
         return dataset_file_names
 
-    def get_hyperparameter_candidates(self) -> NDArray:
+    def get_hyperparameter_candidates(self) -> np.ndarray:
 
         return np.array(self.hp_candidates)
 

@@ -4,7 +4,7 @@ from pathlib import Path
 from functools import lru_cache
 
 import numpy as np
-from numpy.typing import NDArray
+# from numpy.typing import NDArray
 import pandas as pd
 
 from src.benchmarks.base_benchmark import BaseBenchmark

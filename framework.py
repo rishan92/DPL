@@ -3,7 +3,7 @@ import json
 import os
 import time
 import numpy as np
-from numpy.typing import NDArray
+# from numpy.typing import NDArray
 import pandas as pd
 import sklearn
 from sklearn.preprocessing import MinMaxScaler
@@ -195,7 +195,7 @@ class Framework:
             self.pred_trend_path.mkdir(parents=True, exist_ok=True)
             delete_folder_content(self.pred_trend_path)
 
-        self.hp_candidates: NDArray
+        self.hp_candidates: np.ndarray
         if self.surrogate_name not in disable_preprocessing:
             self.hp_candidates = self.preprocess(self.benchmark.get_hyperparameter_candidates())
         else:
@@ -266,6 +266,7 @@ class Framework:
             best_value = np.NINF
 
         incumbent_value = self.benchmark.get_best_performance()
+        total_fidelity_cost = 0
 
         plot_pred_curves_fidelity_percentile = np.array([5, 10, 20, 40]) / 50
         plot_pred_curves_fidelity = []
@@ -338,14 +339,6 @@ class Framework:
 
             time_duration = time.time() - start_time
 
-            # if hp_index in evaluated_configs:
-            #     previous_budget = evaluated_configs[hp_index]
-            # else:
-            #     previous_budget = 0
-
-            # budget_cost = budget - previous_budget
-            # evaluated_configs[hp_index] = budget
-
             # step_time_duration = time_duration / budget_cost
             step_time_duration = time_duration
 
@@ -381,7 +374,25 @@ class Framework:
             #     else:
             #         raise NotImplementedError
             #     log_budget.append(v)
-            log_fidelity = self.fidelity_manager.get_fidelities(best_fidelity_id)
+            # log_fidelity = self.fidelity_manager.get_fidelities(best_fidelity_id)
+            log_fidelity = tuple(float(x) for x in best_fidelity_id)
+            normalized_log_fidelity = (log_fidelity[0] / 5000, log_fidelity[1] / 10)
+
+            if best_hp_index in evaluated_configs:
+                previous_budgets = evaluated_configs[best_hp_index]
+                max_previous_normalized_fidelity = [max(element) for element in zip(*previous_budgets)]
+            else:
+                evaluated_configs[best_hp_index] = []
+                max_previous_normalized_fidelity = [0] * len(log_fidelity)
+
+            # budget_cost = budget - previous_budget
+            fidelity_cost = sum(
+                max(a - b, 0) for a, b in zip(normalized_log_fidelity, max_previous_normalized_fidelity))
+            fidelity_cost /= len(log_fidelity)
+            total_fidelity_cost += fidelity_cost
+
+            evaluated_configs[best_hp_index].append(normalized_log_fidelity)
+
             self.log_info(
                 int(best_hp_index),
                 float(budget_performance),
@@ -396,6 +407,8 @@ class Framework:
                 'hpo/overhead': step_time_duration,
                 'hpo/surrogate_budget': self.surrogate_budget,
                 'hpo/regret': regret,
+                'hpo/cost': total_fidelity_cost,
+                'hpo/fidelity_cost': fidelity_cost,
             }
             for i, name in enumerate(self.fidelity_manager.fidelity_names):
                 metrics[f'hpo/{name}'] = log_fidelity[i]
@@ -407,7 +420,7 @@ class Framework:
 
         self.finish()
 
-    def preprocess(self, hp_candidates: Union[NDArray, pd.DataFrame]) -> NDArray:
+    def preprocess(self, hp_candidates: Union[np.ndarray, pd.DataFrame]) -> np.ndarray:
         """Preprocess the hyperparameter candidates.
 
         Performs min-max standardization for the numerical attributes and

@@ -4,7 +4,7 @@ import os
 import time
 from typing import List, Tuple, Dict, Optional, Any, Union, Type
 import pandas as pd
-from numpy.typing import NDArray
+# from numpy.typing import NDArray
 from loguru import logger
 import numpy as np
 import random

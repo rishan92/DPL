@@ -3,7 +3,9 @@ from typing import List, Union, Dict, Tuple
 from pathlib import Path
 
 import numpy as np
-from numpy.typing import NDArray
+
+
+# from numpy.typing import NDArray
 
 
 class BaseBenchmark(ABC):
@@ -29,7 +31,7 @@ class BaseBenchmark(ABC):
         raise NotImplementedError('Please implement the load_dataset_names method')
 
     @abstractmethod
-    def get_hyperparameter_candidates(self) -> NDArray:
+    def get_hyperparameter_candidates(self) -> np.ndarray:
         raise NotImplementedError('Please extend the get_hyperparameter_candidates method')
 
     @abstractmethod

@@ -2,7 +2,7 @@ import math
 from collections import OrderedDict
 from typing import List
 import numpy as np
-from numpy.typing import NDArray
+# from numpy.typing import NDArray
 import pandas as pd
 from pathlib import Path
 import json
@@ -254,7 +254,7 @@ class SyntheticMFBench(BaseBenchmark):
 
         return hyperparameter_info
 
-    def generate_hyperparameter_candidates(self, benchmark: CS.ConfigurationSpace) -> NDArray:
+    def generate_hyperparameter_candidates(self, benchmark: CS.ConfigurationSpace) -> np.ndarray:
         if self.seed is not None:
             benchmark.seed(seed=self.seed)
         configs = benchmark.sample_configuration(SyntheticMFBench.nr_hyperparameters)
@@ -267,7 +267,7 @@ class SyntheticMFBench(BaseBenchmark):
 
         return hp_configs
 
-    def get_hyperparameter_candidates(self) -> NDArray:
+    def get_hyperparameter_candidates(self) -> np.ndarray:
         return self.benchmark_config_pd
 
     def get_best_performance(self):
@@ -376,8 +376,8 @@ class SyntheticMFBench(BaseBenchmark):
         # else:
         #     fidelity_dict = budget
         # config_dict.update(fidelity_dict)
-
-        fidelity_dict = self.fidelity_manager.get_fidelities(fidelity_id, return_dict=True)
+        # fidelity_dict = self.fidelity_manager.get_fidelities(fidelity_id, return_dict=True)
+        fidelity_dict = dict(zip(self.fidelity_names, fidelity_id))
 
         metric = self.get_benchmark_objective_function(configuration_id=hp_index, fidelity=fidelity_dict)
 

@@ -3,7 +3,7 @@ from typing import List, Union, Dict, Tuple
 from pathlib import Path
 
 import numpy as np
-from numpy.typing import NDArray
+# from numpy.typing import NDArray
 import pandas as pd
 
 from src.benchmarks.base_benchmark import BaseBenchmark

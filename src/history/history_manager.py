@@ -15,7 +15,7 @@ import copy
 from src.dataset.tabular_dataset import TabularDataset
 import functools
 from functools import partial
-from numpy.typing import NDArray
+# from numpy.typing import NDArray
 from src.utils.utils import get_class_from_package, get_class_from_packages, numpy_to_torch_apply
 import src.models.activation_functions
 from src.benchmarks.base_benchmark import BaseBenchmark
@@ -204,8 +204,8 @@ class HistoryManager:
         return last_sample
 
     def history_configurations(self, curve_size_mode) -> \
-        Tuple[NDArray[int], NDArray[np.float32], List[Tuple[int]], Optional[NDArray[np.float32]],
-              NDArray[np.float32], NDArray[np.float32], pd.DataFrame]:
+        Tuple[np.ndarray, np.ndarray, List[Tuple[int]], Optional[np.ndarray],
+              np.ndarray, np.ndarray, pd.DataFrame]:
         """
         Generate the configurations, labels, budgets and curves
         based on the history of evaluated configurations.
@@ -463,7 +463,7 @@ class HistoryManager:
 
         return pred_test_data, real_budgets_id, max_train_fidelity
 
-    def get_processed_curves(self, curves, curve_size_mode, real_budgets) -> Optional[NDArray[np.float32]]:
+    def get_processed_curves(self, curves, curve_size_mode, real_budgets) -> Optional[np.ndarray]:
         if self.use_learning_curve:
             if curve_size_mode == "variable":
                 min_size = self.cnn_kernel_size
@@ -480,7 +480,7 @@ class HistoryManager:
             curves = None
         return curves
 
-    def patch_curves_to_same_length(self, curves: List[List[float]], min_size: int) -> NDArray[np.float32]:
+    def patch_curves_to_same_length(self, curves: List[List[float]], min_size: int) -> np.ndarray:
         """
         Patch the given curves to the same length.
 
@@ -574,7 +574,7 @@ class HistoryManager:
 
         return best_value
 
-    def add_curve_missing_value_mask(self, curves: NDArray[np.float32], budgets: List[int]) -> NDArray[np.float32]:
+    def add_curve_missing_value_mask(self, curves: np.ndarray, budgets: List[int]) -> np.ndarray:
         missing_value_mask = self.prepare_missing_values_masks(budgets, curves.size(1))
 
         # add depth dimension to the train_curves array and missing_value_matrix
@@ -591,7 +591,7 @@ class HistoryManager:
         mask[:budget] = True
         return mask
 
-    def prepare_missing_values_masks(self, budgets: List[int], size: int) -> NDArray[bool]:
+    def prepare_missing_values_masks(self, budgets: List[int], size: int) -> np.ndarray:
         missing_value_masks = []
 
         for i in range(len(budgets)):
@@ -623,7 +623,7 @@ class HistoryManager:
         return mean_initial_value
 
     def get_candidate_configurations_dataset(self, predict_mode, curve_size_mode) -> \
-        Tuple[TabularDataset, NDArray[int], List[Dict]]:
+        Tuple[TabularDataset, np.ndarray, List[Dict]]:
 
         if not self.is_test_data_modified:
             return self.cached_test_dataset
@@ -679,7 +679,7 @@ class HistoryManager:
     # TODO: break this function to only handle candidates in history and make config manager handle configs
     #  not in history
     def generate_candidate_configurations(self, predict_mode, curve_size_mode) -> \
-        Tuple[NDArray[int], List[Tuple[int]], List[Tuple[int]], Optional[NDArray[np.float32]], pd.DataFrame]:
+        Tuple[np.ndarray, List[Tuple[int]], List[Tuple[int]], Optional[np.ndarray], pd.DataFrame]:
         """Generate candidate configurations that will be
         fantasized upon.
 
@@ -771,8 +771,7 @@ class HistoryManager:
         return hp_indices, hp_fidelity_ids, real_fidelity_ids, hp_curves, hp_extra_budgets
 
     def all_configurations(self, curve_size_mode, benchmark: BaseBenchmark) -> \
-        Tuple[NDArray[int], NDArray[np.float32], NDArray[np.float32], Optional[NDArray[np.float32]], NDArray[bool],
-              NDArray[np.float32]]:
+        Tuple[np.ndarray, np.ndarray, np.ndarray, Optional[np.ndarray], np.ndarray, np.ndarray]:
 
         train_indices = []
         train_labels = []

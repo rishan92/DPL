@@ -4,7 +4,7 @@ from pathlib import Path
 
 import ConfigSpace as CS
 import numpy as np
-from numpy.typing import NDArray
+# from numpy.typing import NDArray
 import pandas as pd
 
 import jahs_bench
@@ -180,7 +180,7 @@ class JAHSBench(BaseBenchmark):
     def load_dataset_names(self) -> List[str]:
         return self.benchmark.instances
 
-    def generate_hyperparameter_candidates(self, benchmark) -> NDArray:
+    def generate_hyperparameter_candidates(self, benchmark) -> np.ndarray:
         hp_configs = [benchmark.sample_config() for _ in range(JAHSBench.nr_hyperparameters)]
 
         return hp_configs

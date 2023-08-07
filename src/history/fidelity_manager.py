@@ -2,20 +2,31 @@ import numpy as np
 from typing import List, Union, Dict, Tuple, Optional
 import ConfigSpace as CS
 import itertools
-from numpy.typing import NDArray
+
+
+# from numpy.typing import NDArray
 
 
 class FidelityManager:
-    def __init__(self, fidelity_space: Dict[str, Union[List, NDArray]], num_configurations: int):
+    def __init__(self, fidelity_space: Dict[str, Union[List, np.ndarray]], num_configurations: int):
         self.fidelity_space = fidelity_space
         self.fidelity_names = list(self.fidelity_space.keys())
         self.num_configurations = num_configurations
         self.fidelity_id_to_fidelity_map, self.fidelity_id_to_normalized_fidelity_map = self.generate_fidelity_tensor()
         self.fidelity_to_fidelity_id_map = self.get_reverse_mapping(self.fidelity_id_to_fidelity_map)
         self.fidelity_ids: List[Optional[Tuple[int]]] = [None] * self.num_configurations
+        self.fidelity: List[Optional[Tuple[int]]] = [None] * self.num_configurations
         self.fidelity_path_ids: List[Tuple[int]] = []
         self.first_fidelity_id: Tuple[int] = tuple([0] * len(self.fidelity_space))
         self.last_fidelity_id: Tuple[int] = tuple([len(self.fidelity_space[k]) - 1 for k in self.fidelity_names])
+
+    def convert_fidelity_id_to_fidelity(self, fidelity_id, is_normalized=False):
+        fidelity_map = \
+            self.fidelity_id_to_normalized_fidelity_map if is_normalized else self.fidelity_id_to_fidelity_map
+        return fidelity_map[fidelity_id]
+
+    def convert_fidelity_to_fidelity_id(self, fidelity):
+        return self.fidelity_to_fidelity_id_map[fidelity]
 
     def min_fidelity(self):
         return self.fidelity_id_to_fidelity_map[self.first_fidelity_id]

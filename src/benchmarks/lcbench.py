@@ -3,7 +3,7 @@ from typing import List
 from pathlib import Path
 
 import numpy as np
-from numpy.typing import NDArray
+# from numpy.typing import NDArray
 
 from src.benchmarks.base_benchmark import BaseBenchmark
 from lc_bench.api import Benchmark
@@ -76,7 +76,7 @@ class LCBench(BaseBenchmark):
 
         return self.benchmark.get_dataset_names()
 
-    def get_hyperparameter_candidates(self) -> NDArray:
+    def get_hyperparameter_candidates(self) -> np.ndarray:
 
         hp_names = list(LCBench.param_space.keys())
         hp_configs = []

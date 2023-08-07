@@ -86,9 +86,9 @@ def main():
     dataset_files_path = Path("./bash_scripts")
 
     method_names = ['power_law', 'dyhpo', 'random']
-    method_names = ['power_law', 'dyhpo']
+    method_names = ['dyhpo_baseline', 'dyhpo_hist']
     benchmark_names = ['taskset', 'lcbench']
-    benchmark_names = ['pd1']
+    benchmark_names = ['lcbench_mini']
     dataset_names = None
     # dataset_names = ['FixedTextRNNClassification_imdb_patch32_GRU64_avg_bs128',
     #                  'FixedTextRNNClassification_imdb_patch32_GRU128_bs128']
@@ -107,7 +107,7 @@ def main():
     # plot_results_f(y_metric='curve', x_metric='epochs', aggregate_level='benchmark')
     # plot_results_f(y_metric='regret', x_metric='epochs', aggregate_level=None)
     plot_results_f(y_metric='regret', x_metric='epochs', aggregate_level='dataset', y_log=True, plot_std=False)
-    plot_results_f(y_metric='regret', x_metric='epochs', aggregate_level='benchmark', y_log=True, plot_std=False)
+    # plot_results_f(y_metric='regret', x_metric='epochs', aggregate_level='benchmark', y_log=True, plot_std=False)
     # plot_results_f(y_metric='best_regret', x_metric='first_curve', aggregate_level='dataset', plot_std=False)
 
 

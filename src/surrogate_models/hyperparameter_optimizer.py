@@ -4,7 +4,7 @@ import os
 import time
 from typing import List, Tuple, Dict, Optional, Any, Union, Type
 import pandas as pd
-from numpy.typing import NDArray
+# from numpy.typing import NDArray
 from loguru import logger
 import numpy as np
 import random
@@ -139,7 +139,7 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
         else:
             self.dev = torch.device(device)
 
-        self.hp_candidates: NDArray[np.float32] = hp_candidates.astype(dtype=np.float32)
+        self.hp_candidates: np.ndarray = hp_candidates.astype(dtype=np.float32)
 
         self.minimization = minimization
         self.seed = seed
@@ -386,7 +386,7 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
         return return_state
 
     def _predict(self) -> Tuple[
-        NDArray[np.float32], NDArray[np.float32], NDArray[int], List[Dict], Optional[Dict], NDArray[np.float32]]:
+        np.ndarray, np.ndarray, np.ndarray, List[Dict], Optional[Dict], np.ndarray]:
         """
         Predict the performances of the hyperparameter configurations
         as well as the standard deviations based on the ensemble.
@@ -540,11 +540,12 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
                     self.prediction_params_pd.loc[self.iterations_counter, (hp_indices, k)] = v
 
         fidelity_id = self.fidelity_manager.get_next_fidelity_id(configuration_id=suggested_hp_index)
+        fidelity = self.fidelity_manager.convert_fidelity_id_to_fidelity(fidelity_id=fidelity_id)
 
         suggest_time_end = time.time()
         self.suggest_time_duration = suggest_time_end - suggest_time_start
 
-        return suggested_hp_index, fidelity_id
+        return suggested_hp_index, fidelity
 
     def observe(self, hp_index: int, budget: List[Tuple[int]], hp_curve: List):
         """Receive information regarding the performance of a hyperparameter
@@ -559,6 +560,11 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
                 The performance of the hyperparameter configuration.
         """
         self.surrogate_budget += 1
+        budget_id = []
+        for b in budget:
+            b_id = self.fidelity_manager.convert_fidelity_to_fidelity_id(fidelity=b)
+            budget_id.append(b_id)
+        budget = budget_id
 
         for index, curve_element in enumerate(hp_curve):
             if np.isnan(curve_element):
@@ -684,15 +690,15 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
 
     def find_suggested_config(
         self,
-        mean_predictions: NDArray[np.float32],
-        mean_stds: NDArray[np.float32],
+        mean_predictions: np.ndarray,
+        mean_stds: np.ndarray,
         budgets: List[Dict] = None,
         acq_mode: str = 'ei',
         acq_best_value_mode: str = None,
         exploitation_mask=None,
         hp_indices=None,
         acq_explore_factor=0,
-        mean_model_stds: Optional[NDArray[np.float32]] = None,
+        mean_model_stds: Optional[np.ndarray] = None,
     ) -> int:
         """Return the hyperparameter with the highest acq function value.
 
