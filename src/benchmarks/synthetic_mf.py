@@ -6,8 +6,6 @@ import numpy as np
 import pandas as pd
 from pathlib import Path
 import json
-from ConfigSpace.hyperparameters import FloatHyperparameter, IntegerHyperparameter, Constant, \
-    CategoricalHyperparameter, OrdinalHyperparameter
 import ConfigSpace as CS
 from ConfigSpace import Float, Integer, OrdinalHyperparameter, Categorical
 from dragonfly import load_config_file
@@ -72,6 +70,9 @@ class SyntheticMFBench(BaseBenchmark):
         self.is_new_data_added = False
 
         self.init_benchmark()
+
+        self.nr_hyperparameters = SyntheticMFBench.nr_hyperparameters
+        self.max_budgets = SyntheticMFBench.max_budgets
 
         self.max_value = self.get_best_performance()
         self.min_value = self.get_worst_performance()
@@ -208,53 +209,7 @@ class SyntheticMFBench(BaseBenchmark):
 
         return config_space, config_names, all_dimensions
 
-    def extract_hyperparameter_info(self, config_space):
-        hyperparameter_info = OrderedDict()
-        for hp in config_space.get_hyperparameters():
-            hp_name = hp.name
-            default_value = hp.default_value
-            is_log = False
-            categories = []
-            if isinstance(hp, Constant):
-                value = hp.value
-                if isinstance(value, float):
-                    hp_type = 'float'
-                elif isinstance(value, int):
-                    hp_type = 'int'
-                elif isinstance(value, str):
-                    hp_type = 'str'
-                    categories = [value]
-                else:
-                    raise NotImplementedError
-                lower = upper = value
-            elif isinstance(hp, FloatHyperparameter):
-                hp_type = 'float'
-                is_log = hp.log
-                lower = hp.lower
-                upper = hp.upper
-            elif isinstance(hp, IntegerHyperparameter):
-                hp_type = 'int'
-                is_log = hp.log
-                lower = hp.lower
-                upper = hp.upper
-            elif isinstance(hp, CategoricalHyperparameter):
-                hp_type = 'str'
-                lower = 0
-                upper = 0
-                categories = hp.choices
-            elif isinstance(hp, OrdinalHyperparameter):
-                hp_type = 'ord'
-                lower = 0
-                upper = len(hp.sequence) - 1
-                categories = hp.sequence
-            else:
-                raise NotImplementedError(f"Hyperparameter type not implemented: {hp}")
-
-            hyperparameter_info[hp_name] = [lower, upper, hp_type, is_log, categories, default_value]
-
-        return hyperparameter_info
-
-    def generate_hyperparameter_candidates(self, benchmark: CS.ConfigurationSpace) -> np.ndarray:
+    def generate_hyperparameter_candidates(self, benchmark: CS.ConfigurationSpace) -> List[Dict]:
         if self.seed is not None:
             benchmark.seed(seed=self.seed)
         configs = benchmark.sample_configuration(SyntheticMFBench.nr_hyperparameters)
@@ -269,15 +224,6 @@ class SyntheticMFBench(BaseBenchmark):
 
     def get_hyperparameter_candidates(self) -> np.ndarray:
         return self.benchmark_config_pd
-
-    def get_best_performance(self):
-        incumbent_curve = self.get_incumbent_curve()
-        if self.is_minimize:
-            best_value = min(incumbent_curve)
-        else:
-            best_value = max(incumbent_curve)
-
-        return best_value
 
     def get_benchmark_config(self, config_id):
         column_name = self.config_ids[config_id]
@@ -357,14 +303,6 @@ class SyntheticMFBench(BaseBenchmark):
 
         return metrics, fidelity_dicts
 
-    def get_curve_best(self, hp_index: int) -> float:
-        curve, _ = self.get_curve(hp_index, self.max_budget)
-        if self.is_minimize:
-            best_value = min(curve)
-        else:
-            best_value = max(curve)
-        return best_value
-
     def get_performance(self, hp_index: int, fidelity_id: Tuple[int]) -> float:
         config_dict = self.benchmark_config[hp_index]
 
@@ -383,51 +321,12 @@ class SyntheticMFBench(BaseBenchmark):
 
         return metric
 
-    @lru_cache
-    def get_incumbent_curve(self):
-        best_value = np.PINF if self.is_minimize else np.NINF
-        best_curve = None
-        for index in range(SyntheticMFBench.nr_hyperparameters):
-            val_curve, _ = self.get_curve(hp_index=index, budget=SyntheticMFBench.max_budgets)
-            # print(f"loaded {index}")
-            if self.is_minimize:
-                value = min(val_curve)
-                if value < best_value:
-                    best_value = value
-                    best_curve = val_curve
-            else:
-                value = max(val_curve)
-                if value > best_value:
-                    best_value = value
-                    best_curve = val_curve
-        self.save_benchmark()
-        return best_curve
-
-    @lru_cache
-    def get_worst_performance(self):
-        min_value = np.PINF if self.is_minimize else np.NINF
-        for hp_index in range(SyntheticMFBench.nr_hyperparameters):
-            val_curve, _ = self.get_curve(hp_index=hp_index, budget=SyntheticMFBench.max_budgets)
-            if self.is_minimize:
-                worst_performance_hp_curve = max(val_curve)
-                if worst_performance_hp_curve < min_value:
-                    min_value = worst_performance_hp_curve
-            else:
-                worst_performance_hp_curve = min(val_curve)
-                if worst_performance_hp_curve > min_value:
-                    min_value = worst_performance_hp_curve
-        self.save_benchmark()
-        return min_value
-
-    def get_incumbent_config_id(self):
-        return 0
-
     def get_fidelity_manager(self):
         return self.fidelity_manager
 
     def save_benchmark(self):
-        print("Saving benchmark data")
         if self.is_new_data_added:
+            print("Saving benchmark data")
             self.root_save_path.mkdir(parents=True, exist_ok=True)
             benchmark_path = self.root_save_path / f"{self.dataset_name}_seed_{self.seed}.parquet"
             self.benchmark_results.to_parquet(path=benchmark_path)
@@ -444,6 +343,10 @@ class SyntheticMFBench(BaseBenchmark):
             benchmark.set_index(multi_index_columns, inplace=True)
 
         return benchmark
+
+    def calc_benchmark_stats(self):
+        super().calc_benchmark_stats()
+        self.save_benchmark()
 
     def close(self):
         self.save_benchmark()

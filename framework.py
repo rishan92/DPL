@@ -266,7 +266,7 @@ class Framework:
             best_value = np.NINF
 
         incumbent_value = self.benchmark.get_best_performance()
-        total_fidelity_cost = 0
+        total_surrogate_cost = 0
 
         plot_pred_curves_fidelity_percentile = np.array([5, 10, 20, 40]) / 50
         plot_pred_curves_fidelity = []
@@ -275,7 +275,10 @@ class Framework:
             indices = [int(round(p * (n - 1))) for p in plot_pred_curves_fidelity_percentile]
             plot_pred_curves_fidelity.append(set(indices))
 
-        while self.surrogate_budget < self.total_budget:
+        total_cost = self.total_budget * 0.1
+
+        # while self.surrogate_budget < self.total_budget:
+        while total_surrogate_cost < total_cost:
 
             start_time = time.time()
             hp_indices, fidelity_ids = self.surrogate.suggest()
@@ -389,16 +392,18 @@ class Framework:
             fidelity_cost = sum(
                 max(a - b, 0) for a, b in zip(normalized_log_fidelity, max_previous_normalized_fidelity))
             fidelity_cost /= len(log_fidelity)
-            total_fidelity_cost += fidelity_cost
+            total_surrogate_cost += fidelity_cost
 
             evaluated_configs[best_hp_index].append(normalized_log_fidelity)
 
             self.log_info(
-                int(best_hp_index),
-                float(budget_performance),
-                log_fidelity,
-                float(best_value),
-                step_time_duration,
+                hp_index=int(best_hp_index),
+                performance=float(budget_performance),
+                budget=log_fidelity,
+                best_value_observed=float(best_value),
+                time_duration=step_time_duration,
+                fidelity_cost=fidelity_cost,
+                surrogate_cost=total_surrogate_cost,
             )
             metrics = {
                 'hpo/hp': int(best_hp_index),
@@ -407,14 +412,15 @@ class Framework:
                 'hpo/overhead': step_time_duration,
                 'hpo/surrogate_budget': self.surrogate_budget,
                 'hpo/regret': regret,
-                'hpo/cost': total_fidelity_cost,
+                'hpo/cost': total_surrogate_cost,
                 'hpo/fidelity_cost': fidelity_cost,
             }
             for i, name in enumerate(self.fidelity_manager.fidelity_names):
                 metrics[f'hpo/{name}'] = log_fidelity[i]
             wandb.log(metrics)
 
-            if self.surrogate_budget >= self.total_budget or self.surrogate_budget >= self.benchmark.size():
+            # if self.surrogate_budget >= self.total_budget or self.surrogate_budget >= self.benchmark.size():
+            if total_surrogate_cost >= total_cost or self.surrogate_budget >= self.benchmark.size():
                 self.finish()
                 return
 
@@ -514,9 +520,11 @@ class Framework:
         self,
         hp_index: int,
         performance: float,
-        budget: List,
+        budget: Union[List, Tuple],
         best_value_observed: float,
         time_duration: float,
+        fidelity_cost: float,
+        surrogate_cost: float,
     ):
         """Log information after every HPO iteration.
 
@@ -560,6 +568,16 @@ class Framework:
             self.info_dict['overhead'].append(time_duration)
         else:
             self.info_dict['overhead'] = [time_duration]
+
+        if 'fidelity_cost' in self.info_dict:
+            self.info_dict['fidelity_cost'].append(fidelity_cost)
+        else:
+            self.info_dict['fidelity_cost'] = [fidelity_cost]
+
+        if 'surrogate_cost' in self.info_dict:
+            self.info_dict['surrogate_cost'].append(surrogate_cost)
+        else:
+            self.info_dict['surrogate_cost'] = [surrogate_cost]
 
         with open(self.result_file, 'w') as fp:
             json.dump(self.info_dict, fp)
