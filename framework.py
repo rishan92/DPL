@@ -415,6 +415,14 @@ class Framework:
                 'hpo/cost': total_surrogate_cost,
                 'hpo/fidelity_cost': fidelity_cost,
             }
+            if fidelity_cost > 0:
+                metrics['hpo/surrogate_cost'] = total_surrogate_cost
+                metrics['hpo/c_regret'] = regret
+                metrics['hpo/c_curve'] = best_value
+                metrics['hpo/c_hp'] = int(best_hp_index)
+                metrics['hpo/c_scores'] = budget_performance
+                metrics['hpo/c_overhead'] = step_time_duration
+                metrics['hpo/c_fidelity_cost'] = fidelity_cost
             for i, name in enumerate(self.fidelity_manager.fidelity_names):
                 metrics[f'hpo/{name}'] = log_fidelity[i]
             wandb.log(metrics)
