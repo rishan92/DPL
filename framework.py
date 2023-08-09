@@ -404,6 +404,7 @@ class Framework:
                 time_duration=step_time_duration,
                 fidelity_cost=fidelity_cost,
                 surrogate_cost=total_surrogate_cost,
+                regret=regret,
             )
             metrics = {
                 'hpo/hp': int(best_hp_index),
@@ -533,6 +534,7 @@ class Framework:
         time_duration: float,
         fidelity_cost: float,
         surrogate_cost: float,
+        regret: float,
     ):
         """Log information after every HPO iteration.
 
@@ -586,6 +588,11 @@ class Framework:
             self.info_dict['surrogate_cost'].append(surrogate_cost)
         else:
             self.info_dict['surrogate_cost'] = [surrogate_cost]
+            
+        if 'regret' in self.info_dict:
+            self.info_dict['regret'].append(regret)
+        else:
+            self.info_dict['regret'] = [regret]
 
         with open(self.result_file, 'w') as fp:
             json.dump(self.info_dict, fp)

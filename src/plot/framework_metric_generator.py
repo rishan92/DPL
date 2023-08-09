@@ -15,6 +15,7 @@ from functools import partial
 from src.benchmarks.lcbench import LCBench
 from src.benchmarks.taskset import TaskSet
 from src.benchmarks.hyperbo import PD1
+from src.benchmarks.synthetic_mf import SyntheticMFBench
 
 
 class FrameworkMetricsGenerator:
@@ -57,6 +58,13 @@ class FrameworkMetricsGenerator:
                 'kwargs': {
                     'path_to_json_files': str(Path('pd1')),
                     'dataset_name': 'uniref50_transformer_batch_size_128'
+                }
+            },
+            'synthetic_mf': {
+                'class': SyntheticMFBench,
+                'kwargs': {
+                    'path_to_json_files': str(Path('synthetic_mf')),
+                    'dataset_name': 'park2_3'
                 }
             }
         }

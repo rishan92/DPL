@@ -86,9 +86,9 @@ def main():
     dataset_files_path = Path("./bash_scripts")
 
     method_names = ['power_law', 'dyhpo', 'random']
-    method_names = ['dyhpo_baseline', 'dyhpo_hist']
+    method_names = ['dyhpo', 'dragonfly', 'random']
     benchmark_names = ['taskset', 'lcbench']
-    benchmark_names = ['lcbench_mini']
+    benchmark_names = ['synthetic_mf']
     dataset_names = None
     # dataset_names = ['FixedTextRNNClassification_imdb_patch32_GRU64_avg_bs128',
     #                  'FixedTextRNNClassification_imdb_patch32_GRU128_bs128']
