@@ -8,9 +8,7 @@ from pathlib import Path
 import json
 import ConfigSpace as CS
 from ConfigSpace import Float, Integer, OrdinalHyperparameter, Categorical
-from dragonfly import load_config_file
 from typing import List, Union, Dict, Tuple, Optional
-from functools import lru_cache
 
 from src.benchmarks.base_benchmark import BaseBenchmark
 from src.history.fidelity_manager import FidelityManager

@@ -275,7 +275,7 @@ class Framework:
             indices = [int(round(p * (n - 1))) for p in plot_pred_curves_fidelity_percentile]
             plot_pred_curves_fidelity.append(set(indices))
 
-        total_cost = self.total_budget * 0.1
+        total_cost = self.total_budget
 
         # while self.surrogate_budget < self.total_budget:
         while total_surrogate_cost < total_cost:
@@ -588,7 +588,7 @@ class Framework:
             self.info_dict['surrogate_cost'].append(surrogate_cost)
         else:
             self.info_dict['surrogate_cost'] = [surrogate_cost]
-            
+
         if 'regret' in self.info_dict:
             self.info_dict['regret'].append(regret)
         else:

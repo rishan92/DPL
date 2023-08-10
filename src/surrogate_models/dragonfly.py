@@ -3,11 +3,17 @@ from argparse import Namespace
 import threading
 import numpy as np
 from typing import Dict, List, OrderedDict, Tuple
-
-from dragonfly import load_config, maximize_multifidelity_function, minimize_multifidelity_function
+import git
 
 from src.surrogate_models.base_hyperparameter_optimizer import BaseHyperparameterOptimizer
 from src.history.fidelity_manager import FidelityManager
+
+try:
+    from dragonfly.dragonfly import load_config, maximize_multifidelity_function, minimize_multifidelity_function
+except:
+    repo = git.Repo.clone_from('https://github.com/rishan92/dragonfly.git', '.')
+    repo.git.checkout('dpl_mod')
+    from dragonfly.dragonfly import load_config, maximize_multifidelity_function, minimize_multifidelity_function
 
 
 class DragonFlyOptimizer(BaseHyperparameterOptimizer):
@@ -57,6 +63,8 @@ class DragonFlyOptimizer(BaseHyperparameterOptimizer):
 
         self.evaluated_configurations = dict()
         self.evaluated_hp_curves = dict()
+        self.evaluated_budgets = dict()
+        self.to_add_evaluated_budgets = dict()
         # Basically the same as evaluated_hp_curves. However, this will
         # be used to estimate the evaluation cost for a certain fidelity.
         # If we used evaluated_hp_curves, the cost would always be zero
@@ -111,12 +119,47 @@ class DragonFlyOptimizer(BaseHyperparameterOptimizer):
         )
         self.dragonfly_run.start()
 
-    def fidel_cost_function(self, fidelity):
+    def fidel_cost_function(self, fidelity, configuration):
 
-        fidelity_value = fidelity[0]
-        fidelity_opt_cost = (fidelity[0] / 5000 + fidelity[1] / 10) / 2
-        print("fidel_cost_function", fidelity, fidelity_opt_cost)
+        fidelity = tuple(fidelity)
+        normalized_fidelity = (fidelity[0] / 5000, fidelity[1] / 10)
+
+        if configuration is None:
+            fidelity_opt_cost = sum(normalized_fidelity)
+            fidelity_opt_cost /= len(fidelity)
+            print("fidel_cost_function_No_Config", fidelity, fidelity_opt_cost)
+            return fidelity_opt_cost
+
+        configuration_id = self.map_configuration_to_index(list(configuration[0]))
+
+        if configuration_id in self.evaluated_budgets:
+            previous_budgets = self.evaluated_budgets[configuration_id]
+            max_previous_fidelity = [max(element) for element in zip(*previous_budgets)]
+        else:
+            max_previous_fidelity = [0] * len(fidelity)
+
+        max_previous_normalized_fidelity = (max_previous_fidelity[0] / 5000, max_previous_fidelity[1] / 10)
+
+        # budget_cost = budget - previous_budget
+        fidelity_opt_cost = sum(max(a - b, 0) for a, b in zip(normalized_fidelity, max_previous_normalized_fidelity))
+        fidelity_opt_cost /= len(fidelity)
+
+        # add to evaluated_budgets. This is called here not in the observe function, because dragonfly calls
+        # target function first and then the fidelity cost function to get related cost. Also it sometimes only calls
+        # fidelity cost function without calling target function.
+        if configuration_id in self.to_add_evaluated_budgets:
+            if fidelity in self.to_add_evaluated_budgets[configuration_id]:
+                if configuration_id not in self.evaluated_budgets:
+                    self.evaluated_budgets[configuration_id] = []
+                self.evaluated_budgets[configuration_id].append(fidelity)
+
+                self.to_add_evaluated_budgets[configuration_id].remove(fidelity)
+                if len(self.to_add_evaluated_budgets[configuration_id]) == 0:
+                    self.to_add_evaluated_budgets.pop(configuration_id)
+
+        print("fidel_cost_function", fidelity, fidelity_opt_cost, configuration_id)
         return fidelity_opt_cost
+
         # while True:
         #     if self.fidelity_index is not None:
         #         config_index = self.fidelity_index
@@ -288,6 +331,11 @@ class DragonFlyOptimizer(BaseHyperparameterOptimizer):
         if hp_index not in self.evaluated_hp_curves:
             self.evaluated_hp_curves[hp_index] = {}
         self.evaluated_hp_curves[hp_index][budget[-1]] = hp_curve[-1]
+
+        if hp_index not in self.to_add_evaluated_budgets:
+            self.to_add_evaluated_budgets[hp_index] = []
+        self.to_add_evaluated_budgets[hp_index].append(budget[-1])
+
         #
         # if budget[-1] == req_budget_id and hp_index == self.previous_config_index:
         #     assert self.next_conf is not None, 'Call get_next first.'
