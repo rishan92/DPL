@@ -8,12 +8,7 @@ import git
 from src.surrogate_models.base_hyperparameter_optimizer import BaseHyperparameterOptimizer
 from src.history.fidelity_manager import FidelityManager
 
-try:
-    from dragonfly.dragonfly import load_config, maximize_multifidelity_function, minimize_multifidelity_function
-except:
-    repo = git.Repo.clone_from('https://github.com/rishan92/dragonfly.git', '.')
-    repo.git.checkout('dpl_mod')
-    from dragonfly.dragonfly import load_config, maximize_multifidelity_function, minimize_multifidelity_function
+from dragonfly.dragonfly import load_config, maximize_multifidelity_function, minimize_multifidelity_function
 
 
 class DragonFlyOptimizer(BaseHyperparameterOptimizer):
