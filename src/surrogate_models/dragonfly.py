@@ -3,12 +3,14 @@ from argparse import Namespace
 import threading
 import numpy as np
 from typing import Dict, List, OrderedDict, Tuple
-import git
+import ConfigSpace as CS
+from ConfigSpace.hyperparameters import UniformFloatHyperparameter, UniformIntegerHyperparameter, \
+    CategoricalHyperparameter, OrdinalHyperparameter
+
+from dragonfly.dragonfly import load_config, maximize_multifidelity_function, minimize_multifidelity_function
 
 from src.surrogate_models.base_hyperparameter_optimizer import BaseHyperparameterOptimizer
 from src.history.fidelity_manager import FidelityManager
-
-from dragonfly.dragonfly import load_config, maximize_multifidelity_function, minimize_multifidelity_function
 
 
 class DragonFlyOptimizer(BaseHyperparameterOptimizer):
@@ -69,19 +71,19 @@ class DragonFlyOptimizer(BaseHyperparameterOptimizer):
         domain_vars = [
             {'type': 'discrete_euclidean', 'items': list(self.hyperparameter_candidates)},
         ]
-        self.fidelity_path_to_id_map = {i + 1: (i, i) for i in range(10)}
-        self.fidelity_id_to_path_map = {(i, i): i + 1 for i in range(10)}
-        fidelity_space = self.fidelity_manager.fidelity_space
+
         # fidel_vars = [
         #     {'type': 'discrete_numeric', 'items': fidelity_space['f0']},
         #     {'type': 'discrete_numeric', 'items': fidelity_space['f1']},
         # ]
-        fidel_vars = [
-            {'type': 'int', 'min': 10, 'max': 5000},
-            {'type': 'float', 'min': 1, 'max': 10},
-        ]
+        # fidel_vars = [
+        #     {'type': 'int', 'min': 10, 'max': 5000},
+        #     {'type': 'float', 'min': 1, 'max': 10},
+        # ]
+        fidelity_space_cs = self.fidelity_manager.get_raw_fidelity_space()
+        fidel_vars = self.convert_to_dragonfly_space(fidelity_space_cs)
 
-        fidel_to_opt = [5000, 10]
+        fidel_to_opt = self.fidelity_manager.last_fidelity
 
         config = {
             'domain': domain_vars,
@@ -117,7 +119,7 @@ class DragonFlyOptimizer(BaseHyperparameterOptimizer):
     def fidel_cost_function(self, fidelity, configuration):
 
         fidelity = tuple(fidelity)
-        normalized_fidelity = (fidelity[0] / 5000, fidelity[1] / 10)
+        normalized_fidelity = self.fidelity_manager.normalize_fidelity(fidelity=fidelity)
 
         if configuration is None:
             fidelity_opt_cost = sum(normalized_fidelity)
@@ -133,7 +135,7 @@ class DragonFlyOptimizer(BaseHyperparameterOptimizer):
         else:
             max_previous_fidelity = [0] * len(fidelity)
 
-        max_previous_normalized_fidelity = (max_previous_fidelity[0] / 5000, max_previous_fidelity[1] / 10)
+        max_previous_normalized_fidelity = self.fidelity_manager.normalize_fidelity(fidelity=max_previous_fidelity)
 
         # budget_cost = budget - previous_budget
         fidelity_opt_cost = sum(max(a - b, 0) for a, b in zip(normalized_fidelity, max_previous_normalized_fidelity))
@@ -155,30 +157,30 @@ class DragonFlyOptimizer(BaseHyperparameterOptimizer):
         print("fidel_cost_function", fidelity, fidelity_opt_cost, configuration_id)
         return fidelity_opt_cost
 
-        # while True:
-        #     if self.fidelity_index is not None:
-        #         config_index = self.fidelity_index
-        #         if config_index in self.fidelity_hp_curves:
-        #             budget_evaluated = self.fidelity_hp_curves[config_index]
-        #             # the hyperparameter configuration has been evaluated before
-        #             # and it was evaluated for a higher\same budget
-        #             if budget_evaluated >= fidelity_value:
-        #                 # there was a curve which was evaluated for longer
-        #                 fidelity_opt_cost = 0
-        #             else:
-        #                 # will only resume training for the extra query
-        #                 fidelity_opt_cost = fidelity_value - budget_evaluated
-        #                 self.fidelity_hp_curves[config_index] = fidelity_value
-        #         else:
-        #             # first evaluation
-        #             fidelity_opt_cost = fidelity_value
-        #             self.fidelity_hp_curves[config_index] = fidelity_value
-        #         self.fidelity_index = None
-        #         break
-        #     else:
-        #         time.sleep(1)
-        #
-        # return fidelity_opt_cost
+    def convert_to_dragonfly_space(self, config_space):
+        fidel_vars = []
+        for hp in config_space.get_hyperparameters():
+            var = {}
+            if isinstance(hp, UniformFloatHyperparameter):
+                var['type'] = 'float'
+                var['min'] = hp.lower
+                var['max'] = hp.upper
+            elif isinstance(hp, UniformIntegerHyperparameter):
+                var['type'] = 'int'
+                var['min'] = hp.lower
+                var['max'] = hp.upper
+            elif isinstance(hp, CategoricalHyperparameter):
+                var['type'] = 'discrete'
+                var['items'] = hp.choices
+            elif isinstance(hp, OrdinalHyperparameter):
+                var['type'] = 'discrete_numeric'
+                var['items'] = hp.sequence
+            else:
+                raise NotImplementedError
+
+            fidel_vars.append(var)
+
+        return fidel_vars
 
     def target_function(
         self,

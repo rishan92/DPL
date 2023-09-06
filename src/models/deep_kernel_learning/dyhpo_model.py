@@ -389,7 +389,12 @@ class DyHPOModel(BasePytorchModule):
 
             projected_x, predict_info = self.feature_extractor(x_train, train_budgets, train_curves)
             self.model.set_train_data(projected_x, y_train, strict=False)
-            output: gpytorch.ExactMarginalLogLikelihood = self.model(projected_x)
+            try:
+                output: gpytorch.ExactMarginalLogLikelihood = self.model(projected_x)
+            except:
+                print(f"ExactMarginalLogLikelihood failed. projected_x {projected_x}\n x_train {x_train}\n "
+                      f"train_budgets {train_budgets}\n train_curves {train_curves}")
+                a = 0
 
             zero_tensor = torch.tensor(0.0, requires_grad=True)
             if self.regularization_factor != 0:
@@ -822,7 +827,12 @@ class DyHPOModel(BasePytorchModule):
                     test_data.budgets,
                     test_data.curves,
                 )
-                preds: gpytorch.distributions.Distribution = self.likelihood(self.model(projected_test_x))
+                try:
+                    preds: gpytorch.distributions.Distribution = self.likelihood(self.model(projected_test_x))
+                except:
+                    print(f"prediction likelihood failed. projected_test_x {projected_test_x}\n X {test_data.X}\n "
+                          f"budgets {test_data.budgets}\n curves {test_data.curves}")
+                    a = 0
                 all_mean_predictions.append(preds.mean)
                 all_std_predictions.append(preds.stddev)
                 all_projected_test_x.append(projected_test_x)

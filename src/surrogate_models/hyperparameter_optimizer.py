@@ -52,7 +52,7 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
         seed: int = 11,
         max_budgets: Union[int, Dict] = 52,
         min_budgets: Union[int, Dict] = 1,
-        fantasize_step: Union[int, Dict] = 1,
+        fantasize_step: Union[int, Dict] = None,
         minimization: bool = True,
         total_budget: int = 1000,
         device: str = None,
@@ -158,11 +158,11 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
         if isinstance(max_budgets, Dict):
             self.max_budgets: Dict = max_budgets
             self.min_budgets: Dict = min_budgets
-            self.fantasize_step: Dict = fantasize_step
+            # self.fantasize_step: Dict = fantasize_step
         else:
             self.max_budgets: Dict = {fidelity_names[0]: max_budgets}
             self.min_budgets: Dict = {fidelity_names[0]: min_budgets}
-            self.fantasize_step: Dict = {fidelity_names[0]: fantasize_step}
+            # self.fantasize_step: Dict = {fidelity_names[0]: fantasize_step}
 
         self.pretrain = pretrain
 
@@ -170,8 +170,8 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
         conf_individual_budget = 1
         init_conf_indices = np.random.choice(self.hp_candidates.shape[0], initial_configurations_nr, replace=False)
 
-        init_budgets = [{fidelity_name: self.min_budgets[fidelity_name] + i * self.fantasize_step[fidelity_name]
-                         for fidelity_name in self.fidelity_names} for i in range(0, conf_individual_budget)]
+        # init_budgets = [{fidelity_name: self.min_budgets[fidelity_name] + i * self.fantasize_step[fidelity_name]
+        #                  for fidelity_name in self.fidelity_names} for i in range(0, conf_individual_budget)]
 
         init_budgets = list(range(0, conf_individual_budget))
 
@@ -219,8 +219,10 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
         self.output_path = output_path
         self.dataset_name = dataset_name
 
-        max_steps = [((self.max_budgets[fidelity_name] - self.min_budgets[fidelity_name]) / self.fantasize_step[
-            fidelity_name]) + 1 for fidelity_name in self.fidelity_names]
+        # fidelity_curve = self.fidelity_manager.fidelity_space
+        # fidelity_diffs = {k: curve.shape[0] for k, curve in fidelity_curve.items()}
+        max_steps = \
+            [self.fidelity_manager.fidelity_space[fidelity_name].shape[0] for fidelity_name in self.fidelity_names]
         max_steps = max(max_steps)
         self.no_improvement_threshold = int(max_steps + 0.2 * max_steps)
         self.no_improvement_patience = 0
@@ -245,7 +247,7 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
             fill_value=self.fill_value,
             use_learning_curve=self.model_class.meta_use_learning_curve,
             use_learning_curve_mask=self.model_class.meta_use_learning_curve_mask,
-            fantasize_step=self.fantasize_step,
+            # fantasize_step=self.fantasize_step,
             use_target_normalization=self.meta.use_target_normalization,
             target_normalization_range=self.target_normalization_range,
             model_output_normalization=self.model_class.meta_output_act_func,
@@ -257,6 +259,9 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
             use_sample_weight_by_label=self.model_class.meta_use_sample_weight_by_label,
             use_y_constraint_weights=self.model_class.meta_use_y_constraint_weights,
             fidelity_names=self.fidelity_names,
+            minimization=minimization,
+            max_value=max_value,
+            min_value=min_value,
         )
 
         self.real_curve_targets_map_pd: Optional[pd.DataFrame] = None
@@ -501,29 +506,29 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
 
             # decide for what budget we will evaluate the most
             # promising hyperparameter configuration next.
-            evaluated_budgets = self.history_manager.get_evaluated_budgets(suggested_hp_index)
-            if len(evaluated_budgets) != 0:
-                # max_budget = max(evaluated_budgets)
-                # budget = max_budget + self.fantasize_step[self.fidelity_name]
-                # # this would only trigger if fantasize_step is bigger than 1
-                # if budget > self.max_budgets[self.fidelity_name]:
-                #     budget = self.max_budgets[self.fidelity_name]
-                max_budget = evaluated_budgets[-1]
-                max_budget = dict(zip(self.fidelity_manager.fidelity_names, max_budget))
-                num_max_budgets = 0
-                next_budget = {}
-                for k in self.fidelity_names:
-                    next_b = max_budget[k] + self.fantasize_step[k]
-                    next_b = round(next_b, 4)
-                    if next_b >= self.max_budgets[k]:
-                        next_b = self.max_budgets[k]
-                        num_max_budgets += 1
-                    next_budget[k] = next_b
-                budget = next_budget
-            else:
-                budget = {
-                    fidelity_name: self.min_budgets[fidelity_name] for fidelity_name in self.fidelity_names
-                }
+            # evaluated_budgets = self.history_manager.get_evaluated_budgets(suggested_hp_index)
+            # if len(evaluated_budgets) != 0:
+            #     # max_budget = max(evaluated_budgets)
+            #     # budget = max_budget + self.fantasize_step[self.fidelity_name]
+            #     # # this would only trigger if fantasize_step is bigger than 1
+            #     # if budget > self.max_budgets[self.fidelity_name]:
+            #     #     budget = self.max_budgets[self.fidelity_name]
+            #     max_budget = evaluated_budgets[-1]
+            #     max_budget = dict(zip(self.fidelity_manager.fidelity_names, max_budget))
+            #     num_max_budgets = 0
+            #     next_budget = {}
+            #     for k in self.fidelity_names:
+            #         next_b = max_budget[k] + self.fantasize_step[k]
+            #         next_b = round(next_b, 4)
+            #         if next_b >= self.max_budgets[k]:
+            #             next_b = self.max_budgets[k]
+            #             num_max_budgets += 1
+            #         next_budget[k] = next_b
+            #     budget = next_budget
+            # else:
+            #     budget = {
+            #         fidelity_name: self.min_budgets[fidelity_name] for fidelity_name in self.fidelity_names
+            #     }
             if gv.PLOT_PRED_CURVES and predict_infos is not None:
                 if self.prediction_params_pd is None:
                     info_names = list(predict_infos.keys())
@@ -545,7 +550,7 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
         suggest_time_end = time.time()
         self.suggest_time_duration = suggest_time_end - suggest_time_start
 
-        return suggested_hp_index, fidelity
+        return [suggested_hp_index], [fidelity]
 
     def observe(self, hp_index: int, budget: List[Tuple[int]], hp_curve: List):
         """Receive information regarding the performance of a hyperparameter
@@ -566,14 +571,14 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
             budget_id.append(b_id)
         budget = budget_id
 
-        for index, curve_element in enumerate(hp_curve):
-            if np.isnan(curve_element):
-                self.diverged_configs.add(hp_index)
-                # only use the non-nan part of the curve and the corresponding
-                # budget to still have the information in the network
-                hp_curve = hp_curve[0:index + 1]
-                b = index
-                break
+        # for index, curve_element in enumerate(hp_curve):
+        #     if np.isnan(curve_element):
+        #         self.diverged_configs.add(hp_index)
+        #         # only use the non-nan part of the curve and the corresponding
+        #         # budget to still have the information in the network
+        #         # hp_curve = hp_curve[0:index + 1]
+        #         # b = index
+        #         break
 
         if not self.minimization:
             hp_curve = self.max_value - np.array(hp_curve)
@@ -835,7 +840,7 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
 
         prediction_data = []
         for fidelity_name in self.fidelity_names:
-            pred_test_data, real_budgets, max_train_budget = self.history_manager.get_predict_curves_dataset(
+            pred_test_data, real_fidelity_ids, max_train_budget = self.history_manager.get_predict_curves_dataset(
                 hp_index=hp_index,
                 curve_size_mode=self.meta.curve_size_mode,
                 fidelity_name=fidelity_name
@@ -861,8 +866,11 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
 
             # real_curve = [real_curves[real_curve_budgets.index(v)] for v in real_budgets]
             real_curve = []
+            real_budgets = self.fidelity_manager.get_fidelities(
+                fidelity_ids=real_fidelity_ids, is_normalized=False, return_dict=True
+            )
             for real_budget in real_budgets:
-                performance = benchmark.get_performance(hp_index, real_budget)
+                performance, _ = benchmark.get_performance(hp_index, real_budget)
                 real_curve.append(performance)
 
             if not self.minimization:
@@ -915,9 +923,9 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
             # max_train_budget_limit = real_budgets.index(prediction_data[i]['max_train_budget'])
             max_train_budget_limit = 0
 
-            real_budgets = self.fidelity_manager.get_fidelities(
-                fidelity_ids=real_budgets, is_normalized=False, return_dict=True,
-            )
+            # real_budgets = self.fidelity_manager.get_fidelities(
+            #     fidelity_ids=real_budgets, is_normalized=False, return_dict=True,
+            # )
             x_data = [v[fidelity_name] for v in real_budgets]
             sns.lineplot(x=x_data, y=mean_data, ax=predict_curve_axes[i], color='blue', label='mean prediction')
             if predict_infos_exist:

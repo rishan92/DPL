@@ -25,6 +25,7 @@ from src.benchmarks.synthetic import SyntheticBench
 # from src.benchmarks.hpobench import HPOBench
 # from src.benchmarks.jahsbench import JAHSBench
 from src.benchmarks.synthetic_mf import SyntheticMFBench
+from src.benchmarks.nanogptbench import NanoGPTBench
 from src.surrogate_models.hyperparameter_optimizer import HyperparameterOptimizer
 from src.surrogate_models.asha import AHBOptimizer
 from src.surrogate_models.dehb.interface import DEHBOptimizer
@@ -63,6 +64,7 @@ class Framework:
         # 'hpobench': HPOBench,
         # 'jahsbench': JAHSBench,
         'synthetic_mf': SyntheticMFBench,
+        'nanogpt': NanoGPTBench,
     }
 
     def __init__(
@@ -101,6 +103,7 @@ class Framework:
             'hpobench': Path('hpobench'),
             'jahsbench': Path('jahsbench'),
             'synthetic_mf': Path('synthetic_mf'),
+            'nanogpt': Path('data', 'nanogpt'),
         }
 
         if self.benchmark_name in benchmark_extensions:
@@ -129,6 +132,7 @@ class Framework:
         self.log_indicator: List[bool] = self.benchmark.log_indicator
         self.hp_names: List[str] = self.benchmark.hp_names
         self.info_dict: Dict[str, Any] = dict()
+        self.total_time = 0
 
         # set up wandb
         commit_hash: str = subprocess.check_output(["git", "rev-parse", "HEAD"]).decode("ascii").strip()
@@ -259,6 +263,7 @@ class Framework:
     def run(self):
 
         evaluated_configs = dict()
+        evaluated_configs_eval_time = dict()
 
         if self.benchmark.minimization_metric:
             best_value = np.PINF
@@ -266,7 +271,9 @@ class Framework:
             best_value = np.NINF
 
         incumbent_value = self.benchmark.get_best_performance()
+        best_value = self.benchmark.get_worst_performance()
         total_surrogate_cost = 0
+        self.total_time = 0
 
         plot_pred_curves_fidelity_percentile = np.array([5, 10, 20, 40]) / 50
         plot_pred_curves_fidelity = []
@@ -281,23 +288,28 @@ class Framework:
         while total_surrogate_cost < total_cost:
 
             start_time = time.time()
-            hp_indices, fidelity_ids = self.surrogate.suggest()
+            hp_indices, fidelities = self.surrogate.suggest()
+
+            if hp_indices is None or len(hp_indices) == 0:
+                self.finish()
+                return
 
             if gv.PLOT_PRED_CURVES:
                 is_budget = False
                 if self.benchmark_name == 'yahpo' or self.benchmark_name == 'synthetic_mf':
                     for i, pred_curves in enumerate(plot_pred_curves_fidelity):
-                        is_budget = fidelity_ids[i] in pred_curves
+                        is_budget = fidelities[i] in pred_curves
                         if is_budget:
                             break
                 else:
-                    is_budget = fidelity_ids in plot_pred_curves_fidelity
+                    is_budget = fidelities in plot_pred_curves_fidelity
                 if gv.PLOT_PRED_CURVES and (
                     is_budget
                     or self.benchmark_name == 'synthetic'
                     or self.benchmark_name == 'yahpo'
                     # or self.benchmark_name == 'lcbench_mini'
                     or self.benchmark_name == 'synthetic_mf'
+                    or self.benchmark_name == 'nanogpt'
                 ):
                     hp_index = hp_indices
                     if isinstance(hp_indices, List):
@@ -324,14 +336,17 @@ class Framework:
                 )
             if not isinstance(hp_indices, List):
                 hp_indices = [hp_indices]
-                fidelity_ids = [fidelity_ids]
+                fidelities = [fidelities]
 
             hp_curves = []
-            for hp_index, fidelity_id in zip(hp_indices, fidelity_ids):
-                hp_curve, fidelity_id_out = self.benchmark.get_objective_function_performance(hp_index, fidelity_id)
+            eval_times = []
+            for hp_index, fidelity in zip(hp_indices, fidelities):
+                hp_curve, fidelity_out, eval_time = self.benchmark.get_objective_function_performance(hp_index,
+                                                                                                      fidelity)
                 # hp_curve = self.benchmark.get_performance(hp_index, budget)
+                eval_times.append(eval_time)
                 hp_curves.append(hp_curve)
-                self.surrogate.observe(hp_index, fidelity_id_out, hp_curve)
+                self.surrogate.observe(hp_index, fidelity_out, hp_curve)
 
             # if len(hp_indices) == 1:
             #     hp_indices = hp_indices[0]
@@ -359,7 +374,20 @@ class Framework:
                     best_value = budget_performance
 
             best_hp_index = hp_indices[best_index]
-            best_fidelity_id = fidelity_ids[best_index]
+            best_fidelity = fidelities[best_index]
+            best_eval_time = float(np.sum(eval_times))
+
+            fidelity_key = tuple(
+                [best_fidelity[i] for i, k in enumerate(self.fidelity_manager.fidelity_names) if k != "epochs"])
+            configs_eval_time_key = (best_hp_index, fidelity_key)
+            if configs_eval_time_key in evaluated_configs_eval_time:
+                previous_eval_time = evaluated_configs_eval_time[configs_eval_time_key]
+            else:
+                previous_eval_time = 0
+            evaluated_configs_eval_time[configs_eval_time_key] = max(best_eval_time, previous_eval_time)
+
+            current_eval_time = best_eval_time - previous_eval_time
+            self.total_time += (step_time_duration + current_eval_time)
 
             self.surrogate_budget += 1
 
@@ -368,18 +396,8 @@ class Framework:
             else:
                 regret = incumbent_value - best_value
 
-            # log_budget = []
-            # for v in best_budget.values():
-            #     if isinstance(v, float):
-            #         v = float(v)
-            #     elif isinstance(v, int):
-            #         v = int(v)
-            #     else:
-            #         raise NotImplementedError
-            #     log_budget.append(v)
-            # log_fidelity = self.fidelity_manager.get_fidelities(best_fidelity_id)
-            log_fidelity = tuple(float(x) for x in best_fidelity_id)
-            normalized_log_fidelity = (log_fidelity[0] / 5000, log_fidelity[1] / 10)
+            log_fidelity = tuple(float(x) for x in best_fidelity)
+            normalized_log_fidelity = self.fidelity_manager.normalize_fidelity(fidelity=log_fidelity)
 
             if best_hp_index in evaluated_configs:
                 previous_budgets = evaluated_configs[best_hp_index]
@@ -388,7 +406,6 @@ class Framework:
                 evaluated_configs[best_hp_index] = []
                 max_previous_normalized_fidelity = [0] * len(log_fidelity)
 
-            # budget_cost = budget - previous_budget
             fidelity_cost = sum(
                 max(a - b, 0) for a, b in zip(normalized_log_fidelity, max_previous_normalized_fidelity))
             fidelity_cost /= len(log_fidelity)
@@ -402,6 +419,8 @@ class Framework:
                 budget=log_fidelity,
                 best_value_observed=float(best_value),
                 time_duration=step_time_duration,
+                eval_time_duration=current_eval_time,
+                total_time=self.total_time,
                 fidelity_cost=fidelity_cost,
                 surrogate_cost=total_surrogate_cost,
                 regret=regret,
@@ -411,6 +430,8 @@ class Framework:
                 'hpo/scores': budget_performance,
                 'hpo/curve': best_value,
                 'hpo/overhead': step_time_duration,
+                'hpo/eval_time': current_eval_time,
+                'hpo/total_time': self.total_time,
                 'hpo/surrogate_budget': self.surrogate_budget,
                 'hpo/regret': regret,
                 'hpo/cost': total_surrogate_cost,
@@ -532,6 +553,8 @@ class Framework:
         budget: Union[List, Tuple],
         best_value_observed: float,
         time_duration: float,
+        eval_time_duration: float,
+        total_time: float,
         fidelity_cost: float,
         surrogate_cost: float,
         regret: float,
@@ -578,6 +601,16 @@ class Framework:
             self.info_dict['overhead'].append(time_duration)
         else:
             self.info_dict['overhead'] = [time_duration]
+
+        if 'eval_time' in self.info_dict:
+            self.info_dict['eval_time'].append(eval_time_duration)
+        else:
+            self.info_dict['eval_time'] = [eval_time_duration]
+
+        if 'total_time' in self.info_dict:
+            self.info_dict['total_time'].append(total_time)
+        else:
+            self.info_dict['total_time'] = [total_time]
 
         if 'fidelity_cost' in self.info_dict:
             self.info_dict['fidelity_cost'].append(fidelity_cost)

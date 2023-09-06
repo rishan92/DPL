@@ -1,4 +1,5 @@
 import math
+import time
 from collections import OrderedDict
 from typing import List
 import numpy as np
@@ -15,13 +16,13 @@ from src.history.fidelity_manager import FidelityManager
 
 
 class SyntheticMFBench(BaseBenchmark):
-    nr_hyperparameters = 2000
+    nr_hyperparameters = 10
 
     param_space = None
     max_budget = 51
     min_budget = 1
-    max_budgets = None
-    min_budgets = None
+    # max_budgets = None
+    # min_budgets = None
     max_steps = 10
 
     hp_names = None
@@ -29,7 +30,7 @@ class SyntheticMFBench(BaseBenchmark):
     log_indicator = None
     fidelity_space = None
     fidelity_interval = None
-    fidelity_curve_points = None
+    # fidelity_curve_points = None
     # fidelity_steps = None
 
     # if the best value corresponds to a lower value
@@ -70,10 +71,6 @@ class SyntheticMFBench(BaseBenchmark):
         self.init_benchmark()
 
         self.nr_hyperparameters = SyntheticMFBench.nr_hyperparameters
-        self.max_budgets = SyntheticMFBench.max_budgets
-
-        self.max_value = self.get_best_performance()
-        self.min_value = self.get_worst_performance()
 
     def init_benchmark(self):
         if self.dataset_name == 'hartmann6_4':
@@ -108,9 +105,9 @@ class SyntheticMFBench(BaseBenchmark):
         #     sorted(SyntheticMFBench.param_space.items(), key=lambda item: item[1][2] == 'str'))
         SyntheticMFBench.hp_names = config_names
 
-        fidelity_space, config_names, dimensions = self.dragonfly_config_to_config_space(config["fidel_space"])
+        raw_fidelity_space, config_names, dimensions = self.dragonfly_config_to_config_space(config["fidel_space"])
         self.fidelity_dimensions = dimensions
-        SyntheticMFBench.fidelity_space = self.extract_hyperparameter_info(config_space=fidelity_space)
+        SyntheticMFBench.fidelity_space = self.extract_hyperparameter_info(config_space=raw_fidelity_space)
         SyntheticMFBench.fidelity_names = config_names
 
         SyntheticMFBench.fidelity_interval = {}
@@ -119,31 +116,31 @@ class SyntheticMFBench(BaseBenchmark):
         SyntheticMFBench.fidelity_curve_points = {}
         # SyntheticMFBench.fidelity_steps = {}
 
-        for k, v in SyntheticMFBench.fidelity_space.items():
-            max_budget = v[1]
-            if v[2] == 'ord':
-                SyntheticMFBench.fidelity_curve_points[k] = np.array(v[4])
-                max_budget = SyntheticMFBench.fidelity_curve_points[k][-1]
-                interval = SyntheticMFBench.fidelity_curve_points[k][1] - SyntheticMFBench.fidelity_curve_points[k][0]
-            else:
-                SyntheticMFBench.fidelity_curve_points[k] = np.around(
-                    np.linspace(v[0], v[1], self.max_steps), decimals=4
-                )
-                if v[2] == 'int':
-                    interval = 1
-                    size = v[1] - v[0] + 1
-                    rounded_values = np.round(SyntheticMFBench.fidelity_curve_points[k]).astype(int)
-                    curve_values = np.unique(rounded_values)
-                    curve_values = curve_values.astype(float)
-                    SyntheticMFBench.fidelity_curve_points[k] = curve_values
-                elif v[2] == 'float':
-                    interval = (v[1] - v[0]) / self.max_steps
-                else:
-                    raise NotImplementedError
-
-            SyntheticMFBench.min_budgets[k] = SyntheticMFBench.fidelity_curve_points[k][0]
-            SyntheticMFBench.max_budgets[k] = SyntheticMFBench.fidelity_curve_points[k][-1]
-            SyntheticMFBench.fidelity_interval[k] = interval
+        # for k, v in SyntheticMFBench.fidelity_space.items():
+        #     max_budget = v[1]
+        #     if v[2] == 'ord':
+        #         SyntheticMFBench.fidelity_curve_points[k] = np.array(v[4])
+        #         max_budget = SyntheticMFBench.fidelity_curve_points[k][-1]
+        #         interval = SyntheticMFBench.fidelity_curve_points[k][1] - SyntheticMFBench.fidelity_curve_points[k][0]
+        #     else:
+        #         SyntheticMFBench.fidelity_curve_points[k] = np.around(
+        #             np.linspace(v[0], v[1], self.max_steps), decimals=4
+        #         )
+        #         if v[2] == 'int':
+        #             interval = 1
+        #             size = v[1] - v[0] + 1
+        #             rounded_values = np.round(SyntheticMFBench.fidelity_curve_points[k]).astype(int)
+        #             curve_values = np.unique(rounded_values)
+        #             curve_values = curve_values.astype(float)
+        #             SyntheticMFBench.fidelity_curve_points[k] = curve_values
+        #         elif v[2] == 'float':
+        #             interval = (v[1] - v[0]) / self.max_steps
+        #         else:
+        #             raise NotImplementedError
+        #
+        #     SyntheticMFBench.min_budgets[k] = SyntheticMFBench.fidelity_curve_points[k][0]
+        #     SyntheticMFBench.max_budgets[k] = SyntheticMFBench.fidelity_curve_points[k][-1]
+        #     SyntheticMFBench.fidelity_interval[k] = interval
         self.categorical_indicator = [v[2] == 'str' for v in SyntheticMFBench.param_space.values()]
         self.categories = [v[4] for v in SyntheticMFBench.param_space.values() if v[2] == 'str']
         SyntheticMFBench.log_indicator = [v[3] for v in SyntheticMFBench.param_space.values()]
@@ -154,9 +151,13 @@ class SyntheticMFBench(BaseBenchmark):
         self.benchmark_results = self.load_benchmark()
 
         self.fidelity_manager = FidelityManager(
-            fidelity_space=SyntheticMFBench.fidelity_curve_points,
+            fidelity_space=raw_fidelity_space,
             num_configurations=SyntheticMFBench.nr_hyperparameters,
+            max_steps=self.max_steps,
         )
+
+        self.max_budgets = self.fidelity_manager.get_max_fidelity()
+        self.min_budgets = self.fidelity_manager.get_min_fidelity()
 
     def dragonfly_config_to_config_space(self, config):
         all_dimensions = []
@@ -238,19 +239,22 @@ class SyntheticMFBench(BaseBenchmark):
 
         if row_values_tuple in self.benchmark_results.index:
             result = self.benchmark_results.loc[row_values_tuple, 'result']
-            return result
+            return result, 0
 
         # calculate metrics
         converted_config = self.objective_function_input_config[configuration_id]
         converted_fidelity = self.convert_to_dragonfly_objective_input(
             config=fidelity, ordered_names=self.fidelity_names, dimensions=self.fidelity_dimensions
         )
+        start_time = time.perf_counter()
         result_data = self.mf_objective(z=converted_fidelity, x=converted_config)
+        end_time = time.perf_counter()
+        eval_time = end_time - start_time
 
         self.benchmark_results.loc[row_values_tuple, 'result'] = result_data
         self.is_new_data_added = True
 
-        return result_data
+        return result_data, eval_time
 
     def convert_to_dragonfly_objective_input(self, config, ordered_names, dimensions):
         config = [config[key] for key in ordered_names]
@@ -273,7 +277,7 @@ class SyntheticMFBench(BaseBenchmark):
 
         valid_curves = []
         for k in self.fidelity_names:
-            curve = SyntheticMFBench.fidelity_curve_points[k]
+            curve = self.fidelity_manager.fidelity_space[k]
             # if k in SyntheticMFBench.is_metric_best_end and SyntheticMFBench.is_metric_best_end[k]:
             #     valid_curves.append(curve[curve == budget[k]])
             # else:
@@ -292,7 +296,7 @@ class SyntheticMFBench(BaseBenchmark):
 
         metrics = []
         for fidelity_dict in fidelity_dicts:
-            metric = self.get_benchmark_objective_function(
+            metric, _ = self.get_benchmark_objective_function(
                 configuration_id=hp_index, fidelity=fidelity_dict
             )
             metrics.append(metric)
@@ -315,9 +319,9 @@ class SyntheticMFBench(BaseBenchmark):
         # fidelity_dict = self.fidelity_manager.get_fidelities(fidelity_id, return_dict=True)
         fidelity_dict = dict(zip(self.fidelity_names, fidelity_id))
 
-        metric = self.get_benchmark_objective_function(configuration_id=hp_index, fidelity=fidelity_dict)
+        metric, eval_time = self.get_benchmark_objective_function(configuration_id=hp_index, fidelity=fidelity_dict)
 
-        return metric
+        return metric, eval_time
 
     def get_fidelity_manager(self):
         return self.fidelity_manager
@@ -345,6 +349,10 @@ class SyntheticMFBench(BaseBenchmark):
     def calc_benchmark_stats(self):
         super().calc_benchmark_stats()
         self.save_benchmark()
+
+    def set_dataset_name(self, dataset_name):
+        self.dataset_name = dataset_name
+        return self
 
     def close(self):
         self.save_benchmark()

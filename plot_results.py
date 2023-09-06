@@ -38,15 +38,15 @@ def plot_results(result_path: Path, x_metric: str = None, y_metric: str = None, 
                                                            dataset_names=dataset_names, method_names=method_names)
 
     x_metric = 'epochs' if x_metric is None else x_metric
-    assert x_metric in ['epochs', 'first_curve']
+    assert x_metric in ['epochs', 'first_curve', 'surrogate_cost']
     if 'x_label' not in kwargs:
         kwargs['x_label'] = x_metric
     if 'y_label' not in kwargs:
         kwargs['y_label'] = y_metric
 
-    x_data_iter = result_loader.get_result_data(aggregate_level=aggregate_level, metric=x_metric)
-    result_data_iter = result_loader.get_result_data(aggregate_level=aggregate_level, metric=y_metric)
     if x_metric == 'first_curve' and y_metric == 'best_regret' and aggregate_level == 'dataset':
+        x_data_iter = result_loader.get_result_data(aggregate_level=aggregate_level, metric=x_metric)
+        result_data_iter = result_loader.get_result_data(aggregate_level=aggregate_level, metric=y_metric)
         data = pd.DataFrame(columns=['first_curve', 'best_regret'])
         for i, ((tag, benchmark_name, dataset_name), mean_data, std_data) in enumerate(x_data_iter):
             data.loc[i, 'first_curve'] = mean_data.iloc[0, 0]
@@ -57,6 +57,10 @@ def plot_results(result_path: Path, x_metric: str = None, y_metric: str = None, 
             kwargs['title'] = "Initial performance vs best regret"
         plot_scatter(data=data, x='first_curve', y='best_regret', path=out_path, **kwargs)
     else:
+        result_data_iter = result_loader.get_result_data(
+            aggregate_level=aggregate_level, metric=y_metric, x_metric=x_metric,
+            x_max=kwargs.get('x_max', None)
+        )
         if aggregate_level is None:
             for (tag, benchmark_name, dataset_name, repeat_nr), data in result_data_iter:
                 out_path = plot_path / f"{benchmark_name}_{dataset_name}_{repeat_nr}_{tag}.png"
@@ -106,9 +110,13 @@ def main():
     # plot_results_f(y_metric='curve', x_metric='epochs', aggregate_level='dataset')
     # plot_results_f(y_metric='curve', x_metric='epochs', aggregate_level='benchmark')
     # plot_results_f(y_metric='regret', x_metric='epochs', aggregate_level=None)
-    plot_results_f(y_metric='regret', x_metric='epochs', aggregate_level='dataset', y_log=True, plot_std=False)
+    # plot_results_f(y_metric='regret', x_metric='epochs', aggregate_level='dataset', y_log=True, plot_std=False)
     # plot_results_f(y_metric='regret', x_metric='epochs', aggregate_level='benchmark', y_log=True, plot_std=False)
     # plot_results_f(y_metric='best_regret', x_metric='first_curve', aggregate_level='dataset', plot_std=False)
+    plot_results_f(y_metric='regret', x_metric='surrogate_cost', aggregate_level='dataset',
+                   y_log=True, plot_std=False, x_max=20)
+    plot_results_f(y_metric='regret', x_metric='surrogate_cost', aggregate_level='benchmark',
+                   y_log=True, plot_std=False, x_max=20)
 
 
 if __name__ == "__main__":

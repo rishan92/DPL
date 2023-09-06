@@ -2,13 +2,22 @@ import numpy as np
 from typing import List, Union, Dict, Tuple, Optional
 import ConfigSpace as CS
 import itertools
+from collections import OrderedDict
+from ConfigSpace.hyperparameters import FloatHyperparameter, IntegerHyperparameter, Constant, \
+    CategoricalHyperparameter, OrdinalHyperparameter
 
 
 # from numpy.typing import NDArray
 
 
 class FidelityManager:
-    def __init__(self, fidelity_space: Dict[str, Union[List, np.ndarray]], num_configurations: int):
+    def __init__(self, fidelity_space: CS.ConfigurationSpace, num_configurations: int, max_steps: int):
+        self.max_steps = max_steps
+        self.raw_fidelity_space = None
+        self.fidelity_interval = {}
+        self.raw_fidelity_space = fidelity_space
+        self.config_space_info = self.extract_hyperparameter_info(fidelity_space)
+        fidelity_space = self.from_config_space(self.config_space_info)
         self.fidelity_space = fidelity_space
         self.fidelity_names = list(self.fidelity_space.keys())
         self.num_configurations = num_configurations
@@ -19,6 +28,39 @@ class FidelityManager:
         self.fidelity_path_ids: List[Tuple[int]] = []
         self.first_fidelity_id: Tuple[int] = tuple([0] * len(self.fidelity_space))
         self.last_fidelity_id: Tuple[int] = tuple([len(self.fidelity_space[k]) - 1 for k in self.fidelity_names])
+        self.first_fidelity = self.convert_fidelity_id_to_fidelity(fidelity_id=self.first_fidelity_id)
+        self.last_fidelity = self.convert_fidelity_id_to_fidelity(fidelity_id=self.last_fidelity_id)
+        self.last_fidelity = self.convert_type(fidelity=self.last_fidelity)
+
+    def get_raw_fidelity_space(self):
+        return self.raw_fidelity_space
+
+    def get_max_fidelity(self):
+        return {k: v for k, v in zip(self.fidelity_names, self.last_fidelity)}
+
+    def get_min_fidelity(self):
+        return {k: v for k, v in zip(self.fidelity_names, self.first_fidelity)}
+
+    def from_config_space(self, config_space):
+        fidelity_curve_points = {}
+        for k, v in config_space.items():
+            if v[2] == 'ord':
+                fidelity_curve_points[k] = np.array(v[4])
+            else:
+                fidelity_curve_points[k] = np.around(
+                    np.linspace(v[0], v[1], self.max_steps), decimals=4
+                )
+                if v[2] == 'int':
+                    rounded_values = np.round(fidelity_curve_points[k]).astype(int)
+                    curve_values = np.unique(rounded_values)
+                    curve_values = curve_values.astype(float)
+                    fidelity_curve_points[k] = curve_values
+                elif v[2] == 'float':
+                    interval = (v[1] - v[0]) / self.max_steps
+                else:
+                    raise NotImplementedError
+
+        return fidelity_curve_points
 
     def convert_fidelity_id_to_fidelity(self, fidelity_id, is_normalized=False):
         fidelity_map = \
@@ -28,11 +70,28 @@ class FidelityManager:
     def convert_fidelity_to_fidelity_id(self, fidelity):
         return self.fidelity_to_fidelity_id_map[fidelity]
 
-    def min_fidelity(self):
-        return self.fidelity_id_to_fidelity_map[self.first_fidelity_id]
+    def convert_type(self, fidelity):
+        if isinstance(fidelity, Dict):
+            converted_fidelity = {}
+            for k, v in fidelity.items():
+                if self.config_space_info[k][2] == 'int':
+                    converted_fidelity[k] = int(v)
+                else:
+                    converted_fidelity[k] = v
+        else:
+            converted_fidelity = []
+            for k, v in zip(self.fidelity_names, fidelity):
+                if self.config_space_info[k][2] == 'int':
+                    converted_fidelity.append(int(v))
+                else:
+                    converted_fidelity.append(v)
+            converted_fidelity = tuple(converted_fidelity)
 
-    def get_max_fidelity(self):
-        return self.fidelity_id_to_fidelity_map[self.last_fidelity_id]
+        return converted_fidelity
+
+    def normalize_fidelity(self, fidelity):
+        normalized_fidelity = tuple([f / max_f for f, max_f in zip(fidelity, self.last_fidelity)])
+        return normalized_fidelity
 
     def generate_fidelity_tensor(self):
         for k, v in self.fidelity_space.items():
@@ -134,3 +193,49 @@ class FidelityManager:
     def add_fidelity(self, configuration_id):
         assert configuration_id == len(self.fidelity_ids), "Only incremental adding of fidelity supported."
         self.fidelity_ids.append(None)
+
+    def extract_hyperparameter_info(self, config_space: CS.ConfigurationSpace):
+        hyperparameter_info = OrderedDict()
+        for hp in list(config_space.values()):
+            hp_name = hp.name
+            default_value = hp.default_value
+            is_log = False
+            categories = []
+            if isinstance(hp, Constant):
+                value = hp.value
+                if isinstance(value, float):
+                    hp_type = 'float'
+                elif isinstance(value, int):
+                    hp_type = 'int'
+                elif isinstance(value, str):
+                    hp_type = 'str'
+                    categories = [value]
+                else:
+                    raise NotImplementedError
+                lower = upper = value
+            elif isinstance(hp, FloatHyperparameter):
+                hp_type = 'float'
+                is_log = hp.log
+                lower = hp.lower
+                upper = hp.upper
+            elif isinstance(hp, IntegerHyperparameter):
+                hp_type = 'int'
+                is_log = hp.log
+                lower = hp.lower
+                upper = hp.upper
+            elif isinstance(hp, CategoricalHyperparameter):
+                hp_type = 'str'
+                lower = 0
+                upper = 0
+                categories = hp.choices
+            elif isinstance(hp, OrdinalHyperparameter):
+                hp_type = 'ord'
+                lower = 0
+                upper = len(hp.sequence) - 1
+                categories = hp.sequence
+            else:
+                raise NotImplementedError(f"Hyperparameter type not implemented: {hp}")
+
+            hyperparameter_info[hp_name] = [lower, upper, hp_type, is_log, categories, default_value]
+
+        return hyperparameter_info

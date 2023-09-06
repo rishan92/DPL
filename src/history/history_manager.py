@@ -24,8 +24,9 @@ from src.history.fidelity_manager import FidelityManager
 
 
 class HistoryManager:
-    def __init__(self, hp_candidates, max_budgets, min_budgets, fantasize_step, use_learning_curve,
-                 use_learning_curve_mask, fidelity_manager: FidelityManager = None, fill_value='zero',
+    def __init__(self, hp_candidates, max_budgets, min_budgets, use_learning_curve,
+                 use_learning_curve_mask, minimization, max_value, min_value,
+                 fidelity_manager: FidelityManager = None, fill_value='zero',
                  use_target_normalization=False, use_scaled_budgets=True,
                  model_output_normalization=None, cnn_kernel_size=0, target_normalization_range=None,
                  use_sample_weights=False, use_sample_weight_by_budget=False, sample_weight_by_budget_strategy=None,
@@ -72,15 +73,18 @@ class HistoryManager:
         self.performance_history: Dict[int, List[float]] = dict()
         self.fidelity_id_history: Dict[int, List[Tuple[int]]] = dict()
         self.extra_budget: Dict[int, List[Dict]] = dict()
+        self.diverged_configs = set()
 
         self.last_point = None
 
-        self.fantasize_step = fantasize_step
+        # self.fantasize_step = fantasize_step
 
         self.is_train_data_modified = True
         self.cached_train_dataset = None
         self.is_test_data_modified = True
         self.cached_test_dataset = None
+        self.minimization = minimization
+        self.worst_performance = max_value if minimization else min_value
 
     def set_target_normalization_value(self):
         self.target_normalization_value = self.max_curve_value
@@ -88,6 +92,9 @@ class HistoryManager:
         self.target_normalization_fn = lambda x: (x * gap / self.target_normalization_value) + \
                                                  self.target_normalization_range[0]
         return self.target_normalization_value
+
+    def add_diverdged_config(self, hp_index):
+        self.diverged_configs.add(hp_index)
 
     def get_initial_empty_value(self):
         initial_empty_value = self.get_mean_initial_value() if self.fill_value == 'last' else 0
@@ -106,6 +113,28 @@ class HistoryManager:
         #             self.extra_budget[hp_index].extend(extra_b)
         #         else:
         #             self.extra_budget[hp_index] = [extra_b]
+        if np.isnan(hp_curve).any():
+            self.add_diverdged_config(hp_index=hp_index)
+            num_entries = 0
+            if hp_index in self.performance_history:
+                mean_performance = float(np.mean(self.performance_history[hp_index]))
+            else:
+                mean_performance = 0
+                num_entries = 0
+                for index in self.performance_history:
+                    for p in self.performance_history[index]:
+                        mean_performance += p
+                        num_entries += 1
+                if num_entries == 0:
+                    mean_performance = self.worst_performance
+                else:
+                    mean_performance /= num_entries
+            print(f"NAN entry found mean_performance {mean_performance} num_entries {num_entries} hp_index {hp_index} "
+                  f"entry found {hp_index in self.performance_history} "
+                  f"self.worst_performance {self.worst_performance}")
+            for i in range(len(hp_curve)):
+                if np.isnan(hp_curve[i]):
+                    hp_curve[i] = mean_performance
 
         b = self.fidelity_manager.get_fidelities(fidelity_ids=fidelity_id)
         if hp_index in self.performance_history:
@@ -384,10 +413,11 @@ class HistoryManager:
 
     def get_predict_curves_dataset(self, hp_index, curve_size_mode, fidelity_name='epochs'):
         curves = []
-        real_budgets = []
+        real_budgets_ids = []
         initial_empty_value = self.get_initial_empty_value()
-        first_budgets = {fidelity_name: min(self.fantasize_step[fidelity_name], self.min_budgets[fidelity_name])
-                         for fidelity_name in self.fidelity_names}
+        # first_budgets = {fidelity_name: min(self.fantasize_step[fidelity_name], self.min_budgets[fidelity_name])
+        #                  for fidelity_name in self.fidelity_names}
+        first_budgets = {k: self.min_budgets[k] for k in self.fidelity_names}
 
         if hp_index in self.examples:
             budgets: List = self.examples[hp_index]
@@ -395,15 +425,16 @@ class HistoryManager:
             max_train_fidelity_id = budgets[-1]
             performances = self.performance_history[hp_index]
             for i, (budget, performance) in enumerate(zip(budgets, performances)):
-                real_budgets.append(budget)
+                real_budgets_ids.append(budget)
                 train_curve = performances[:i] if i > 0 else [initial_empty_value]
                 curves.append(train_curve)
         else:
             max_train_fidelity_id = self.fidelity_manager.first_fidelity_id
-            real_budgets.append(first_budgets)
+            real_budgets_ids.append(first_budgets)
             curves.append([0])
 
-        curves = self.get_processed_curves(curves=curves, curve_size_mode=curve_size_mode, real_budgets=real_budgets)
+        curves = self.get_processed_curves(curves=curves, curve_size_mode=curve_size_mode,
+                                           real_budgets=real_budgets_ids)
 
         # real_budgets = np.arange(
         #     self.min_budgets[fidelity_name],
@@ -452,6 +483,10 @@ class HistoryManager:
             p_curve = torch.tensor(curves, dtype=torch.float32)
             p_curve_last_row = p_curve[-1].unsqueeze(0)
             p_curve_num_repeats = fidelity_steps - p_curve.size(0)
+            if p_curve_num_repeats < 0:
+                print(f"INVALID p_curve_num_repeats {p_curve_num_repeats} hp_index {hp_index} "
+                      f"fidelity_name {fidelity_name} fidelity_steps {fidelity_steps} p_curve {p_curve.size(0)}")
+                a = 0
             repeated_last_row = p_curve_last_row.repeat_interleave(p_curve_num_repeats, dim=0)
             p_curve = torch.cat((p_curve, repeated_last_row), dim=0)
 
@@ -463,7 +498,7 @@ class HistoryManager:
 
         return pred_test_data, real_budgets_id, max_train_fidelity
 
-    def get_processed_curves(self, curves, curve_size_mode, real_budgets) -> Optional[np.ndarray]:
+    def get_processed_curves(self, curves, curve_size_mode, real_budgets=None) -> Optional[np.ndarray]:
         if self.use_learning_curve:
             if curve_size_mode == "variable":
                 min_size = self.cnn_kernel_size
@@ -475,6 +510,7 @@ class HistoryManager:
             curves = self.patch_curves_to_same_length(curves=curves, min_size=min_size)
 
             if self.use_learning_curve_mask:
+                assert real_budgets is not None, "Need real budgets"
                 curves = self.add_curve_missing_value_mask(curves, real_budgets)
         else:
             curves = None
@@ -700,34 +736,37 @@ class HistoryManager:
         initial_empty_value = self.get_mean_initial_value() if self.fill_value == 'last' else 0
 
         first_budgets = {fidelity_name: self.min_budgets[fidelity_name] for fidelity_name in self.fidelity_names}
-        first_extra_budgets = {fidelity_name: min(self.fantasize_step[fidelity_name], self.min_budgets[fidelity_name])
-                               for fidelity_name in self.extra_budgets_names}
+        first_extra_budgets = {fidelity_name: self.min_budgets[fidelity_name] for fidelity_name in
+                               self.extra_budgets_names}
         max_budgets = {fidelity_name: self.max_budgets[fidelity_name] for fidelity_name in self.fidelity_names}
         max_extra_budgets = {fidelity_name: self.max_budgets[fidelity_name] for fidelity_name in
                              self.extra_budgets_names}
 
         for hp_index in range(0, self.hp_candidates.shape[0]):
+            # if hp_index in self.diverged_configs:
+            #     print("Skipped diverged config")
+            #     continue
             if hp_index in self.examples:
                 budgets: List = self.examples[hp_index]
                 # Take the max budget evaluated for a certain hpc
-                max_budget: Dict = budgets[-1]
-                max_budget = dict(zip(self.fidelity_manager.fidelity_names, max_budget))
-                num_max_budgets = 0
-                next_budget = {}
-                for k in self.fidelity_names:
-                    next_b = max_budget[k] + self.fantasize_step[k]
-                    next_b = round(next_b, 4)
-                    if next_b >= self.max_budgets[k]:
-                        next_b = self.max_budgets[k]
-                        num_max_budgets += 1
-                    next_budget[k] = next_b
-                if num_max_budgets == len(self.fidelity_names):
-                    continue
+                # max_budget: Dict = budgets[-1]
+                # max_budget = dict(zip(self.fidelity_manager.fidelity_names, max_budget))
+                # num_max_budgets = 0
+                # next_budget = {}
+                # for k in self.fidelity_names:
+                #     next_b = max_budget[k] + self.fantasize_step[k]
+                #     next_b = round(next_b, 4)
+                #     if next_b >= self.max_budgets[k]:
+                #         next_b = self.max_budgets[k]
+                #         num_max_budgets += 1
+                #     next_budget[k] = next_b
+                # if num_max_budgets == len(self.fidelity_names):
+                #     continue
                 # budgets: List = self.fidelity_id_history[hp_index]
                 # next_fidelity_id = self.fidelity_manager.get_next_fidelity_id(configuration_id=hp_index)
                 # if next_fidelity_id is None:
                 #     continue
-                real_budgets.append(next_budget)
+                # real_budgets.append(next_budget)
                 if len(self.extra_budgets_names) != 0:
                     real_extra_budgets.append(self.extra_budget[hp_index][-1])
                 learning_curve = self.performance_history[hp_index]
@@ -735,7 +774,7 @@ class HistoryManager:
                 budget_index = len(budgets)  # - 1
                 hp_curve = learning_curve[:budget_index] if budget_index > 0 else [initial_empty_value]
             else:
-                real_budgets.append(first_budgets)
+                # real_budgets.append(first_budgets)
                 hp_curve = [initial_empty_value]
                 if len(self.extra_budgets_names) != 0:
                     real_extra_budgets.append(first_extra_budgets)
@@ -747,9 +786,9 @@ class HistoryManager:
 
             hp_indices.append(hp_index)
             hp_curves.append(hp_curve)
-        hp_budgets = [max_budgets] * len(real_budgets)
-        hp_fidelity_ids = [self.fidelity_manager.last_fidelity_id] * len(real_budgets)
-        hp_extra_budgets = [max_extra_budgets] * len(real_budgets)
+        hp_budgets = [max_budgets] * len(real_fidelity_ids)
+        hp_fidelity_ids = [self.fidelity_manager.last_fidelity_id] * len(real_fidelity_ids)
+        hp_extra_budgets = [max_extra_budgets] * len(real_fidelity_ids)
 
         hp_curves = self.get_processed_curves(curves=hp_curves, curve_size_mode=curve_size_mode,
                                               real_budgets=hp_budgets)
@@ -757,12 +796,12 @@ class HistoryManager:
         if predict_mode == "next_budget":
             # make sure there is a copy happening because hp_budgets get normalized and real_budgets does not.
             # Creating np.array below copies the data.
-            hp_budgets = real_budgets
+            # hp_budgets = real_budgets
             hp_fidelity_ids = real_fidelity_ids
             hp_extra_budgets = real_extra_budgets
 
         hp_indices = np.array(hp_indices, dtype=int)
-        hp_budgets = pd.DataFrame(hp_budgets, columns=self.fidelity_names).astype(np.float32)
+        # hp_budgets = pd.DataFrame(hp_budgets, columns=self.fidelity_names).astype(np.float32)
         if len(self.extra_budgets_names) != 0:
             hp_extra_budgets = pd.DataFrame(hp_extra_budgets, columns=self.extra_budgets_names).astype(np.float32)
         else:

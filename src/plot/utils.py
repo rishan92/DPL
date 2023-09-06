@@ -27,7 +27,11 @@ def add_plot_legend(ax: matplotlib.axes.Axes, n: int):
 def plot_line(ydata: pd.DataFrame, x_label: str, y_label: str, title: str, path: Union[Path, str],
               std_data: pd.DataFrame = None, dpi=200, **kwargs):
     plt.clf()
-    p = sns.lineplot(data=ydata)
+    if 'x' in ydata.columns:
+        ydata.set_index('x', inplace=True)
+        p = sns.lineplot(data=ydata)
+    else:
+        p = sns.lineplot(data=ydata)
 
     plot_std = kwargs['plot_std'] if 'plot_std' in kwargs else True
     if std_data is not None and plot_std:

@@ -70,6 +70,8 @@ class RandomOptimizer(BaseHyperparameterOptimizer):
         #         break
         possible_candidates = {i for i in range(self.hyperparameter_candidates.shape[0])}
         not_evaluated_candidates = possible_candidates - self.evaluated_configurations
+        if len(not_evaluated_candidates) == 0:
+            return [], []
         config_index = np.random.choice(list(not_evaluated_candidates))
         self.evaluated_configurations.add(config_index)
         fidelity_id = self.fidelity_manager.last_fidelity_id

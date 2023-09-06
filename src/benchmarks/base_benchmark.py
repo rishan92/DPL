@@ -18,12 +18,11 @@ class BaseBenchmark(ABC):
     param_space = None
     # if the best value corresponds to a lower value
     minimization_metric = True
-    max_budgets = None
 
     def __init__(self, path_to_json_file: Path, seed=0):
-        self.path_to_json_file: Path = path_to_json_file
-        self.max_value = None
-        self.min_value = None
+        self.path_to_json_file: Path = path_to_json_file.absolute()
+        self._max_value = None
+        self._min_value = None
         self.categorical_indicator = None
         self.objective_performance_info = {}
         self.categories = None
@@ -34,6 +33,7 @@ class BaseBenchmark(ABC):
         self.worst_config_id = None
         self.nr_hyperparameters = None
         self.max_budgets = None
+        self.min_budgets = None
 
     def load_dataset_names(self):
         raise NotImplementedError('Please implement the load_dataset_names method')
@@ -43,7 +43,7 @@ class BaseBenchmark(ABC):
         raise NotImplementedError('Please extend the get_hyperparameter_candidates method')
 
     @abstractmethod
-    def get_performance(self, hp_index: int, fidelity_id: Tuple[int]) -> float:
+    def get_performance(self, hp_index: int, fidelity_id: Tuple[int]) -> Tuple[float, float]:
         raise NotImplementedError('Please extend the get_performance method')
 
     @abstractmethod
@@ -57,16 +57,16 @@ class BaseBenchmark(ABC):
     def size(self) -> int:
         return self.nr_hyperparameters * self.max_budget
 
-    def get_objective_function_performance(self, hp_index: int, fidelity_id: Tuple[int]) -> Tuple[List, List]:
-        performance = self.get_performance(hp_index=hp_index, fidelity_id=fidelity_id)
-        return [performance], [fidelity_id]
+    def get_objective_function_performance(self, hp_index: int, fidelity_id: Tuple[int]) -> Tuple[List, List, List]:
+        performance, eval_time = self.get_performance(hp_index=hp_index, fidelity_id=fidelity_id)
+        return [performance], [fidelity_id], [eval_time]
 
     def close(self):
         pass
 
     def extract_hyperparameter_info(self, config_space):
         hyperparameter_info = OrderedDict()
-        for hp in config_space.get_hyperparameters():
+        for hp in list(config_space.values()):
             hp_name = hp.name
             default_value = hp.default_value
             is_log = False
@@ -110,14 +110,25 @@ class BaseBenchmark(ABC):
 
         return hyperparameter_info
 
-    def get_best_performance(self):
-        incumbent_curve = self.get_incumbent_curve()
-        if self.is_minimize:
-            best_value = min(incumbent_curve)
-        else:
-            best_value = max(incumbent_curve)
+    @property
+    def max_value(self):
+        if self._max_value is None:
+            self.calc_benchmark_stats()
+        return self._max_value
 
-        return best_value
+    @property
+    def min_value(self):
+        if self._min_value is None:
+            self.calc_benchmark_stats()
+        return self._min_value
+
+    def get_best_performance(self):
+        if self.is_minimize:
+            value = self.min_value
+        else:
+            value = self.max_value
+
+        return value
 
     def get_curve_best(self, hp_index: int) -> float:
         curve, _ = self.get_curve(hp_index, self.max_budget)
@@ -147,6 +158,9 @@ class BaseBenchmark(ABC):
                 max_curve = val_curve
                 max_id = index
 
+        self._max_value = max_value
+        self._min_value = min_value
+
         if self.is_minimize:
             self.incumbent_curve = min_curve
             self.worst_curve = max_curve
@@ -164,9 +178,12 @@ class BaseBenchmark(ABC):
         return self.incumbent_curve
 
     def get_worst_performance(self):
-        if self.worst_curve is None:
-            self.calc_benchmark_stats()
-        return self.worst_curve
+        if self.is_minimize:
+            value = self.max_value
+        else:
+            value = self.min_value
+
+        return value
 
     def get_incumbent_config_id(self):
         if self.incumbent_config_id is None:
