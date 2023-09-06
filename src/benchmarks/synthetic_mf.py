@@ -16,7 +16,7 @@ from src.history.fidelity_manager import FidelityManager
 
 
 class SyntheticMFBench(BaseBenchmark):
-    nr_hyperparameters = 10
+    nr_hyperparameters = 2000
 
     param_space = None
     max_budget = 51

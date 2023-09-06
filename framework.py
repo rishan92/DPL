@@ -19,7 +19,7 @@ from pathlib import Path
 from src.benchmarks.base_benchmark import BaseBenchmark
 from src.benchmarks.lcbench import LCBench
 from src.benchmarks.taskset import TaskSet
-from src.benchmarks.hyperbo import PD1
+# from src.benchmarks.hyperbo import PD1
 from src.benchmarks.synthetic import SyntheticBench
 # from src.benchmarks.yahpo import YAHPOGym
 # from src.benchmarks.hpobench import HPOBench
@@ -27,10 +27,10 @@ from src.benchmarks.synthetic import SyntheticBench
 from src.benchmarks.synthetic_mf import SyntheticMFBench
 from src.benchmarks.nanogptbench import NanoGPTBench
 from src.surrogate_models.hyperparameter_optimizer import HyperparameterOptimizer
-from src.surrogate_models.asha import AHBOptimizer
-from src.surrogate_models.dehb.interface import DEHBOptimizer
+# from src.surrogate_models.asha import AHBOptimizer
+# from src.surrogate_models.dehb.interface import DEHBOptimizer
 from src.surrogate_models.random_search import RandomOptimizer
-from src.surrogate_models.many_fidelity_hyperparameter_optimizer import MFHyperparameterOptimizer
+# from src.surrogate_models.many_fidelity_hyperparameter_optimizer import MFHyperparameterOptimizer
 from src.surrogate_models.dragonfly import DragonFlyOptimizer
 import global_variables as gv
 import subprocess
@@ -47,18 +47,18 @@ class Framework:
     surrogate_types = {
         'power_law': HyperparameterOptimizer,
         'dyhpo': HyperparameterOptimizer,
-        'asha': AHBOptimizer,
-        'dehb': DEHBOptimizer,
+        # 'asha': AHBOptimizer,
+        # 'dehb': DEHBOptimizer,
         'dragonfly': DragonFlyOptimizer,
         'random': RandomOptimizer,
-        'many_fidelity': MFHyperparameterOptimizer
+        # 'many_fidelity': MFHyperparameterOptimizer
     }
 
     benchmark_types = {
         'lcbench': LCBench,
         'taskset': TaskSet,
         'lcbench_mini': LCBench,
-        'pd1': PD1,
+        # 'pd1': PD1,
         'synthetic': SyntheticBench,
         # 'yahpo': YAHPOGym,
         # 'hpobench': HPOBench,
@@ -133,6 +133,7 @@ class Framework:
         self.hp_names: List[str] = self.benchmark.hp_names
         self.info_dict: Dict[str, Any] = dict()
         self.total_time = 0
+        self.no_improvement_count = 0
 
         # set up wandb
         commit_hash: str = subprocess.check_output(["git", "rev-parse", "HEAD"]).decode("ascii").strip()
@@ -313,9 +314,14 @@ class Framework:
                 ):
                     hp_index = hp_indices
                     if isinstance(hp_indices, List):
-                        hp_index = hp_indices[0]
+                        plot_hp_index = hp_indices[0]
+                        plot_fidelities = fidelities[0]
+                    else:
+                        plot_hp_index = hp_indices
+                        plot_fidelities = fidelities
                     self.surrogate.plot_pred_curve(
-                        hp_index=hp_index,
+                        hp_index=plot_hp_index,
+                        fidelities=plot_fidelities,
                         benchmark=self.benchmark,
                         surrogate_budget=self.surrogate_budget,
                         output_dir=self.pred_curves_path
@@ -410,6 +416,14 @@ class Framework:
                 max(a - b, 0) for a, b in zip(normalized_log_fidelity, max_previous_normalized_fidelity))
             fidelity_cost /= len(log_fidelity)
             total_surrogate_cost += fidelity_cost
+
+            if fidelity_cost == 0:
+                self.no_improvement_count += 1
+            else:
+                self.no_improvement_count = 0
+
+            if self.no_improvement_count > 50:
+                return
 
             evaluated_configs[best_hp_index].append(normalized_log_fidelity)
 
