@@ -411,24 +411,38 @@ class HistoryManager:
 
         return train_dataset
 
-    def get_predict_curves_dataset(self, hp_index, curve_size_mode, fidelity_name='epochs'):
+    def get_predict_curves_dataset(self, hp_index, fidelities, curve_size_mode, fidelity_name='epochs'):
         curves = []
         real_budgets_ids = []
         initial_empty_value = self.get_initial_empty_value()
         # first_budgets = {fidelity_name: min(self.fantasize_step[fidelity_name], self.min_budgets[fidelity_name])
         #                  for fidelity_name in self.fidelity_names}
         first_budgets = {k: self.min_budgets[k] for k in self.fidelity_names}
+        check_fidelity_id = self.fidelity_manager.convert_fidelity_to_fidelity_id(fidelity=fidelities)
+        fidelity_index = self.fidelity_manager.fidelity_names.index(fidelity_name)
+        max_train_fidelity_id = None
 
         if hp_index in self.examples:
             budgets: List = self.examples[hp_index]
             budgets = self.fidelity_id_history[hp_index]
             max_train_fidelity_id = budgets[-1]
             performances = self.performance_history[hp_index]
-            for i, (budget, performance) in enumerate(zip(budgets, performances)):
-                real_budgets_ids.append(budget)
-                train_curve = performances[:i] if i > 0 else [initial_empty_value]
-                curves.append(train_curve)
-        else:
+            # for i, (budget, performance) in enumerate(zip(budgets, performances)):
+            #     is_valid = [False] * len(check_fidelity_id)
+            #     for check_index, v in enumerate(check_fidelity_id):
+            #         if check_index == fidelity_index or v == budget[check_index]:
+            #             is_valid[check_index] = True
+            #
+            #     if np.all(is_valid):
+            #         real_budgets_ids.append(budget)
+            #         train_curve = performances[:i] if i > 0 else [initial_empty_value]
+            #         curves.append(train_curve)
+            real_budgets_ids.append(budgets[-1])
+            i = len(performances)
+            train_curve = performances[:i] if i > 0 else [initial_empty_value]
+            curves.append(train_curve)
+
+        if len(real_budgets_ids) == 0:
             max_train_fidelity_id = self.fidelity_manager.first_fidelity_id
             real_budgets_ids.append(first_budgets)
             curves.append([0])
@@ -451,7 +465,6 @@ class HistoryManager:
         #         budgets_pd[col] = budgets_pd[col] / self.max_budgets[col]
         # p_budgets = budgets_pd.to_numpy()
 
-        fidelity_index = self.fidelity_manager.fidelity_names.index(fidelity_name)
         fidelity = self.fidelity_manager.fidelity_space[fidelity_name]
         real_budgets_id = []
         max_train_fidelity_ids = list(max_train_fidelity_id)
@@ -658,16 +671,17 @@ class HistoryManager:
 
         return mean_initial_value
 
-    def get_candidate_configurations_dataset(self, predict_mode, curve_size_mode) -> \
+    def get_candidate_configurations_dataset(self, predict_mode, curve_size_mode, fidelity_info=None) -> \
         Tuple[TabularDataset, np.ndarray, List[Dict]]:
 
-        if not self.is_test_data_modified:
-            return self.cached_test_dataset
+        # if not self.is_test_data_modified:
+        #     return self.cached_test_dataset
 
         hp_indices, hp_fidelity_ids, real_fidelity_ids, hp_curves, hp_extra_budgets = \
             self.generate_candidate_configurations(
                 predict_mode,
-                curve_size_mode
+                curve_size_mode,
+                fidelity_info=fidelity_info
             )
 
         train_fidelities = self.fidelity_manager.get_fidelities(
@@ -714,7 +728,7 @@ class HistoryManager:
 
     # TODO: break this function to only handle candidates in history and make config manager handle configs
     #  not in history
-    def generate_candidate_configurations(self, predict_mode, curve_size_mode) -> \
+    def generate_candidate_configurations(self, predict_mode, curve_size_mode, fidelity_info=None) -> \
         Tuple[np.ndarray, List[Tuple[int]], List[Tuple[int]], Optional[np.ndarray], pd.DataFrame]:
         """Generate candidate configurations that will be
         fantasized upon.
@@ -779,7 +793,13 @@ class HistoryManager:
                 if len(self.extra_budgets_names) != 0:
                     real_extra_budgets.append(first_extra_budgets)
 
-            next_fidelity_id = self.fidelity_manager.get_next_fidelity_id(configuration_id=hp_index)
+            fidelity_info_id = None
+            if fidelity_info is not None:
+                fidelity_info_id = fidelity_info[0]
+                if hp_index in self.examples and fidelity_info[1] in self.examples[hp_index]:
+                    continue
+            next_fidelity_id = self.fidelity_manager.get_next_fidelity_id(
+                configuration_id=hp_index, configuration_fidelity_id=fidelity_info_id)
             if next_fidelity_id is None:
                 continue
             real_fidelity_ids.append(next_fidelity_id)
@@ -799,6 +819,9 @@ class HistoryManager:
             # hp_budgets = real_budgets
             hp_fidelity_ids = real_fidelity_ids
             hp_extra_budgets = real_extra_budgets
+
+        if len(hp_indices) == 0:
+            a = 0
 
         hp_indices = np.array(hp_indices, dtype=int)
         # hp_budgets = pd.DataFrame(hp_budgets, columns=self.fidelity_names).astype(np.float32)

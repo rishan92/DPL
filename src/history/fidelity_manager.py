@@ -31,6 +31,9 @@ class FidelityManager:
         self.first_fidelity = self.convert_fidelity_id_to_fidelity(fidelity_id=self.first_fidelity_id)
         self.last_fidelity = self.convert_fidelity_id_to_fidelity(fidelity_id=self.last_fidelity_id)
         self.last_fidelity = self.convert_type(fidelity=self.last_fidelity)
+        self.predict_fidelity_mode = "all"  # "next"  #
+        self.predict_fidelities = self.generate_predict_fidelity_tensor()
+        self.evaluated_fidelity_id_map = [set()] * self.num_configurations
 
     def get_raw_fidelity_space(self):
         return self.raw_fidelity_space
@@ -40,6 +43,9 @@ class FidelityManager:
 
     def get_min_fidelity(self):
         return {k: v for k, v in zip(self.fidelity_names, self.first_fidelity)}
+
+    def get_predict_fidelity_ids(self):
+        return self.predict_fidelities
 
     def from_config_space(self, config_space):
         fidelity_curve_points = {}
@@ -93,6 +99,19 @@ class FidelityManager:
         normalized_fidelity = tuple([f / max_f for f, max_f in zip(fidelity, self.last_fidelity)])
         return normalized_fidelity
 
+    def generate_predict_fidelity_tensor(self):
+        for k, v in self.fidelity_space.items():
+            assert np.all(np.diff(v) > 0), "Fidelities should be strictly increasing."
+            self.fidelity_space[k] = np.array(v)
+
+        combinations = list(itertools.product(*self.fidelity_space.values()))
+        fidelities = [
+            (tuple(np.where(self.fidelity_space[key] == value)[0][0]
+                   for key, value in zip(self.fidelity_space, combination)), combination)
+            for combination in combinations
+        ]
+        return fidelities
+
     def generate_fidelity_tensor(self):
         for k, v in self.fidelity_space.items():
             assert np.all(np.diff(v) > 0), "Fidelities should be strictly increasing."
@@ -121,30 +140,40 @@ class FidelityManager:
         reverse_mapping = {value: key for key, value in mapping.items()}
         return reverse_mapping
 
-    def get_next_fidelity_id(self, configuration_id):
-        num_max_budgets = 0
-        next_budget = []
-        fidelity_id = self.fidelity_ids[configuration_id]
+    def get_next_fidelity_id(self, configuration_id, configuration_fidelity_id=None):
+        if self.predict_fidelity_mode == "all":
+            if configuration_fidelity_id is not None:
+                return configuration_fidelity_id
+            else:
+                raise NotImplementedError
+        elif self.predict_fidelity_mode == "next":
+            num_max_budgets = 0
+            next_budget = []
+            fidelity_id = self.fidelity_ids[configuration_id]
 
-        if fidelity_id is None:
-            return self.first_fidelity_id
+            if fidelity_id is None:
+                return self.first_fidelity_id
 
-        for i, k in enumerate(self.fidelity_names):
-            next_b = fidelity_id[i] + 1
-            if next_b >= len(self.fidelity_space[k]):
-                next_b = fidelity_id[i]
-                num_max_budgets += 1
-            next_budget.append(next_b)
-        if num_max_budgets == len(self.fidelity_names):
-            return None
+            for i, k in enumerate(self.fidelity_names):
+                next_b = fidelity_id[i] + 1
+                if next_b >= len(self.fidelity_space[k]):
+                    next_b = fidelity_id[i]
+                    num_max_budgets += 1
+                next_budget.append(next_b)
+            if num_max_budgets == len(self.fidelity_names):
+                return None
 
-        return tuple(next_budget)
+            return tuple(next_budget)
+        else:
+            raise NotImplementedError
 
     def get_fidelity_id(self, configuration_id):
         return self.fidelity_ids[configuration_id]
 
-    def get_next_fidelity(self, configuration_id, is_normalized=False):
-        next_id = self.get_next_fidelity_id(configuration_id=configuration_id)
+    def get_next_fidelity(self, configuration_id, is_normalized=False, configuration_fidelity=None):
+        next_id = self.get_next_fidelity_id(
+            configuration_id=configuration_id, configuration_fidelity_id=configuration_fidelity
+        )
         next_fidelity = None
         if next_id is not None:
             fidelity_map = \
@@ -189,6 +218,7 @@ class FidelityManager:
 
     def set_fidelity_id(self, configuration_id, fidelity_id):
         self.fidelity_ids[configuration_id] = fidelity_id
+        self.evaluated_fidelity_id_map[configuration_id].add(fidelity_id)
 
     def add_fidelity(self, configuration_id):
         assert configuration_id == len(self.fidelity_ids), "Only incremental adding of fidelity supported."

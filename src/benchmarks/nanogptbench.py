@@ -237,7 +237,7 @@ class NanoGPTBench(BaseBenchmark):
             metric = metric_data[self.metric_name]
             eval_time = metric_data['runtime']
         except KeyError as ex:
-            metric = np.nan
+            # metric = np.nan
             # Simulate failed runs.
             try:
                 metric_data = self.benchmark(
@@ -248,8 +248,14 @@ class NanoGPTBench(BaseBenchmark):
                     full_trajectory=True,
                 )
                 eval_time = metric_data[-1]['runtime']
+                metric = np.nan
             except KeyError as ex_in:
                 eval_time = 0
+                metric = np.nan
+
+        if np.isnan(metric).any():
+            a = 0
+
         return metric, eval_time
 
     def get_fidelity_manager(self):

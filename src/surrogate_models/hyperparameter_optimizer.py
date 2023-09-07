@@ -390,7 +390,7 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
 
         return return_state
 
-    def _predict(self) -> Tuple[
+    def _predict(self, fidelity_info=None) -> Tuple[
         np.ndarray, np.ndarray, np.ndarray, List[Dict], Optional[Dict], np.ndarray]:
         """
         Predict the performances of the hyperparameter configurations
@@ -408,8 +408,12 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
 
         test_data, hp_indices, real_budgets = self.history_manager.get_candidate_configurations_dataset(
             predict_mode=self.meta.predict_mode,
-            curve_size_mode=self.meta.curve_size_mode
+            curve_size_mode=self.meta.curve_size_mode,
+            fidelity_info=fidelity_info,
         )
+
+        if hp_indices.shape[0] == 0:
+            return tuple([None] * 6)
 
         mean_predictions, std_predictions, predict_infos, model_std_predictions = self.model.predict(
             test_data=test_data,
@@ -452,49 +456,74 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
             suggested_hp_index = self.rand_init_conf_indices[self.initial_random_index]
             # budget = self.rand_init_budgets[self.initial_random_index]
             self.initial_random_index += 1
+            suggested_fidelity_id = self.fidelity_manager.first_fidelity_id
         else:
-            mean_predictions, std_predictions, hp_indices, real_budgets, predict_infos, mean_model_stds = self._predict()
+            fidelity_infos = self.fidelity_manager.get_predict_fidelity_ids()
+            if fidelity_infos is None:
+                fidelity_infos = [None]
+            suggested_acq_values = []
+            suggested_index_data = []
+            for fidelity_info in fidelity_infos:
+                mean_predictions, std_predictions, hp_indices, real_budgets, predict_infos, mean_model_stds = \
+                    self._predict(fidelity_info=fidelity_info)
 
-            evaluated_mask = None
-            if hasattr(self.meta, 'use_exploitation_sampling') and self.meta.use_exploitation_sampling:
-                ex_sampling_probability = self.surrogate_budget / self.total_budget
-                random_number = np.random.uniform(0, 1)
-                if random_number < ex_sampling_probability:
-                    evaluated_indices = self.history_manager.get_evaluted_indices()
-                    if len(evaluated_indices) != 0:
-                        evaluated_indices = np.array(evaluated_indices)
-                        all_hp_indices = np.array(hp_indices)
-                        evaluated_mask = np.isin(all_hp_indices, evaluated_indices)
+                if mean_predictions is None:
+                    suggested_acq_values.append(np.NINF)
+                    suggested_index_data.append(None)
+                    continue
 
-            acq_explore_factor = 0
-            if hasattr(self.meta, 'acq_explore_factor') and \
-                self.meta.acq_explore_factor is not None and self.meta.acq_explore_factor != 0:
-                acq_explore_factor = self.meta.acq_explore_factor
-                if hasattr(self.meta, 'acq_explore_strategy') and \
-                    self.meta.acq_explore_strategy is not None and self.meta.acq_explore_strategy != 'constant':
-                    if self.meta.acq_explore_strategy == 'linear':
-                        acq_explore_factor = self.meta.acq_explore_factor * (
-                            1 - self.surrogate_budget / self.total_budget)
-                    elif self.meta.acq_explore_strategy == 'exponential':
-                        gamma = math.exp(math.log(1e-6 / self.meta.acq_explore_factor) / self.total_budget)
-                        acq_explore_factor = math.pow(gamma, self.surrogate_budget)
-                    elif self.meta.acq_explore_strategy == 'cosine_annealing':
-                        acq_explore_factor = 0.5 * self.meta.acq_explore_factor * (
-                            1 + math.cos(self.surrogate_budget * math.pi / self.total_budget))
-                    else:
-                        raise NotImplementedError
+                evaluated_mask = None
+                if hasattr(self.meta, 'use_exploitation_sampling') and self.meta.use_exploitation_sampling:
+                    ex_sampling_probability = self.surrogate_budget / self.total_budget
+                    random_number = np.random.uniform(0, 1)
+                    if random_number < ex_sampling_probability:
+                        evaluated_indices = self.history_manager.get_evaluted_indices()
+                        if len(evaluated_indices) != 0:
+                            evaluated_indices = np.array(evaluated_indices)
+                            all_hp_indices = np.array(hp_indices)
+                            evaluated_mask = np.isin(all_hp_indices, evaluated_indices)
 
-            best_prediction_index = self.find_suggested_config(
-                mean_predictions,
-                std_predictions,
-                budgets=real_budgets,
-                acq_mode=self.meta.acq_mode,
-                acq_best_value_mode=self.meta.acq_best_value_mode,
-                exploitation_mask=evaluated_mask,
-                hp_indices=hp_indices,
-                acq_explore_factor=acq_explore_factor,
-                mean_model_stds=mean_model_stds
-            )
+                acq_explore_factor = 0
+                if hasattr(self.meta, 'acq_explore_factor') and \
+                    self.meta.acq_explore_factor is not None and self.meta.acq_explore_factor != 0:
+                    acq_explore_factor = self.meta.acq_explore_factor
+                    if hasattr(self.meta, 'acq_explore_strategy') and \
+                        self.meta.acq_explore_strategy is not None and self.meta.acq_explore_strategy != 'constant':
+                        if self.meta.acq_explore_strategy == 'linear':
+                            acq_explore_factor = self.meta.acq_explore_factor * (
+                                1 - self.surrogate_budget / self.total_budget)
+                        elif self.meta.acq_explore_strategy == 'exponential':
+                            gamma = math.exp(math.log(1e-6 / self.meta.acq_explore_factor) / self.total_budget)
+                            acq_explore_factor = math.pow(gamma, self.surrogate_budget)
+                        elif self.meta.acq_explore_strategy == 'cosine_annealing':
+                            acq_explore_factor = 0.5 * self.meta.acq_explore_factor * (
+                                1 + math.cos(self.surrogate_budget * math.pi / self.total_budget))
+                        else:
+                            raise NotImplementedError
+
+                best_prediction_index, acq_func_value = self.find_suggested_config(
+                    mean_predictions,
+                    std_predictions,
+                    budgets=real_budgets,
+                    acq_mode=self.meta.acq_mode,
+                    acq_best_value_mode=self.meta.acq_best_value_mode,
+                    exploitation_mask=evaluated_mask,
+                    hp_indices=hp_indices,
+                    acq_explore_factor=acq_explore_factor,
+                    mean_model_stds=mean_model_stds
+                )
+                suggested_acq_values.append(acq_func_value)
+                suggested_index_data.append({
+                    'best_prediction_index': best_prediction_index,
+                    'hp_indices': hp_indices,
+                    'predict_infos': predict_infos,
+                })
+
+            max_fidelity_index = np.argmax(suggested_acq_values)
+            suggested_fidelity_id = fidelity_infos[max_fidelity_index][0]
+            best_prediction_index = suggested_index_data[max_fidelity_index]['best_prediction_index']
+            hp_indices = suggested_index_data[max_fidelity_index]['hp_indices']
+            predict_infos = suggested_index_data[max_fidelity_index]['predict_infos']
 
             """
             the best prediction index is not always matching with the actual hp index.
@@ -544,7 +573,12 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
                 for k, v in predict_infos.items():
                     self.prediction_params_pd.loc[self.iterations_counter, (hp_indices, k)] = v
 
-        fidelity_id = self.fidelity_manager.get_next_fidelity_id(configuration_id=suggested_hp_index)
+        if suggested_fidelity_id is None:
+            fidelity_id = self.fidelity_manager.get_next_fidelity_id(
+                configuration_id=suggested_hp_index, configuration_fidelity_id=suggested_fidelity_id
+            )
+        else:
+            fidelity_id = suggested_fidelity_id
         fidelity = self.fidelity_manager.convert_fidelity_id_to_fidelity(fidelity_id=fidelity_id)
 
         suggest_time_end = time.time()
@@ -823,11 +857,12 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
 
         max_value_index = np.argmax(acq_func_values)
         max_value_index = int(max_value_index)
+        acq_func_value = acq_func_values[max_value_index]
 
-        return max_value_index
+        return max_value_index, acq_func_value
 
-    def plot_pred_curve(self, hp_index: int, benchmark: BaseBenchmark, surrogate_budget: int, output_dir: Path,
-                        prefix: str = ""):
+    def plot_pred_curve(self, hp_index: int, benchmark: BaseBenchmark, fidelities: Tuple, surrogate_budget: int,
+                        output_dir: Path, prefix: str = ""):
         if self.model is None:
             return
 
@@ -842,6 +877,7 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
         for fidelity_name in self.fidelity_names:
             pred_test_data, real_fidelity_ids, max_train_budget = self.history_manager.get_predict_curves_dataset(
                 hp_index=hp_index,
+                fidelities=fidelities,
                 curve_size_mode=self.meta.curve_size_mode,
                 fidelity_name=fidelity_name
             )
@@ -956,7 +992,8 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
 
         test_data, hp_indices, real_budgets = self.history_manager.get_candidate_configurations_dataset(
             predict_mode=self.meta.predict_mode,
-            curve_size_mode=self.meta.curve_size_mode
+            curve_size_mode=self.meta.curve_size_mode,
+            fidelity_info=None
         )
 
         if self.real_curve_targets_map_pd is None:
