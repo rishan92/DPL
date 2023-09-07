@@ -390,10 +390,13 @@ class Framework:
                 previous_eval_time = evaluated_configs_eval_time[configs_eval_time_key]
             else:
                 previous_eval_time = 0
-            evaluated_configs_eval_time[configs_eval_time_key] = max(best_eval_time, previous_eval_time)
+            evaluated_configs_eval_time[configs_eval_time_key] = best_eval_time
 
-            current_eval_time = best_eval_time - previous_eval_time
+            current_eval_time = max(best_eval_time, 0)
             self.total_time += (step_time_duration + current_eval_time)
+            print(
+                f"previous_eval_time {previous_eval_time} best_eval_time {best_eval_time} "
+                f"current_eval_time {current_eval_time}")
 
             self.surrogate_budget += 1
 
@@ -401,6 +404,11 @@ class Framework:
                 regret = best_value - incumbent_value
             else:
                 regret = incumbent_value - best_value
+
+            if regret < 0:
+                print(f"regret is NEGATIVE regret {regret} incumbent_value {incumbent_value} "
+                      f"best_hp_index {best_hp_index} best_fidelity {best_fidelity}")
+                a = 0
 
             log_fidelity = tuple(float(x) for x in best_fidelity)
             normalized_log_fidelity = self.fidelity_manager.normalize_fidelity(fidelity=log_fidelity)
