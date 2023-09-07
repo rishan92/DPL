@@ -242,6 +242,7 @@ class Framework:
                 pred_trend_path=self.pred_trend_path,
                 fidelity_names=fidelity_names
             )
+            self.fidelity_manager.set_predict_fidelity_mode(mode=self.surrogate.meta_predict_fidelity_mode)
         else:
             self.surrogate = surrogate_class(
                 hyperparameter_candidates=self.hp_candidates,

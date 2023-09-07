@@ -38,7 +38,7 @@ def plot_results(result_path: Path, x_metric: str = None, y_metric: str = None, 
                                                            dataset_names=dataset_names, method_names=method_names)
 
     x_metric = 'epochs' if x_metric is None else x_metric
-    assert x_metric in ['epochs', 'first_curve', 'surrogate_cost']
+    assert x_metric in ['epochs', 'first_curve', 'surrogate_cost', 'total_time']
     if 'x_label' not in kwargs:
         kwargs['x_label'] = x_metric
     if 'y_label' not in kwargs:
@@ -90,9 +90,9 @@ def main():
     dataset_files_path = Path("./bash_scripts")
 
     method_names = ['power_law', 'dyhpo', 'random']
-    method_names = ['dyhpo', 'dragonfly', 'random']
+    method_names = ['dyhpo', 'dragonfly', 'random', 'dyhpo_all_fidelities']
     benchmark_names = ['taskset', 'lcbench']
-    benchmark_names = ['synthetic_mf']
+    benchmark_names = ['nanogpt']
     dataset_names = None
     # dataset_names = ['FixedTextRNNClassification_imdb_patch32_GRU64_avg_bs128',
     #                  'FixedTextRNNClassification_imdb_patch32_GRU128_bs128']
@@ -114,9 +114,11 @@ def main():
     # plot_results_f(y_metric='regret', x_metric='epochs', aggregate_level='benchmark', y_log=True, plot_std=False)
     # plot_results_f(y_metric='best_regret', x_metric='first_curve', aggregate_level='dataset', plot_std=False)
     plot_results_f(y_metric='regret', x_metric='surrogate_cost', aggregate_level='dataset',
-                   y_log=True, plot_std=False, x_max=20)
-    plot_results_f(y_metric='regret', x_metric='surrogate_cost', aggregate_level='benchmark',
-                   y_log=True, plot_std=False, x_max=20)
+                   y_log=True, plot_std=False, x_max=12)
+    # plot_results_f(y_metric='regret', x_metric='surrogate_cost', aggregate_level='benchmark',
+    #                y_log=True, plot_std=False, x_max=20)
+    plot_results_f(y_metric='regret', x_metric='total_time', aggregate_level='dataset',
+                   y_log=True, plot_std=False)
 
 
 if __name__ == "__main__":

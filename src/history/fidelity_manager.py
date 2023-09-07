@@ -31,9 +31,12 @@ class FidelityManager:
         self.first_fidelity = self.convert_fidelity_id_to_fidelity(fidelity_id=self.first_fidelity_id)
         self.last_fidelity = self.convert_fidelity_id_to_fidelity(fidelity_id=self.last_fidelity_id)
         self.last_fidelity = self.convert_type(fidelity=self.last_fidelity)
-        self.predict_fidelity_mode = "all"  # "next"  #
+        self.predict_fidelity_mode = "next"  # "all"  #
         self.predict_fidelities = self.generate_predict_fidelity_tensor()
         self.evaluated_fidelity_id_map = [set()] * self.num_configurations
+
+    def set_predict_fidelity_mode(self, mode="next"):
+        self.predict_fidelity_mode = mode
 
     def get_raw_fidelity_space(self):
         return self.raw_fidelity_space

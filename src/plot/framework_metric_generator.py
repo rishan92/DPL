@@ -16,6 +16,7 @@ from src.benchmarks.lcbench import LCBench
 from src.benchmarks.taskset import TaskSet
 from src.benchmarks.hyperbo import PD1
 from src.benchmarks.synthetic_mf import SyntheticMFBench
+from src.benchmarks.nanogptbench import NanoGPTBench
 
 
 class FrameworkMetricsGenerator:
@@ -65,6 +66,13 @@ class FrameworkMetricsGenerator:
                 'kwargs': {
                     'path_to_json_files': str(Path('synthetic_mf')),
                     'dataset_name': 'park2_3'
+                }
+            },
+            'nanogpt': {
+                'class': NanoGPTBench,
+                'kwargs': {
+                    'path_to_json_files': str(Path('data', 'nanogpt')),
+                    'dataset_name': 'openwebtext'
                 }
             }
         }

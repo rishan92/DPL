@@ -302,7 +302,8 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
                 'use_exploitation_sampling': False,
                 'reset_refine_optimizer': True,
                 'acq_explore_factor': 0,
-                'acq_explore_strategy': 'constant',  # 'linear' 'exponential' 'cosine_annealing'
+                'acq_explore_strategy': 'constant',  # 'linear' 'exponential' 'cosine_annealing',
+                'predict_fidelity_mode': 'next',
             }
         elif model_class == DyHPOModel:
             hp = {
@@ -319,6 +320,7 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
                 'reset_refine_optimizer': True,
                 'acq_explore_factor': 0,
                 'acq_explore_strategy': 'constant',
+                'predict_fidelity_mode': 'next',
             }
         else:
             raise NotImplementedError(f"{model_class=}")
@@ -1129,3 +1131,10 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
             return self.model_class.meta.data_uncertainty_factor
         else:
             return 1
+
+    @property
+    def meta_predict_fidelity_mode(self):
+        if hasattr(self.meta, 'predict_fidelity_mode'):
+            return self.meta.predict_fidelity_mode
+        else:
+            return "next"
