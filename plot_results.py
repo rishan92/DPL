@@ -91,8 +91,10 @@ def main():
 
     method_names = ['power_law', 'dyhpo', 'random']
     method_names = ['dyhpo', 'dragonfly', 'random', 'dyhpo_all_fidelities']
+    # method_names = ['dyhpo', 'dyhpo_all_fidelities']
     benchmark_names = ['taskset', 'lcbench']
     benchmark_names = ['nanogpt']
+    benchmark_names = ['synthetic_mf']
     dataset_names = None
     # dataset_names = ['FixedTextRNNClassification_imdb_patch32_GRU64_avg_bs128',
     #                  'FixedTextRNNClassification_imdb_patch32_GRU128_bs128']
@@ -117,8 +119,8 @@ def main():
                    y_log=True, plot_std=False, x_max=12)
     # plot_results_f(y_metric='regret', x_metric='surrogate_cost', aggregate_level='benchmark',
     #                y_log=True, plot_std=False, x_max=20)
-    plot_results_f(y_metric='regret', x_metric='total_time', aggregate_level='dataset',
-                   y_log=True, plot_std=False)
+    # plot_results_f(y_metric='regret', x_metric='total_time', aggregate_level='dataset',
+    #                y_log=True, plot_std=False)
 
 
 if __name__ == "__main__":

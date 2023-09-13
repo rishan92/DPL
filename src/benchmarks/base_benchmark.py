@@ -34,6 +34,9 @@ class BaseBenchmark(ABC):
         self.nr_hyperparameters = None
         self.max_budgets = None
         self.min_budgets = None
+        self.normalization_max_value = 1.0
+        self.normalization_min_value = 0.0
+        self.is_normalized = False
 
     def load_dataset_names(self):
         raise NotImplementedError('Please implement the load_dataset_names method')
@@ -59,7 +62,13 @@ class BaseBenchmark(ABC):
 
     def get_objective_function_performance(self, hp_index: int, fidelity_id: Tuple[int]) -> Tuple[List, List, List]:
         performance, eval_time = self.get_performance(hp_index=hp_index, fidelity_id=fidelity_id)
+        performance = self.normalize_benchmark_performance(performance)
         return [performance], [fidelity_id], [eval_time]
+
+    def normalize_benchmark_performance(self, value):
+        normalized_value = \
+            (value - self.normalization_min_value) / (self.normalization_max_value - self.normalization_min_value)
+        return normalized_value
 
     def close(self):
         pass
@@ -157,6 +166,15 @@ class BaseBenchmark(ABC):
                 max_value = value
                 max_curve = val_curve
                 max_id = index
+
+        if not self.is_normalized:
+            self.normalization_max_value = max_value
+            self.normalization_min_value = min_value
+            max_value = 1.0
+            min_value = 0.0
+            max_curve = list(self.normalize_benchmark_performance(np.array(max_curve)))
+            min_curve = list(self.normalize_benchmark_performance(np.array(min_curve)))
+            self.is_normalized = True
 
         self._max_value = max_value
         self._min_value = min_value

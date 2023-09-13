@@ -314,7 +314,7 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
                 'acq_mode': 'ei',
                 'acq_best_value_mode': 'mf',  # 'normal',  #    mf - multi-fidelity, normal, None
                 'use_target_normalization': False,
-                'target_normalization_range': [0.1, 0.9],
+                'target_normalization_range': [0.0, 1.0],
                 'use_scaled_budgets': True,
                 'use_exploitation_sampling': False,
                 'reset_refine_optimizer': True,

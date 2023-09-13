@@ -125,6 +125,7 @@ class Framework:
         self.seed = seed
         self.max_value = self.benchmark.max_value
         self.min_value = self.benchmark.min_value
+        # print(f"Benchmark max: {self.max_value} min: {self.min_value}")
         self.surrogate_budget = 0
 
         self.categorical_indicator: List[bool] = self.benchmark.categorical_indicator
@@ -348,9 +349,8 @@ class Framework:
             hp_curves = []
             eval_times = []
             for hp_index, fidelity in zip(hp_indices, fidelities):
-                hp_curve, fidelity_out, eval_time = self.benchmark.get_objective_function_performance(hp_index,
-                                                                                                      fidelity)
-                # hp_curve = self.benchmark.get_performance(hp_index, budget)
+                hp_curve, fidelity_out, eval_time = \
+                    self.benchmark.get_objective_function_performance(hp_index, fidelity)
                 eval_times.append(eval_time)
                 hp_curves.append(hp_curve)
                 self.surrogate.observe(hp_index, fidelity_out, hp_curve)

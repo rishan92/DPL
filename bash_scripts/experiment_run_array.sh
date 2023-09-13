@@ -14,6 +14,7 @@ ln -s "$ROOT_PATH"/lc_bench "$job_directory/"
 ln -s "$ROOT_PATH"/data "$job_directory/"
 ln -s "$ROOT_PATH"/cached "$job_directory/"
 ln -s "$ROOT_PATH"/dragonfly_synthetic "$job_directory/"
+ln -s "$ROOT_PATH"/dragonfly "$job_directory/"
 # ln -s "$ROOT_PATH"/wandb "$job_directory/"
 
 # stores WANDB_API_KEY
@@ -25,7 +26,7 @@ fi
 
 export benchmark=$1
 
-if [[ "$benchmark" == "lcbench_mini" || "$benchmark" == "pd1_mini"  || "$benchmark" == "synthetic_mf" ]]
+if [[ "$benchmark" == "lcbench_mini" || "$benchmark" == "pd1_mini"  || "$benchmark" == "synthetic_mf"  || "$benchmark" == "nanogpt" ]]
 then
   export WANDB_MODE="online"
 else
@@ -55,6 +56,10 @@ then
 elif [ "$benchmark" == "synthetic_mf" ]
 then
   file="$ROOT_PATH/bash_scripts/synthetic_mf_dataset_names.txt"
+elif [ "$benchmark" == "nanogpt" ]
+then
+  file="$ROOT_PATH/bash_scripts/nanogpt_dataset_names.txt"
+
 else
   file="$ROOT_PATH/bash_scripts/pd1_dataset_names.txt"
 fi
