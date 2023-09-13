@@ -26,3 +26,7 @@ class BaseHyperparameterOptimizer(Meta, ABC):
 
     def plot_pred_dist(self, benchmark, surrogate_budget, output_dir, prefix=""):
         pass
+
+    @property
+    def meta_predict_fidelity_mode(self):
+        return "next"

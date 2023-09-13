@@ -2,7 +2,8 @@
 
 export ROOT_PATH=/home/fr/fr_fr/fr_rs442/project/DPL
 export JOB_PATH=/home/fr/fr_fr/fr_rs442/project/DPL/nemo_jobs
-export ENV_PATH=/home/fr/fr_fr/fr_rs442/.conda/envs/modpl
+#export ENV_PATH=/home/fr/fr_fr/fr_rs442/.conda/envs/modpl
+export ENV_PATH=/home/fr/fr_fr/fr_rs442/mambaforge-pypy3/envs/modpl_310
 
 export use_config=true
 #"$ROOT_PATH"/bash_scripts/experiment_run_array.sh "taskset" "power_law" "$ROOT_PATH/results" "$use_config"
