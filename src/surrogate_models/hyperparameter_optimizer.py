@@ -465,14 +465,16 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
                 fidelity_infos = [None]
             suggested_acq_values = []
             suggested_index_data = []
+            is_terminate = True
             for fidelity_info in fidelity_infos:
                 mean_predictions, std_predictions, hp_indices, real_budgets, predict_infos, mean_model_stds = \
                     self._predict(fidelity_info=fidelity_info)
 
-                if mean_predictions is None:
+                if real_budgets is None:
                     suggested_acq_values.append(np.NINF)
                     suggested_index_data.append(None)
                     continue
+                is_terminate = False
 
                 evaluated_mask = None
                 if hasattr(self.meta, 'use_exploitation_sampling') and self.meta.use_exploitation_sampling:
@@ -521,11 +523,19 @@ class HyperparameterOptimizer(BaseHyperparameterOptimizer):
                     'predict_infos': predict_infos,
                 })
 
+            if is_terminate:
+                return [], []
+
             max_fidelity_index = np.argmax(suggested_acq_values)
-            suggested_fidelity_id = fidelity_infos[max_fidelity_index][0]
             best_prediction_index = suggested_index_data[max_fidelity_index]['best_prediction_index']
             hp_indices = suggested_index_data[max_fidelity_index]['hp_indices']
             predict_infos = suggested_index_data[max_fidelity_index]['predict_infos']
+
+            fidelity_info = fidelity_infos[max_fidelity_index]
+            if fidelity_info is not None:
+                suggested_fidelity_id = fidelity_info[0]
+            else:
+                suggested_fidelity_id = None
 
             """
             the best prediction index is not always matching with the actual hp index.

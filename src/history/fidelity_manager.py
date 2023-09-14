@@ -48,6 +48,8 @@ class FidelityManager:
         return {k: v for k, v in zip(self.fidelity_names, self.first_fidelity)}
 
     def get_predict_fidelity_ids(self):
+        if self.predict_fidelity_mode == "next":
+            return None
         return self.predict_fidelities
 
     def from_config_space(self, config_space):
