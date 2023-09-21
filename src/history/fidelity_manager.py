@@ -145,9 +145,47 @@ class FidelityManager:
         reverse_mapping = {value: key for key, value in mapping.items()}
         return reverse_mapping
 
+    def filter_fideities(self, list_of_tuples, fidelity_id):
+        # Create an empty list to store the filtered tuples
+        filtered_list = []
+
+        # Iterate through each tuple in the list_of_tuples
+        for t in list_of_tuples:
+            # Flags to help determine whether the tuple should be added or not
+            all_equal = True
+            any_less_than = False
+
+            # Check each element of t against the corresponding element in A
+            for i in range(len(t)):
+                if t[i] < A[i]:
+                    any_less_than = True
+                if t[i] != A[i]:
+                    all_equal = False
+
+            # Based on flags, decide whether to add tuple t to the filtered list
+            if not all_equal and not any_less_than:
+                filtered_list.append(t)
+
+        return filtered_list
+
     def get_next_fidelity_id(self, configuration_id, configuration_fidelity_id=None):
         if self.predict_fidelity_mode == "all":
             if configuration_fidelity_id is not None:
+                current_fidelity_id = self.fidelity_ids[configuration_id]
+
+                if current_fidelity_id is not None:
+                    # Filter out lower fidelities
+                    all_equal = True
+                    any_less_than = False
+
+                    for i in range(len(current_fidelity_id)):
+                        if configuration_fidelity_id[i] < current_fidelity_id[i]:
+                            any_less_than = True
+                        if configuration_fidelity_id[i] != current_fidelity_id[i]:
+                            all_equal = False
+
+                    if all_equal or any_less_than:
+                        return None
                 return configuration_fidelity_id
             else:
                 raise NotImplementedError

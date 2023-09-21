@@ -687,8 +687,8 @@ class HistoryManager:
         train_fidelities = self.fidelity_manager.get_fidelities(
             fidelity_ids=hp_fidelity_ids, is_normalized=self.use_scaled_budgets
         )
-        train_fidelities_pd = pd.DataFrame(train_fidelities, columns=self.fidelity_manager.fidelity_names).astype(
-            np.float32)
+        # train_fidelities_pd = pd.DataFrame(train_fidelities, columns=self.fidelity_manager.fidelity_names).astype(
+        #     np.float32)
 
         real_budgets = self.fidelity_manager.get_fidelities(
             fidelity_ids=real_fidelity_ids, is_normalized=False
