@@ -151,6 +151,7 @@ class FeatureExtractor(BaseFeatureExtractor):
         # add an extra dimensionality for the learning curve
         # making it nr_rows x 1 x lc_values.
         learning_curves = torch.unsqueeze(learning_curves, dim=1)
+        learning_curves = -1 * learning_curves
         lc_features = self.cnn(learning_curves)
         # revert the output from the cnn into nr_rows x nr_kernels.
         lc_features = torch.squeeze(lc_features, dim=2)
