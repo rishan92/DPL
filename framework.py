@@ -17,10 +17,10 @@ from loguru import logger
 from pathlib import Path
 
 from src.benchmarks.base_benchmark import BaseBenchmark
-from src.benchmarks.lcbench import LCBench
-from src.benchmarks.taskset import TaskSet
+# from src.benchmarks.lcbench import LCBench
+# from src.benchmarks.taskset import TaskSet
 # from src.benchmarks.hyperbo import PD1
-from src.benchmarks.synthetic import SyntheticBench
+# from src.benchmarks.synthetic import SyntheticBench
 # from src.benchmarks.yahpo import YAHPOGym
 # from src.benchmarks.hpobench import HPOBench
 # from src.benchmarks.jahsbench import JAHSBench
@@ -55,11 +55,11 @@ class Framework:
     }
 
     benchmark_types = {
-        'lcbench': LCBench,
-        'taskset': TaskSet,
-        'lcbench_mini': LCBench,
+        # 'lcbench': LCBench,
+        # 'taskset': TaskSet,
+        # 'lcbench_mini': LCBench,
         # 'pd1': PD1,
-        'synthetic': SyntheticBench,
+        # 'synthetic': SyntheticBench,
         # 'yahpo': YAHPOGym,
         # 'hpobench': HPOBench,
         # 'jahsbench': JAHSBench,
@@ -364,6 +364,8 @@ class Framework:
 
             time_duration = time.time() - start_time
 
+            print(f"{hp_indices=} {hp_curves=}")
+
             # step_time_duration = time_duration / budget_cost
             step_time_duration = time_duration
 
@@ -394,8 +396,8 @@ class Framework:
 
             current_eval_time = max(best_eval_time - previous_eval_time, 0)
             self.total_time += (step_time_duration + current_eval_time)
-            print(f"previous_eval_time {previous_eval_time} best_eval_time {best_eval_time} "
-                  f"current_eval_time {current_eval_time}")
+            # print(f"previous_eval_time {previous_eval_time} best_eval_time {best_eval_time} "
+            #       f"current_eval_time {current_eval_time}")
 
             self.surrogate_budget += 1
 
