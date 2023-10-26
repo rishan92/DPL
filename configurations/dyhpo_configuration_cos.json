@@ -15,7 +15,7 @@
   "reset_refine_optimizer": true,
   "acq_explore_factor": 0,
   "acq_explore_strategy": "constant",
-  "predict_fidelity_mode": "next",
+  "predict_fidelity_mode": "all",
   "check_model": false,
   "check_model_predict_mode": "best",
   "check_model_train_mode": "exp",
