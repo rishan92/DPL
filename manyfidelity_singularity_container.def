@@ -1,0 +1,36 @@
+# Run this container using following commands.
+# singularity build singularity_container.sif manyfidelity_singularity_container.def
+# singularity run -B .:/DPL/result_output singularity_container.sif
+
+Bootstrap: docker
+From: python:3.10-slim
+
+%post
+    # Update and install essential tools
+    apt-get update && apt-get install -y git
+
+    # Clone GitHub project
+    git clone https://github.com/rishan92/DPL.git
+    cd /DPL
+    git checkout manyfidelity
+    git config --global --add safe.directory /DPL
+
+    git clone https://github.com/rishan92/dragonfly.git
+    cd ./dragonfly
+    git checkout dpl_mod
+    cd ..
+
+    # install the required packages
+    pip install -r requirements.txt
+    pip install ./nanogpt_package/nanogpt_bench-0.1.0-py3-none-any.whl
+
+%environment
+    export PYTHONPATH=$PYTHONPATH:/DPL
+
+%runscript
+    cd /DPL
+    python main_experiment.py --output_dir ./result_output --benchmark_name nanogpt --dataset_name openwebtext --budget_limit 12 --surrogate_name dyhpo --index 1 --config ./configurations/dyhpo_configuration_di.json
+    python main_experiment.py --output_dir ./result_output --benchmark_name nanogpt --dataset_name openwebtext --budget_limit 12 --surrogate_name dyhpo --index 1 --config ./configurations/dyhpo_configuration_cos.json
+    python main_experiment.py --output_dir ./result_output --benchmark_name nanogpt --dataset_name openwebtext --budget_limit 12 --surrogate_name random --index 1
+    python main_experiment.py --output_dir ./result_output --benchmark_name nanogpt --dataset_name openwebtext --budget_limit 12 --surrogate_name dragonfly --index 1
+
